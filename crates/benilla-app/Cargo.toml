@@ -76,6 +76,11 @@ arboard = "3"
 raw-window-handle = "0.6"
 smithay-clipboard = "0.7"
 
+# The iPad's hardware keyboard and mouse: winit's iOS backend carries neither, so GameController
+# feeds Bevy's input messages, and `prefersPointerLocked` stands in for the cursor grab.
+[target.'cfg(target_os = "ios")'.dependencies]
+benilla-ios-input = { path = "../benilla-ios-input" }
+
 # A native NSCursor: winit's cursor rects revert to the arrow under a continuous render loop.
 [target.'cfg(target_os = "macos")'.dependencies]
 # The audio device layer (`sound::output::coreaudio`), at the versions and features cpal uses.

@@ -511,6 +511,7 @@ dependencies = [
  "avian3d",
  "benilla-assets",
  "benilla-formats",
+ "benilla-ios-input",
  "benilla-protocol",
  "benilla-srp",
  "benilla-ui",
