@@ -46,22 +46,23 @@ impl Pasteboard for arboard::Clipboard {
     }
 }
 
-/// iOS: UIPasteboard arrives with the input layer; until then the pasteboard is empty.
+/// iOS: `UIPasteboard.general`, main-thread only like NSPasteboard; [`HostClipboard`] is `NonSend`.
 #[cfg(target_os = "ios")]
-struct EmptyPasteboard;
+struct UiPasteboard;
 
 #[cfg(target_os = "ios")]
-impl Pasteboard for EmptyPasteboard {
+impl Pasteboard for UiPasteboard {
     fn read_text(&mut self) -> Result<Option<String>, String> {
-        Ok(None)
+        Ok(benilla_ios_input::ui_pasteboard_read().filter(|t| !t.is_empty()))
     }
 
-    fn write_text(&mut self, _text: &str) -> Result<(), String> {
+    fn write_text(&mut self, text: &str) -> Result<(), String> {
+        benilla_ios_input::ui_pasteboard_write(text);
         Ok(())
     }
 
     fn name(&self) -> &'static str {
-        "empty/ios"
+        "UIPasteboard"
     }
 }
 
@@ -155,7 +156,7 @@ fn open_host() -> Option<Box<dyn Pasteboard>> {
 
 #[cfg(target_os = "ios")]
 fn open_host() -> Option<Box<dyn Pasteboard>> {
-    Some(Box::new(EmptyPasteboard))
+    Some(Box::new(UiPasteboard))
 }
 
 /// The session's display-server variables, appended to the clipboard log lines, since a Linux
