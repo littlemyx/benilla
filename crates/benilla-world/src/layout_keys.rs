@@ -6,34 +6,34 @@
 //! key. Bevy's `KeyCode` is the physical key, which such a layout does not move: Caps Lock mapped
 //! to Escape arrives as `CapsLock` with the logical key `Escape`.
 //!
-//! Off macOS, each keyboard message whose logical key is a named key other than its physical one
+//! Off macOS and iOS, each keyboard message whose logical key is a named key other than its physical one
 //! takes that named key's code, before Bevy's input collection, so every reader (the bindings,
 //! the text boxes, the glue screens, `ButtonInput<KeyCode>`) sees the layout's key. The Mac client
 //! reads its non-character keys off a fixed table on the physical keycode (`0x5bf320`), so macOS
-//! keeps them physical. A letter, digit or punctuation key keeps its code too: 1.12 names it by
+//! keeps them physical, and iOS, a Darwin client, likewise. A letter, digit or punctuation key keeps its code too: 1.12 names it by
 //! the virtual key the layout makes it, a digit as itself (`0x42d81c`) and a letter or punctuation
 //! key through `MapVirtualKeyA` (`0x42da39`), which the game's key namer reads, not by a named
 //! key. So do the numpad keys, whose Num Lock navigation meanings are not remaps.
 
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(any(not(any(target_os = "macos", target_os = "ios")), test))]
 use bevy::input::keyboard::{Key, KeyCode};
 use bevy::prelude::*;
 
-/// Rewrites remapped named keys before Bevy's input collection (all but macOS).
+/// Rewrites remapped named keys before Bevy's input collection (all but macOS and iOS).
 pub struct LayoutKeysPlugin;
 
 impl Plugin for LayoutKeysPlugin {
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     fn build(&self, app: &mut App) {
         app.add_systems(PreUpdate, remap.before(bevy::input::InputSystems));
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     fn build(&self, _app: &mut App) {}
 }
 
 /// Gives each new keyboard message the code of the named key its layout made it.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 fn remap(mut keys: bevy::ecs::message::MessageMutator<bevy::input::keyboard::KeyboardInput>) {
     for key in keys.read() {
         if let Some(code) = layout_code(key.key_code, &key.logical_key) {
@@ -45,7 +45,7 @@ fn remap(mut keys: bevy::ecs::message::MessageMutator<bevy::input::keyboard::Key
 /// The code of the named key `logical` stands for when a layout put it on the physical key
 /// `physical`, or `None` when the key keeps its code: a character, a numpad key, a named key with
 /// no code, or the key already there (either side, for a modifier).
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(any(not(any(target_os = "macos", target_os = "ios")), test))]
 fn layout_code(physical: KeyCode, logical: &Key) -> Option<KeyCode> {
     use KeyCode as C;
     if is_numpad(physical) {
@@ -65,7 +65,7 @@ fn layout_code(physical: KeyCode, logical: &Key) -> Option<KeyCode> {
 }
 
 /// The physical key a non-modifier named key sits on in a plain layout.
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(any(not(any(target_os = "macos", target_os = "ios")), test))]
 fn named_code(logical: &Key) -> Option<KeyCode> {
     use KeyCode as C;
     Some(match logical {
@@ -106,7 +106,7 @@ fn named_code(logical: &Key) -> Option<KeyCode> {
     })
 }
 
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(any(not(any(target_os = "macos", target_os = "ios")), test))]
 fn is_numpad(code: KeyCode) -> bool {
     use KeyCode as C;
     matches!(
