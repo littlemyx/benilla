@@ -1,0 +1,2 @@
+// The optional, gitignored Local.xcconfig carries DEVELOPMENT_TEAM and PRODUCT_BUNDLE_IDENTIFIER.
+#include? "Local.xcconfig"

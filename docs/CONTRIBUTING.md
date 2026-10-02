@@ -113,6 +113,9 @@ out of scope is closed with the reason.
   round of work; `scripts/gates.sh` is the full chain, and it opens a window for the engine boot
   checks, so it needs a display. `WOW_STOCK_UI=1` boots a dev build on the stock interface
   alone, without benilla's layer. Work on a branch.
+- **The iOS build.** An iPad host app lives in `platform/ios/` (`README.md` there: xcodegen,
+  signing, putting your `Data/` on the device). `scripts/check-ios.sh` is the cfg-seam check
+  for the iOS target; run it after touching a `cfg(target_os = "ios")`.
 
 ## Reporting a bug
 
