@@ -140,6 +140,8 @@ impl Build {
             }
             _ if target.contains("apple-ios") => {
                 config.define("LUA_USE_POSIX", None);
+                // The iOS SDK marks `system()` unavailable; `loslib.c` stubs `os.execute` on it.
+                config.define("LUA_USE_IOS", None);
             }
             _ if target.contains("windows") => {
                 // Defined in Lua >= 5.3

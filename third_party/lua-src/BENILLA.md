@@ -33,10 +33,16 @@ whole of mlua's surface, stay exactly as upstream.
 
 ## The delta, and the command that proves it
 
-Eight hunks in three files. `src/lib.rs` additionally differs by having Lua 5.2/5.3/5.4/5.5 stripped
-from the `Version` enum (with their source trees deleted): benilla builds 5.1 and only 5.1, and a
-fork that still offered the other four would answer a request for one with a missing directory at
-build time instead of a compile error.
+Eight grammar hunks in three files, plus one platform hunk. `src/lib.rs` additionally differs by
+having Lua 5.2/5.3/5.4/5.5 stripped from the `Version` enum (with their source trees deleted):
+benilla builds 5.1 and only 5.1, and a fork that still offered the other four would answer a
+request for one with a missing directory at build time instead of a compile error; and by defining
+`LUA_USE_IOS` for `apple-ios` targets.
+
+The platform hunk is not about grammar: `loslib.c`'s `os_execute` is stubbed to a Lua error under
+`LUA_USE_IOS`, the way upstream stubs it under `__wasi__`, because the iOS SDK marks `system()`
+unavailable and the file does not compile. The 1.12 client exposes no `os` library to the
+interface, so no FrameXML or addon can tell.
 
 Five hunks restore what 5.1 changed or removed:
 
@@ -71,7 +77,8 @@ diff -r third_party/lua-src/lua-5.1.5 \
   ~/.cargo/registry/src/*/lua-src-550.0.0/lua-5.1.5
 ```
 
-That must print exactly the eight hunks in the tables above and nothing else.
+That must print exactly the eight hunks in the tables above, the `loslib.c` platform hunk, and
+nothing else.
 
 ## The generic-for, in detail
 
