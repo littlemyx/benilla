@@ -38,3 +38,19 @@ To put the data there: connect the iPad, open it in Finder, Files tab, drag your
 onto *benilla*, so that it ends up as `WoW/Data/*.MPQ` (create the `WoW` folder first). The same
 folders show in the Files app under *On My iPad > benilla*. Without an install the app logs
 `no WoW install found` and shows an empty window.
+
+## Checking input on a device
+
+Needs an iPad with a hardware keyboard and a mouse or trackpad paired. The app logs no per-event
+input trace, so the checks are behavioural.
+
+1. Launch; the log shows `clipboard: UIPasteboard` after the first paste or copy.
+2. Log in to the server (type the account name and password with the keyboard; the characters
+   must appear once each, no doubles, no drops).
+3. In the world, WASD moves, Space jumps, Esc opens the game menu.
+4. Hold the right mouse button and drag: the view turns, the pointer is hidden and stays put.
+   Release: the pointer returns where the drag began, with no error lines in the log.
+5. Scroll the wheel: the camera zooms in and out.
+6. Type in a chat box, select the text, Cmd+C, then Cmd+V twice: the text is pasted twice. Copy
+   text in another app and paste it here.
+7. Switch to another app and back during a drag: the look ends cleanly, no stuck keys or buttons.
