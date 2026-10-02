@@ -103,6 +103,8 @@ const VERDICTS: &[(&str, Verdict)] = &[
     ("WindowPlugin", Plumbing),
     ("WindowPosition", Plumbing),
     ("WindowResolution", Plumbing),
+    // The iOS window's edge-swipe deferral: a window field, not a channel.
+    ("ScreenEdge", Plumbing),
 ];
 
 /// The gate's source, which every `Swallowed` row must name.
