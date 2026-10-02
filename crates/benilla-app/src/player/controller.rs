@@ -255,6 +255,12 @@ pub(super) fn control(
     if !mouse_turns_body || player.control_lost || player.reseat {
         player.face_yaw = yaw_before_look;
     }
+    // winit on iOS: `CursorGrabMode::Locked` is NotSupported (an error log per set); the lock goes
+    // to UIKit through [`camera::sync_pointer_lock`] and the grab stays `None`.
+    #[cfg(target_os = "ios")]
+    {
+        opts_shadow.grab_mode = bevy::window::CursorGrabMode::None;
+    }
     {
         let cur = cursor_opts.bypass_change_detection();
         if cur.visible != opts_shadow.visible

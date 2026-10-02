@@ -955,15 +955,34 @@ fn disengage_look(rig: &mut CameraControl, window: &mut Window, cursor_opts: &mu
     let stash = rig.cursor_stash.take();
     if !std::mem::take(&mut rig.cursor_released) {
         release_cursor(cursor_opts);
+        // winit on iOS: `set_cursor_position` is NotSupported; the software cursor never moved.
+        #[cfg(not(target_os = "ios"))]
         if let Some(pos) = stash {
             window.set_cursor_position(Some(pos));
         }
+        #[cfg(target_os = "ios")]
+        let _ = (stash, window);
+    }
+}
+
+/// iOS: UIKit's `prefersPointerLocked` holds the pointer for the look session, where winit's
+/// `Locked` is NotSupported. The session holds it while a look is on and the cursor not handed back.
+#[cfg(target_os = "ios")]
+pub(crate) fn sync_pointer_lock(
+    rig: Res<CameraControl>,
+    mut lock: ResMut<benilla_ios_input::PointerLock>,
+) {
+    let held = rig.look.is_some() && !rig.cursor_released;
+    if lock.is_locked() != held {
+        lock.set_locked(held);
     }
 }
 
 /// Stash the cursor, then lock and hide it for the session.
 fn take_cursor(rig: &mut CameraControl, window: &Window, cursor_opts: &mut CursorOptions) {
     rig.cursor_stash = window.cursor_position();
+    // winit on iOS: `Locked` is NotSupported, so the controller drops the grab and locks through
+    // UIKit's `prefersPointerLocked` off the session state ([`super::controller`]).
     cursor_opts.grab_mode = CursorGrabMode::Locked;
     cursor_opts.visible = false;
 }

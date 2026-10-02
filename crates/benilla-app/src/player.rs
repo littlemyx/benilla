@@ -228,6 +228,9 @@ impl Plugin for PlayerPlugin {
             Update,
             world_focus::release_post_snap_hold.after(benilla_world::schedule::WorldStage::Stream),
         );
+        // The look session's pointer lock on iOS, ungated so leaving the world releases it.
+        #[cfg(target_os = "ios")]
+        app.add_systems(Update, camera::sync_pointer_lock.after(control));
         app.add_observer(camera::on_cvar);
         app.add_observer(camera_dynamics::on_cvar);
         app.init_resource::<camera::LookConfig>();
@@ -270,6 +273,7 @@ impl Plugin for PlayerPlugin {
                 .run_if(not(resource_exists::<crate::run_mode::CaptureMode>))
                 .in_set(crate::char_select::InWorldGated),
         )
+        // The look session's pointer lock, ungated so leaving the world releases it.
         // The posture queue (the `/sit` family), which `control` alone executes.
         .add_message::<StandStateRequest>()
         .add_message::<ServerStandState>()

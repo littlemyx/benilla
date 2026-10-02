@@ -449,6 +449,11 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
         extend(&mut app);
     }
 
+    // winit 0.30 on iOS gives no key codes and no mouse: GameController feeds Bevy's keyboard and
+    // mouse messages instead.
+    #[cfg(target_os = "ios")]
+    app.add_plugins(benilla_ios_input::IosInputPlugin);
+
     // The probe fleet, last so it observes the fully-built app; compiled out by
     // `--no-default-features`.
     app.add_plugins(dev::DevProbesPlugin);
