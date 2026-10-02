@@ -1,0 +1,54 @@
+[package]
+name = "benilla-ios-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The iPad's hardware keyboard and mouse as Bevy input messages, from Apple's GameController framework, since winit on iOS delivers neither"
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy.workspace = true
+# The type of `KeyboardInput.text`; the version bevy_input builds against.
+smol_str = "0.2"
+
+# GameController, UIKit and Foundation, at the objc2 0.6 line (winit's own objc2 0.5 is a separate
+# copy; no type crosses between them). Features are the class names the code touches.
+[target.'cfg(target_os = "ios")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+raw-window-handle = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "NSArray",
+    "NSEnumerator",
+    "NSNotification",
+    "NSObject",
+    "NSOperation",
+    "NSString",
+] }
+objc2-game-controller = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-foundation",
+    "GCControllerAxisInput",
+    "GCControllerButtonInput",
+    "GCControllerDirectionPad",
+    "GCControllerElement",
+    "GCDevice",
+    "GCDeviceCursor",
+    "GCKeyCodes",
+    "GCKeyboard",
+    "GCKeyboardInput",
+    "GCMouse",
+    "GCMouseInput",
+    "GCPhysicalInputProfile",
+] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "UIPasteboard",
+    "UIResponder",
+    "UIViewController",
+] }
