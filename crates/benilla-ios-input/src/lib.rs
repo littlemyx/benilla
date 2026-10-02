@@ -25,7 +25,11 @@ use bevy::input::{ButtonState, InputSystems};
 use bevy::prelude::*;
 use bevy::window::{CursorMoved, PrimaryWindow};
 
+#[cfg(target_os = "ios")]
+mod audio;
 pub mod keycodes;
+#[cfg(target_os = "ios")]
+pub use audio::activate_playback_session;
 #[cfg(target_os = "ios")]
 mod native;
 #[cfg(target_os = "ios")]

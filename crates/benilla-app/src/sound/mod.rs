@@ -360,6 +360,11 @@ impl Plugin for SoundPlugin {
             info!("${var} set — audio disabled");
             None
         } else {
+            // cpal 0.17 leaves the AVAudioSession category at its default, which obeys the silent switch.
+            #[cfg(target_os = "ios")]
+            if let Err(e) = benilla_ios_input::activate_playback_session() {
+                warn!("audio session: {e}");
+            }
             match Mixer::new(probe_dir.as_deref()) {
                 Ok(m) => Some(m),
                 Err(e) => {

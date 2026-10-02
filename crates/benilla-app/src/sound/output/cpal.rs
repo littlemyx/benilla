@@ -7,7 +7,7 @@
 //! - Device notices: cpal has no notification API, so [`Listeners`] polls the default device's
 //!   identity and rate, backed by cpal's stream error callback. Nothing is an analogue of
 //!   `kAudioDeviceProcessorOverload`, so the overload meter reads zero.
-//! - Realtime: no workgroups; [`set_realtime`] is `SCHED_FIFO` on unix and MMCSS on Windows.
+//! - Realtime: no workgroups; [`set_realtime`] is `SCHED_FIFO` on unix, user-interactive QoS on iOS and MMCSS on Windows.
 //!
 //! An unsupported target compiles to cpal's Null host, reports no device and runs silent.
 
@@ -424,6 +424,7 @@ pub(super) struct Realtime {
 ///
 /// - unix: `SCHED_FIFO` priority 10, below rtkit's client ceiling (20) so the sound server's
 ///   threads stay above us; `EPERM` without `RLIMIT_RTPRIO` headroom.
+/// - iOS: QoS class `USER_INTERACTIVE`, the most an app thread can ask for.
 /// - Windows: MMCSS task "Pro Audio" at `AVRT_PRIORITY_CRITICAL`.
 ///
 /// `period_ns` is only for macOS's time-constraint policy.
@@ -449,8 +450,19 @@ pub(super) fn set_realtime(_period_ns: u64) -> Result<Realtime> {
             _task: mmcss::Task::join("Pro Audio")?,
         })
     }
-    // iOS has no SCHED_FIFO for apps; thread QoS is the Darwin route.
-    #[cfg(not(any(all(unix, not(any(target_os = "macos", target_os = "ios"))), windows)))]
+    // iOS has no SCHED_FIFO for apps; thread QoS is the Darwin route, so it is the realtime standing.
+    #[cfg(target_os = "ios")]
+    {
+        benilla_world::thread_qos::promote_current_thread(
+            benilla_world::thread_qos::QosClass::UserInteractive,
+        );
+        Ok(Realtime {})
+    }
+    #[cfg(not(any(
+        all(unix, not(any(target_os = "macos", target_os = "ios"))),
+        windows,
+        target_os = "ios"
+    )))]
     {
         bail!("no realtime thread policy on this platform")
     }
