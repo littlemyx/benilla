@@ -428,7 +428,7 @@ pub(super) struct Realtime {
 ///
 /// `period_ns` is only for macOS's time-constraint policy.
 pub(super) fn set_realtime(_period_ns: u64) -> Result<Realtime> {
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios"))))]
     {
         // SAFETY: a POSIX call on the calling thread with a zeroed `sched_param`, zeroed since
         // it carries reserved fields on some targets.
@@ -449,7 +449,8 @@ pub(super) fn set_realtime(_period_ns: u64) -> Result<Realtime> {
             _task: mmcss::Task::join("Pro Audio")?,
         })
     }
-    #[cfg(not(any(all(unix, not(target_os = "macos")), windows)))]
+    // iOS has no SCHED_FIFO for apps; thread QoS is the Darwin route.
+    #[cfg(not(any(all(unix, not(any(target_os = "macos", target_os = "ios"))), windows)))]
     {
         bail!("no realtime thread policy on this platform")
     }
