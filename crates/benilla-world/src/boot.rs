@@ -6,6 +6,13 @@ use bevy::prelude::*;
 
 use crate::thread_qos;
 
+/// Quiet wgpu/naga. On iOS also `bevy_winit::system`, whose `changed_windows` logs an `error!` for
+/// every cursor position the input plugin publishes (winit's iOS `set_cursor_position` is `NotSupported`).
+#[cfg(not(target_os = "ios"))]
+const LOG_FILTER: &str = "wgpu=error,naga=warn";
+#[cfg(target_os = "ios")]
+const LOG_FILTER: &str = "wgpu=error,naga=warn,bevy_winit::system=off";
+
 /// `DefaultPlugins` with benilla's engine tuning applied, around the caller's primary window.
 pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
     DefaultPlugins
@@ -17,7 +24,7 @@ pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
         // machine. Every shader is embedded (`embedded://<crate>/shaders/…`), so no root is read.
         // Quiet wgpu/naga; the ring keeps the last stderr lines for the crash report (`log_ring`).
         .set(bevy::log::LogPlugin {
-            filter: "wgpu=error,naga=warn".into(),
+            filter: LOG_FILTER.into(),
             custom_layer: |_| Some(Box::new(crate::log_ring::LogRing)),
             ..default()
         })

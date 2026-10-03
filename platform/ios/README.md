@@ -54,3 +54,5 @@ input trace, so the checks are behavioural.
 6. Type in a chat box, select the text, Cmd+C, then Cmd+V twice: the text is pasted twice. Copy
    text in another app and paste it here.
 7. Switch to another app and back during a drag: the look ends cleanly, no stuck keys or buttons.
+8. Move the pointer over UI buttons and NPCs in the world: they highlight; a click lands where the
+   pointer is drawn.

@@ -48,8 +48,12 @@ objc2-game-controller = { version = "0.3", default-features = false, features = 
 ] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "std",
+    "objc2-core-foundation",
+    "UIGestureRecognizer",
+    "UIHoverGestureRecognizer",
     "UIPasteboard",
     "UIResponder",
+    "UIView",
     "UIViewController",
 ] }
 # AVAudioSession, for the playback category cpal does not set.

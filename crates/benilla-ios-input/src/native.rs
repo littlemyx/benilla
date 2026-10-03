@@ -1,5 +1,6 @@
-//! The iOS side: GameController handlers feeding the channel, the pointer-lock hook on winit's
-//! root view controller, and the pasteboard.
+//! The iOS side: GameController handlers feeding the channel, the pointer position from a
+//! `UIHoverGestureRecognizer` on winit's view, the pointer-lock hook on winit's root view
+//! controller, and the pasteboard.
 //!
 //! Every UIKit and GameController call here runs on the main thread: the systems take `NonSend`
 //! resources (which bevy runs on the main thread) because Objective-C objects are not `Send`.
@@ -15,15 +16,17 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, RawHandleWrapper};
 use block2::RcBlock;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, ProtocolObject, Sel};
-use objc2::sel;
+use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, NSObject, ProtocolObject, Sel};
+use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol, NSString};
 use objc2_game_controller::{
     GCControllerAxisInput, GCControllerButtonInput, GCKeyCode, GCKeyboard,
     GCKeyboardDidConnectNotification, GCKeyboardDidDisconnectNotification, GCKeyboardInput,
     GCMouse, GCMouseDidConnectNotification, GCMouseDidDisconnectNotification, GCMouseInput,
 };
-use objc2_ui_kit::{UIPasteboard, UIViewController};
+use objc2_ui_kit::{
+    UIGestureRecognizerState, UIHoverGestureRecognizer, UIPasteboard, UIView, UIViewController,
+};
 use raw_window_handle::RawWindowHandle;
 
 use crate::{Raw, PREFERS_LOCKED};
@@ -35,6 +38,8 @@ pub struct Native {
     keyboard: Option<Retained<GCKeyboard>>,
     /// The root view controller `prefersPointerLocked` was installed on.
     root_vc: Option<Retained<UIViewController>>,
+    /// The hover recognizer on winit's view and its target (UIKit holds the target unretained).
+    hover: Option<(Retained<UIHoverGestureRecognizer>, Retained<HoverTarget>)>,
 }
 
 impl Native {
@@ -44,6 +49,7 @@ impl Native {
             tokens: Vec::new(),
             keyboard: None,
             root_vc: None,
+            hover: None,
         }
     }
 }
@@ -52,6 +58,14 @@ impl Native {
 pub fn attach(mut native: NonSendMut<Native>) {
     let tx = native.tx.clone();
     native.keyboard = attach_keyboard(&tx);
+    info!(
+        "ios input: GCKeyboard {}",
+        if native.keyboard.is_some() {
+            "found"
+        } else {
+            "not connected yet"
+        }
+    );
     attach_mice(&tx);
 
     let center = NSNotificationCenter::defaultCenter();
@@ -72,7 +86,8 @@ pub fn attach(mut native: NonSendMut<Native>) {
         Box::new(move || {
             // The keyboard is coalesced: one object for all keyboards, so re-attaching is idempotent.
             // Its retained handle in `Native` is the same object.
-            attach_keyboard(&t);
+            let found = attach_keyboard(&t).is_some();
+            info!("ios input: GCKeyboard connected, attached: {found}");
         }),
     );
     let t = tx.clone();
@@ -85,7 +100,10 @@ pub fn attach(mut native: NonSendMut<Native>) {
     let t = tx.clone();
     observe(
         unsafe { GCMouseDidConnectNotification },
-        Box::new(move || attach_mice(&t)),
+        Box::new(move || {
+            info!("ios input: GCMouse connected");
+            attach_mice(&t);
+        }),
     );
     let t = tx;
     observe(
@@ -123,6 +141,7 @@ fn attach_keyboard(tx: &Sender<Raw>) -> Option<Retained<GCKeyboard>> {
 fn attach_mice(tx: &Sender<Raw>) {
     // SAFETY: class method returning the connected mice.
     let mice = unsafe { GCMouse::mice() };
+    info!("ios input: GCMouse::mice().count() = {}", mice.count());
     for mouse in mice.iter() {
         attach_mouse(&mouse, tx);
     }
@@ -146,6 +165,7 @@ fn button_handler(
 fn attach_mouse(mouse: &GCMouse, tx: &Sender<Raw>) {
     // SAFETY: getter on a live GCMouse.
     let Some(input) = (unsafe { mouse.mouseInput() }) else {
+        info!("ios input: a GCMouse has no mouseInput; skipped");
         return;
     };
     let t = tx.clone();
@@ -161,9 +181,13 @@ fn attach_mouse(mouse: &GCMouse, tx: &Sender<Raw>) {
             .setPressedChangedHandler(RcBlock::as_ptr(&button_handler(tx, MouseButton::Left)));
         if let Some(b) = input.rightButton() {
             b.setPressedChangedHandler(RcBlock::as_ptr(&button_handler(tx, MouseButton::Right)));
+        } else {
+            info!("ios input: GCMouseInput.rightButton is None on this mouse");
         }
         if let Some(b) = input.middleButton() {
             b.setPressedChangedHandler(RcBlock::as_ptr(&button_handler(tx, MouseButton::Middle)));
+        } else {
+            info!("ios input: GCMouseInput.middleButton is None on this mouse");
         }
         if let Some(aux) = input.auxiliaryButtons() {
             for (b, which) in aux.iter().zip([MouseButton::Back, MouseButton::Forward]) {
@@ -184,6 +208,81 @@ fn attach_mouse(mouse: &GCMouse, tx: &Sender<Raw>) {
         });
         scroll.yAxis().setValueChangedHandler(RcBlock::as_ptr(&y));
     }
+}
+
+define_class!(
+    /// The Objective-C target of the hover recognizer's action; main thread only, like the view.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "BenillaHoverTarget"]
+    #[ivars = Sender<Raw>]
+    struct HoverTarget;
+
+    impl HoverTarget {
+        /// `-(void)hover:(UIHoverGestureRecognizer *)r`: the indirect pointer's position in the
+        /// recognizer's view, in points with the origin top-left and y down, as drawn on screen.
+        #[unsafe(method(hover:))]
+        fn hover(&self, r: &UIHoverGestureRecognizer) {
+            // `state` is a property UIKit declares on UIGestureRecognizer; objc2-ui-kit generates
+            // only its subclass setter, so the getter is sent by hand.
+            // SAFETY: `state` returns `UIGestureRecognizerState` (an NSInteger enum).
+            let state: UIGestureRecognizerState = unsafe { msg_send![r, state] };
+            let tx = self.ivars();
+            if state == UIGestureRecognizerState::Ended
+                || state == UIGestureRecognizerState::Cancelled
+            {
+                let _ = tx.send(Raw::HoverEnd);
+                return;
+            }
+            let view = r.view();
+            let p = r.locationInView(view.as_deref());
+            let _ = tx.send(Raw::Hover {
+                x: p.x as f32,
+                y: p.y as f32,
+            });
+        }
+    }
+);
+
+impl HoverTarget {
+    fn new(mtm: MainThreadMarker, tx: Sender<Raw>) -> Retained<Self> {
+        let this = mtm.alloc::<Self>().set_ivars(tx);
+        // SAFETY: NSObject's designated initialiser.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// Attaches a `UIHoverGestureRecognizer` to winit's `UIView` once the window exists; retried each
+/// frame until it does. Hover fires for the indirect pointer (trackpad, mouse) at the position
+/// iPadOS draws it, acceleration included. Main thread only (NonSend).
+pub fn attach_hover(
+    mut native: NonSendMut<Native>,
+    window: Query<&RawHandleWrapper, With<PrimaryWindow>>,
+) {
+    if native.hover.is_some() {
+        return;
+    }
+    let Ok(handle) = window.single() else { return };
+    let RawWindowHandle::UiKit(h) = handle.get_window_handle() else {
+        return;
+    };
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    // SAFETY: winit's `ui_view` is a live UIView owned by the window; NonSend, so main thread.
+    let view: &UIView = unsafe { h.ui_view.cast::<UIView>().as_ref() };
+    let target = HoverTarget::new(mtm, native.tx.clone());
+    // SAFETY: `target` implements `hover:` taking the recognizer, matching the selector.
+    let recognizer = unsafe {
+        UIHoverGestureRecognizer::initWithTarget_action(
+            mtm.alloc::<UIHoverGestureRecognizer>(),
+            Some(&target),
+            Some(sel!(hover:)),
+        )
+    };
+    view.addGestureRecognizer(&recognizer);
+    native.hover = Some((recognizer, target));
+    info!("ios input: hover recognizer attached to the view");
 }
 
 /// `-(BOOL)prefersPointerLocked`, answering the flag [`crate::PointerLock`] sets.
@@ -217,11 +316,15 @@ pub fn sync_pointer_lock(
             let imp: Imp = std::mem::transmute::<extern "C" fn(*mut AnyObject, Sel) -> Bool, Imp>(
                 prefers_pointer_locked,
             );
-            objc2::ffi::class_addMethod(
+            let added = objc2::ffi::class_addMethod(
                 cls,
                 sel!(prefersPointerLocked),
                 imp,
                 c"B@:".as_ptr().cast::<c_char>(),
+            );
+            info!(
+                "ios input: prefersPointerLocked injected: {}",
+                added.as_bool()
             );
         }
         // SAFETY: as above; retaining the live object.

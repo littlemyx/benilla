@@ -6,10 +6,19 @@
 //! `KeyboardInput` (physical code, US-layout logical key, text on press), `MouseMotion`,
 //! `MouseButtonInput`, `MouseWheel` and a software `CursorMoved`.
 //!
-//! The software cursor integrates the mouse deltas from the window centre and clamps them to the
-//! window. While [`PointerLock`] is locked (a mouse-look session) no `CursorMoved` is written, so
-//! UI hover freezes where it was; `MouseMotion` flows either way. Off iOS the plugin does nothing
-//! and the crate only builds, so the translation below is tested on the host.
+//! The cursor is the position iPadOS draws, from a `UIHoverGestureRecognizer` on winit's view
+//! ([`Raw::Hover`], logical points, y down): `drain` writes `CursorMoved` and sets the window's
+//! cursor position, which is what the game reads (`Window::cursor_position`). Raw `GCMouse` deltas
+//! are not that position (iPadOS accelerates the drawn pointer), so they only feed `MouseMotion`
+//! once a hover has been seen; until then they are integrated from the window centre as a
+//! fallback. While [`PointerLock`] is locked (a mouse-look session) the cursor position is not
+//! updated, so UI hover freezes where it was; `MouseMotion` flows either way. Off iOS the plugin
+//! does nothing and the crate only builds, so the translation below is tested on the host.
+//!
+//! Setting the window's position makes bevy_winit's `changed_windows` call winit's
+//! `set_cursor_position` whenever it differs from its cache (`bevy_winit/src/system.rs:401-407`);
+//! winit on iOS returns `NotSupported`, so each move makes bevy log `error!("could not set cursor
+//! position…")`; `benilla-world`'s log filter silences that target on iOS.
 //!
 //! The pointer is locked by answering `prefersPointerLocked` on winit's root view controller,
 //! which winit does not implement; see [`PointerLock::set_locked`].
@@ -23,7 +32,7 @@ use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::{MouseButtonInput, MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::input::{ButtonState, InputSystems};
 use bevy::prelude::*;
-use bevy::window::{CursorMoved, PrimaryWindow};
+use bevy::window::{CursorLeft, CursorMoved, PrimaryWindow};
 
 #[cfg(target_os = "ios")]
 mod audio;
@@ -59,6 +68,13 @@ pub enum Raw {
         dx: f32,
         dy: f32,
     },
+    /// The pointer's position as UIKit draws it, in logical points, origin top-left, y down.
+    Hover {
+        x: f32,
+        y: f32,
+    },
+    /// The pointer left the view.
+    HoverEnd,
     /// A device went away: release everything held, or a key stays down forever.
     Reset,
 }
@@ -74,6 +90,40 @@ pub struct InputState {
     held_buttons: HashSet<MouseButton>,
     /// The software cursor, in logical window pixels; `None` until the first move.
     cursor: Option<Vec2>,
+    /// A hover position has arrived: the deltas no longer move the cursor.
+    hover_seen: bool,
+    /// The kinds of [`Raw`] already logged once, for the on-device channel diagnostics.
+    logged: HashSet<&'static str>,
+}
+
+impl InputState {
+    /// Logs the first occurrence of each event kind per process; no per-event logging.
+    fn first(&mut self, raw: &Raw) {
+        let kind = match raw {
+            Raw::Key { .. } => "Key",
+            Raw::Move { .. } => "Move",
+            Raw::Button {
+                button: MouseButton::Left,
+                ..
+            } => "Button(Left)",
+            Raw::Button {
+                button: MouseButton::Right,
+                ..
+            } => "Button(Right)",
+            Raw::Button {
+                button: MouseButton::Middle,
+                ..
+            } => "Button(Middle)",
+            Raw::Button { .. } => "Button(other)",
+            Raw::Scroll { .. } => "Scroll",
+            Raw::Hover { .. } => "Hover",
+            Raw::HoverEnd => "HoverEnd",
+            Raw::Reset => return,
+        };
+        if self.logged.insert(kind) {
+            info!("ios input: first {kind}");
+        }
+    }
 }
 
 /// The pointer-lock request, set by the camera code on entering and leaving mouse-look.
@@ -93,6 +143,9 @@ impl PointerLock {
     /// controller re-query `prefersPointerLocked` on the next frame; UIKit honours it only while
     /// the scene is foreground and a pointer is attached.
     pub fn set_locked(&mut self, locked: bool) {
+        if self.locked != locked {
+            info!("ios pointer lock: {locked}");
+        }
         self.locked = locked;
         PREFERS_LOCKED.store(locked, Ordering::Relaxed);
     }
@@ -117,7 +170,7 @@ impl Plugin for IosInputPlugin {
                 .add_systems(PreStartup, native::attach)
                 .add_systems(
                     PreUpdate,
-                    (native::sync_pointer_lock, drain)
+                    (native::attach_hover, native::sync_pointer_lock, drain)
                         .chain()
                         .before(InputSystems),
                 );
@@ -127,25 +180,47 @@ impl Plugin for IosInputPlugin {
     }
 }
 
+/// Moves the software cursor to `pos` (logical): the message, and the window's own position.
+fn move_cursor(
+    state: &mut InputState,
+    win: &mut Window,
+    cursor: &mut MessageWriter<CursorMoved>,
+    window: Entity,
+    pos: Vec2,
+    scale: f32,
+) {
+    let delta = state.cursor.map(|prev| pos - prev);
+    state.cursor = Some(pos);
+    win.set_physical_cursor_position(Some((pos * scale).as_dvec2()));
+    cursor.write(CursorMoved {
+        window,
+        position: pos,
+        delta,
+    });
+}
+
 /// Turns the queued device events into Bevy messages for the primary window.
 pub fn drain(
     inbox: Res<RawInbox>,
     mut state: ResMut<InputState>,
     lock: Res<PointerLock>,
-    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut keys: MessageWriter<KeyboardInput>,
     mut motion: MessageWriter<MouseMotion>,
     mut buttons: MessageWriter<MouseButtonInput>,
     mut wheel: MessageWriter<MouseWheel>,
     mut cursor: MessageWriter<CursorMoved>,
+    mut left: MessageWriter<CursorLeft>,
 ) {
-    let Ok((window, win)) = windows.single() else {
+    let Ok((window, mut win)) = windows.single_mut() else {
         return;
     };
     let size = Vec2::new(win.width(), win.height());
+    let scale = win.resolution.scale_factor();
     let rx = inbox.0.lock().unwrap_or_else(|e| e.into_inner());
     let state = &mut *state;
     while let Ok(raw) = rx.try_recv() {
+        state.first(&raw);
         match raw {
             Raw::Key { hid, pressed } => {
                 let Some(key_code) = key_code(hid) else {
@@ -181,14 +256,22 @@ pub fn drain(
                 // GCMouse y is up, bevy's is down: flipped. Unverified on device.
                 let delta = Vec2::new(dx, -dy);
                 motion.write(MouseMotion { delta });
-                if !lock.is_locked() {
+                if !lock.is_locked() && !state.hover_seen {
                     let pos = (state.cursor.unwrap_or(size / 2.0) + delta).clamp(Vec2::ZERO, size);
-                    state.cursor = Some(pos);
-                    cursor.write(CursorMoved {
-                        window,
-                        position: pos,
-                        delta: Some(delta),
-                    });
+                    move_cursor(state, &mut win, &mut cursor, window, pos, scale);
+                }
+            }
+            Raw::Hover { x, y } => {
+                state.hover_seen = true;
+                if !lock.is_locked() {
+                    move_cursor(state, &mut win, &mut cursor, window, Vec2::new(x, y), scale);
+                }
+            }
+            Raw::HoverEnd => {
+                if !lock.is_locked() {
+                    state.cursor = None;
+                    win.set_physical_cursor_position(None);
+                    left.write(CursorLeft { window });
                 }
             }
             Raw::Button { button, pressed } => {
@@ -259,11 +342,13 @@ mod tests {
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
             .add_message::<CursorMoved>()
+            .add_message::<CursorLeft>()
             .insert_resource(RawInbox(Mutex::new(rx)))
             .init_resource::<InputState>()
             .init_resource::<PointerLock>()
             .add_systems(Update, drain);
         let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(2.0));
         window.resolution.set(800.0, 600.0);
         app.world_mut().spawn((window, PrimaryWindow));
         (app, tx)
@@ -319,6 +404,67 @@ mod tests {
         app.world_mut()
             .resource_mut::<PointerLock>()
             .set_locked(false);
+    }
+
+    fn cursor_of(app: &mut App) -> Option<Vec2> {
+        let mut q = app.world_mut().query::<&Window>();
+        q.single(app.world()).unwrap().physical_cursor_position()
+    }
+
+    #[test]
+    fn hover_sets_logical_message_and_physical_window_position() {
+        let (mut app, tx) = app();
+        tx.send(Raw::Hover { x: 100.0, y: 50.0 }).unwrap();
+        app.update();
+        let c = read::<CursorMoved>(&app);
+        assert_eq!(c[0].position, Vec2::new(100.0, 50.0));
+        assert_eq!(cursor_of(&mut app), Some(Vec2::new(200.0, 100.0)));
+        tx.send(Raw::Hover { x: 110.0, y: 50.0 }).unwrap();
+        app.update();
+        assert_eq!(
+            read::<CursorMoved>(&app)[0].delta,
+            Some(Vec2::new(10.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn move_fallback_also_sets_the_window_position() {
+        let (mut app, tx) = app();
+        tx.send(Raw::Move { dx: 10.0, dy: 5.0 }).unwrap();
+        app.update();
+        assert_eq!(cursor_of(&mut app), Some(Vec2::new(820.0, 590.0)));
+    }
+
+    #[test]
+    fn after_hover_moves_only_write_motion() {
+        let (mut app, tx) = app();
+        tx.send(Raw::Hover { x: 100.0, y: 50.0 }).unwrap();
+        tx.send(Raw::Move { dx: 30.0, dy: 0.0 }).unwrap();
+        app.update();
+        assert_eq!(read::<CursorMoved>(&app).len(), 1);
+        assert_eq!(read::<MouseMotion>(&app).len(), 1);
+        assert_eq!(cursor_of(&mut app), Some(Vec2::new(200.0, 100.0)));
+    }
+
+    #[test]
+    fn locked_hover_keeps_the_position_and_hover_end_clears_it() {
+        let (mut app, tx) = app();
+        tx.send(Raw::Hover { x: 100.0, y: 50.0 }).unwrap();
+        app.update();
+        app.world_mut()
+            .resource_mut::<PointerLock>()
+            .set_locked(true);
+        tx.send(Raw::Hover { x: 300.0, y: 300.0 }).unwrap();
+        app.update();
+        assert!(read::<CursorMoved>(&app).is_empty());
+        assert_eq!(cursor_of(&mut app), Some(Vec2::new(200.0, 100.0)));
+        app.world_mut()
+            .resource_mut::<PointerLock>()
+            .set_locked(false);
+        tx.send(Raw::HoverEnd).unwrap();
+        app.update();
+        assert_eq!(cursor_of(&mut app), None);
+        assert_eq!(read::<CursorLeft>(&app).len(), 1);
     }
 
     #[test]
