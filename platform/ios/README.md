@@ -39,6 +39,16 @@ onto *benilla*, so that it ends up as `WoW/Data/*.MPQ` (create the `WoW` folder 
 folders show in the Files app under *On My iPad > benilla*. Without an install the app logs
 `no WoW install found` and shows an empty window.
 
+## Reading the log
+
+The device console does not reach `idevicesyslog`, so the app also writes its log to
+`Documents/benilla-config/Logs/client.log` in its container, truncated at every launch. Pull it:
+
+```sh
+xcrun devicectl device copy from --device <udid> --source Documents/benilla-config/Logs/client.log \
+  --destination ./client.log --domain-type appDataContainer --domain-identifier <bundle id> --user mobile
+```
+
 ## Checking input on a device
 
 Needs an iPad with a hardware keyboard and a mouse or trackpad paired. The app logs no per-event
@@ -56,3 +66,5 @@ input trace, so the checks are behavioural.
 7. Switch to another app and back during a drag: the look ends cleanly, no stuck keys or buttons.
 8. Move the pointer over UI buttons and NPCs in the world: they highlight; a click lands where the
    pointer is drawn.
+9. Drag an action-bar button to another slot, holding the left button: it follows the pointer and
+   drops where released. Move a frame by its title the same way.

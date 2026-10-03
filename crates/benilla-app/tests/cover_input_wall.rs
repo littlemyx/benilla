@@ -77,6 +77,8 @@ const VERDICTS: &[(&str, Verdict)] = &[
         ),
     ),
     // ── Not input at all ────────────────────────────────────────────────────────────────────
+    ("TouchInput", Open("iOS: the shim reads the indirect pointer's touches only while a mouse button is held; the cover blanks the cursor it feeds")),
+    ("TouchPhase", Plumbing),
     ("ButtonState", Plumbing),
     // Cursor outputs benilla writes; nothing arrives through them.
     ("CursorGrabMode", Plumbing),

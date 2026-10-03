@@ -44,3 +44,7 @@ objc2-app-kit = { version = "0.2", features = [
 objc2-foundation = "0.2"
 # `sel!`, for the two selectors `mac_quit` swaps; the objc2 that objc2-app-kit 0.2 builds against.
 objc2 = "0.5"
+
+# The iOS client log file layer (`boot::custom_layer`); the version bevy_log builds against.
+[target.'cfg(target_os = "ios")'.dependencies]
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }

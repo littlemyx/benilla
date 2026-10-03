@@ -20,6 +20,11 @@
 //! winit on iOS returns `NotSupported`, so each move makes bevy log `error!("could not set cursor
 //! position…")`; `benilla-world`'s log filter silences that target on iOS.
 //!
+//! iPadOS ends the hover the moment a trackpad button goes down and reports the pointer as a touch
+//! until the release, so while a mouse button is held `HoverEnd` is ignored and the winit
+//! `TouchInput` position (logical points, `bevy_winit/src/state.rs` `WindowEvent::Touch`) is the
+//! cursor; that is what makes a drag work. Touches with no button held are fingers and are ignored.
+//!
 //! The pointer is locked by answering `prefersPointerLocked` on winit's root view controller,
 //! which winit does not implement; see [`PointerLock::set_locked`].
 
@@ -30,6 +35,7 @@ use std::sync::Mutex;
 
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::{MouseButtonInput, MouseMotion, MouseScrollUnit, MouseWheel};
+use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::input::{ButtonState, InputSystems};
 use bevy::prelude::*;
 use bevy::window::{CursorLeft, CursorMoved, PrimaryWindow};
@@ -211,6 +217,7 @@ pub fn drain(
     mut wheel: MessageWriter<MouseWheel>,
     mut cursor: MessageWriter<CursorMoved>,
     mut left: MessageWriter<CursorLeft>,
+    mut touches: MessageReader<TouchInput>,
 ) {
     let Ok((window, mut win)) = windows.single_mut() else {
         return;
@@ -268,7 +275,9 @@ pub fn drain(
                 }
             }
             Raw::HoverEnd => {
-                if !lock.is_locked() {
+                // iPadOS ends the hover when the trackpad button goes down (the pointer becomes
+                // a touch); the position then comes from `TouchInput` until the release.
+                if !lock.is_locked() && state.held_buttons.is_empty() {
                     state.cursor = None;
                     win.set_physical_cursor_position(None);
                     left.write(CursorLeft { window });
@@ -327,6 +336,20 @@ pub fn drain(
             }
         }
     }
+    // While a mouse button is held iPadOS reports the indirect pointer as a touch, and the hover
+    // is silent: that touch is the cursor. With no button held a touch is a finger and is left
+    // alone, so the screen does not move the software cursor.
+    for touch in touches.read() {
+        if state.held_buttons.is_empty() || lock.is_locked() {
+            continue;
+        }
+        if matches!(touch.phase, TouchPhase::Started | TouchPhase::Moved) {
+            if state.logged.insert("Touch") {
+                info!("ios input: first Touch");
+            }
+            move_cursor(state, &mut win, &mut cursor, window, touch.position, scale);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -343,6 +366,7 @@ mod tests {
             .add_message::<MouseWheel>()
             .add_message::<CursorMoved>()
             .add_message::<CursorLeft>()
+            .add_message::<TouchInput>()
             .insert_resource(RawInbox(Mutex::new(rx)))
             .init_resource::<InputState>()
             .init_resource::<PointerLock>()
@@ -461,6 +485,68 @@ mod tests {
         app.world_mut()
             .resource_mut::<PointerLock>()
             .set_locked(false);
+        tx.send(Raw::HoverEnd).unwrap();
+        app.update();
+        assert_eq!(cursor_of(&mut app), None);
+        assert_eq!(read::<CursorLeft>(&app).len(), 1);
+    }
+
+    fn touch(app: &mut App, phase: TouchPhase, x: f32, y: f32) {
+        let window = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<Entity, With<PrimaryWindow>>();
+            q.single(app.world()).unwrap()
+        };
+        app.world_mut().write_message(TouchInput {
+            phase,
+            position: Vec2::new(x, y),
+            window,
+            force: None,
+            id: 0,
+        });
+    }
+
+    #[test]
+    fn touch_moves_the_cursor_only_while_a_button_is_held() {
+        let (mut app, tx) = app();
+        touch(&mut app, TouchPhase::Moved, 300.0, 200.0);
+        app.update();
+        assert!(read::<CursorMoved>(&app).is_empty());
+        assert_eq!(cursor_of(&mut app), None);
+
+        tx.send(Raw::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        })
+        .unwrap();
+        touch(&mut app, TouchPhase::Moved, 300.0, 200.0);
+        app.update();
+        assert_eq!(
+            read::<CursorMoved>(&app)[0].position,
+            Vec2::new(300.0, 200.0)
+        );
+        assert_eq!(cursor_of(&mut app), Some(Vec2::new(600.0, 400.0)));
+    }
+
+    #[test]
+    fn hover_end_is_ignored_while_a_button_is_held() {
+        let (mut app, tx) = app();
+        tx.send(Raw::Hover { x: 100.0, y: 50.0 }).unwrap();
+        tx.send(Raw::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        })
+        .unwrap();
+        tx.send(Raw::HoverEnd).unwrap();
+        app.update();
+        assert_eq!(cursor_of(&mut app), Some(Vec2::new(200.0, 100.0)));
+        assert!(read::<CursorLeft>(&app).is_empty());
+        tx.send(Raw::Button {
+            button: MouseButton::Left,
+            pressed: false,
+        })
+        .unwrap();
         tx.send(Raw::HoverEnd).unwrap();
         app.update();
         assert_eq!(cursor_of(&mut app), None);

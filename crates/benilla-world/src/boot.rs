@@ -13,6 +13,39 @@ const LOG_FILTER: &str = "wgpu=error,naga=warn";
 #[cfg(target_os = "ios")]
 const LOG_FILTER: &str = "wgpu=error,naga=warn,bevy_winit::system=off";
 
+/// The log ring; on iOS also `$BENILLA_HOME/Logs/client.log`, truncated at launch, since no console
+/// of a device reaches a tool without root. It sits before the plugin's level filter, which applies
+/// to every layer alike.
+fn custom_layer(_: &mut App) -> Option<bevy::log::BoxedLayer> {
+    #[cfg(target_os = "ios")]
+    if let Some(file) = ios_log_file() {
+        use tracing_subscriber::Layer;
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_writer(move || file.try_clone().expect("log file handle"))
+            .with_ansi(false);
+        return Some(Box::new(vec![
+            crate::log_ring::LogRing.boxed(),
+            file_layer.boxed(),
+        ]));
+    }
+    Some(Box::new(crate::log_ring::LogRing))
+}
+
+/// Opens (truncating) the client log. `BENILLA_HOME` is set by `crates/benilla/src/main.rs`;
+/// benilla-world cannot reach `benilla_app::local_state`, so the same fallback is repeated here.
+#[cfg(target_os = "ios")]
+fn ios_log_file() -> Option<std::fs::File> {
+    let home = std::env::var_os("BENILLA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            let h = std::env::var("HOME").unwrap_or_default();
+            std::path::PathBuf::from(h).join("Documents/benilla-config")
+        });
+    let dir = home.join("Logs");
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::File::create(dir.join("client.log")).ok()
+}
+
 /// `DefaultPlugins` with benilla's engine tuning applied, around the caller's primary window.
 pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
     DefaultPlugins
@@ -25,7 +58,7 @@ pub fn tuned_default_plugins(primary_window: Window) -> PluginGroupBuilder {
         // Quiet wgpu/naga; the ring keeps the last stderr lines for the crash report (`log_ring`).
         .set(bevy::log::LogPlugin {
             filter: LOG_FILTER.into(),
-            custom_layer: |_| Some(Box::new(crate::log_ring::LogRing)),
+            custom_layer,
             ..default()
         })
         // Asset loads parse synchronously on the IO pool, and Bevy's default 4 threads saturate on
