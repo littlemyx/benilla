@@ -13,7 +13,6 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    PRODUCT_BUNDLE_IDENTIFIER: org.benilla.client
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     SDKROOT: iphoneos
     TARGETED_DEVICE_FAMILY: "2"
@@ -37,6 +36,13 @@ targets:
       - name: Build the Rust binary
         script: |
           "${SRCROOT}/build_rust.sh"
+        basedOnDependencyAnalysis: false
+        inputFiles: []
+        outputFiles: []
+    postBuildScripts:
+      - name: Sign the app
+        script: |
+          "${SRCROOT}/sign.sh"
         basedOnDependencyAnalysis: false
         inputFiles: []
         outputFiles: []

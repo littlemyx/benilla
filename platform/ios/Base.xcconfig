@@ -1,2 +1,4 @@
-// The optional, gitignored Local.xcconfig carries DEVELOPMENT_TEAM and PRODUCT_BUNDLE_IDENTIFIER.
+// The bundle id, overridden by the optional, gitignored Local.xcconfig below, which also
+// carries DEVELOPMENT_TEAM. A project-level setting would outrank an xcconfig, so it lives here.
+PRODUCT_BUNDLE_IDENTIFIER = org.benilla.client
 #include? "Local.xcconfig"
