@@ -239,8 +239,8 @@ enum Dialect {
     Tbc,
 }
 
-/// [`parse_server_with_tail`] for `build`: `fields` is its update-field table, which only a build
-/// that has one reads (`None` for 2.4.3, whose parser never takes a table).
+/// [`parse_server_with_tail`] for `build`: `fields` is its update-field table, which a 1.12.1 read
+/// needs (`None` is an error there); a 2.4.3 read uses the 8606 table whatever is passed.
 pub fn parse_server_with_tail_for(
     build: &benilla_build::ClientBuild,
     fields: Option<&'static update_object::FieldTable>,
@@ -280,7 +280,7 @@ fn parse_server_with_tail_in(
     let mut inner_tail = 0;
     let packet = match dialect {
         Dialect::Vanilla(fields) => parse_server_body(fields, opcode, &mut r, &mut inner_tail)?,
-        Dialect::Tbc => super::tbc::parse_tbc_body(opcode, &mut r)?,
+        Dialect::Tbc => super::tbc::parse_tbc_body(opcode, &mut r, &mut inner_tail)?,
     };
     let tail = match packet {
         ServerPacket::Other { .. } => 0,

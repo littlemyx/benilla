@@ -73,7 +73,7 @@ pub struct WorldSession {
     addon_info: Option<Vec<u8>>,
     build: benilla_build::ClientBuild,
     /// The build's update-field indices, which every update object is read through; `None` for a
-    /// build without a table (2.4.3), whose parser never takes one.
+    /// build without a table. A 2.4.3 parser reads through its own table whatever is passed.
     fields: Option<&'static FieldTable>,
     /// The expansion byte of a 2.4.3 `AUTH_OK` (`0` classic, `1` Burning Crusade); `None` before
     /// it and in 1.12.1.

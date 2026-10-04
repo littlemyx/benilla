@@ -12,8 +12,8 @@ pub use fields::field;
 pub use fields::{
     build_field_table, field_table, power_display_scale, quest_slot_state, CorpseLook, FieldTable,
     ObjectFields, OwnerFallback, PlayerSkillSlot, QuestLogSlot, UnitAuraSlot, AURA_FLAG_CANCELABLE,
-    AURA_FLAG_EFF_INDEX_MASK, FIELDS_5875, PLAYER_EXPLORED_ZONES_SLOTS, PLAYER_QUEST_LOG_SLOTS,
-    PLAYER_SKILL_SLOTS, UNIT_AURA_POSITIVE_SLOTS, UNIT_AURA_SLOTS,
+    AURA_FLAG_EFF_INDEX_MASK, FIELDS_5875, FIELDS_8606, PLAYER_EXPLORED_ZONES_SLOTS,
+    PLAYER_QUEST_LOG_SLOTS, PLAYER_SKILL_SLOTS, UNIT_AURA_POSITIVE_SLOTS, UNIT_AURA_SLOTS,
 };
 pub use movement::{CreateSpline, MovementBlock, MoverState, ObjectType};
 
@@ -42,8 +42,25 @@ pub enum Object {
     },
 }
 
+/// Which build's movement block a body carries; framing, update types and the values block are
+/// the same in both.
+#[derive(Clone, Copy)]
+enum Wire {
+    Vanilla,
+    Tbc,
+}
+
+impl Wire {
+    fn movement(self, r: &mut impl Read) -> io::Result<MovementBlock> {
+        match self {
+            Wire::Vanilla => MovementBlock::read(r),
+            Wire::Tbc => MovementBlock::read_tbc(r),
+        }
+    }
+}
+
 impl Object {
-    fn read(r: &mut impl Read, table: &'static FieldTable) -> io::Result<Self> {
+    fn read(r: &mut impl Read, table: &'static FieldTable, wire: Wire) -> io::Result<Self> {
         let update_type = read_u8(r)?;
         Ok(match update_type {
             0 => Object::Values {
@@ -52,12 +69,12 @@ impl Object {
             },
             1 => Object::Movement {
                 guid: read_packed_guid(r)?,
-                movement: MovementBlock::read(r)?,
+                movement: wire.movement(r)?,
             },
             2 | 3 => {
                 let guid = read_packed_guid(r)?;
                 let object_type = ObjectType::from_u8(read_u8(r)?);
-                let movement = MovementBlock::read(r)?;
+                let movement = wire.movement(r)?;
                 // A create omits zero fields (vmangos `_SetCreateBits`), so absent reads 0, but
                 // only inside this type's own descriptor.
                 let mask = ObjectFields::read(r, table)?.into_created(object_type);
@@ -98,11 +115,24 @@ pub(super) fn read_update_object(
     r: &mut impl Read,
     table: &'static FieldTable,
 ) -> io::Result<Vec<Object>> {
+    read_objects(r, table, Wire::Vanilla)
+}
+
+/// [`read_update_object`] for a 2.4.3 body, through the 8606 table.
+pub(super) fn read_update_object_tbc(r: &mut impl Read) -> io::Result<Vec<Object>> {
+    read_objects(r, &FIELDS_8606, Wire::Tbc)
+}
+
+fn read_objects(
+    r: &mut impl Read,
+    table: &'static FieldTable,
+    wire: Wire,
+) -> io::Result<Vec<Object>> {
     let amount_of_objects = read_u32_le(r)?;
     let _has_transport = read_u8(r)?;
     let mut objects = Vec::with_capacity(capacity_hint(amount_of_objects, 0xFFFF));
     for _ in 0..amount_of_objects {
-        objects.push(Object::read(r, table)?);
+        objects.push(Object::read(r, table, wire)?);
     }
     Ok(objects)
 }

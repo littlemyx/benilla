@@ -184,7 +184,7 @@
 - `WOW_CAPTURE_STABLE` — benilla-app/src/capture/mod.rs
 - `WOW_CAPTURE_UI` — benilla-app/src/capture/scenarios.rs, benilla-app/src/ui_script/mod.rs, benilla-app/src/video.rs
 - `WOW_CAST_TRACE` — benilla-app/src/net.rs
-- `WOW_CHAR` — benilla-app/src/capture/probe_mail.rs, benilla-app/src/char_select/mod.rs, benilla-app/src/cvars/mod.rs, benilla-app/src/login/mod.rs, benilla-app/src/net.rs, benilla-app/src/realm_select/smoke.rs, benilla-app/src/run_mode.rs
+- `WOW_CHAR` — benilla-app/src/capture/probe_mail.rs, benilla-app/src/char_select/mod.rs, benilla-app/src/cvars/mod.rs, benilla-app/src/login/mod.rs, benilla-app/src/net.rs, benilla-app/src/realm_select/smoke.rs, benilla-app/src/run_mode.rs, benilla-protocol/examples/login_probe.rs
 - `WOW_CHARCREATE_DIALS` — benilla-app/src/char_create/mod.rs
 - `WOW_CHARCREATE_NAME` — benilla-app/src/char_create/mod.rs
 - `WOW_CHARCREATE_PICK` — benilla-app/src/capture/mod.rs, benilla-app/src/char_create/mod.rs
@@ -231,6 +231,7 @@
 - `WOW_DUMP_TILE` — benilla-world/src/wmo_portal/audit/light_probe.rs
 - `WOW_EFFECT_TRACE` — benilla-world/src/particles/render.rs
 - `WOW_EMIT_DUMP` — benilla-world/src/particles/emitdump.rs
+- `WOW_ENTER` — benilla-protocol/examples/login_probe.rs
 - `WOW_ENTITY_CENSUS` — benilla-app/src/capture/probes/world_census.rs, benilla-app/src/dev.rs
 - `WOW_FADE_NEAR` — benilla-world/src/terrain_stream/spawn/mod.rs
 - `WOW_FARCLIP` — benilla-app/src/cvars/mod.rs, benilla-world/src/view.rs

@@ -5,12 +5,23 @@
 //! male warrior, appearance bytes 0), prints the result, reads the list again, and prints every
 //! character in full.
 //!
+//! With `WOW_ENTER=1` and `WOW_CHAR=<Name>` set, it then logs that character in, reads the world stream
+//! until the own player's create has arrived and 5 s more, prints the own player through the typed
+//! accessors (and which of them found their member absent for the build), the objects and update
+//! blocks seen and every opcode read as `Other`, then requests a logout and waits for it. It sends
+//! nothing but the login and the logout request: no movement, chat, combat or interaction.
+//!
 //! `WOW_HOST` (default `localhost`, an optional `:port` for realmd), `WOW_USER` and `WOW_PASS` name
 //! the server and account; the password is never printed. Refuses to run without
 //! `WOW_UNATTENDED=1`, since a login kicks whoever holds the account.
 
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
 use anyhow::{anyhow, bail, Context, Result};
 use benilla_build::ClientBuild;
+use benilla_protocol::messages::{self, Character, FieldTable, Object, ObjectFields, ServerPacket};
+use benilla_protocol::wire::Vector3d;
 use benilla_protocol::{logon_as, CharCreateReq, CharRecord, WorldSession};
 
 fn env(name: &str) -> Result<String> {
@@ -92,6 +103,10 @@ fn main() -> Result<()> {
     for record in &world.last_char_enum_records()? {
         print_record(record);
     }
+    if std::env::var("WOW_ENTER").as_deref() == Ok("1") {
+        let name = env("WOW_CHAR")?;
+        enter_world(&mut world, &characters, &name)?;
+    }
     drop(world);
     println!("disconnected");
     Ok(())
@@ -131,4 +146,418 @@ fn print_record(r: &CharRecord) {
         })
         .collect();
     println!("    slots (display/type/enchant): {}", slots.join(" "));
+}
+
+/// What the entry run saw of the own player: the create's fields and its movement block.
+struct OwnPlayer {
+    fields: ObjectFields,
+    position: Option<(Vector3d, f32)>,
+    flags: Option<u32>,
+    speeds: Option<[f32; 6]>,
+    flight: Option<[f32; 2]>,
+}
+
+/// Prints each own-player value and keeps which readers had nothing to say, and why.
+#[derive(Default)]
+struct Shown {
+    none: Vec<String>,
+    defaulted: Vec<String>,
+}
+
+impl Shown {
+    /// An accessor that answers `Option`: `None` is either an absent member or an uncarried field.
+    fn value<T: std::fmt::Debug>(&mut self, name: &str, member: u16, v: Option<T>) {
+        match v {
+            Some(x) => println!("    {name}: {x:?}"),
+            None => {
+                let why = if member == FieldTable::ABSENT {
+                    "member ABSENT"
+                } else {
+                    "not carried"
+                };
+                println!("    {name}: None ({why})");
+                self.none.push(format!("{name} [{why}]"));
+            }
+        }
+    }
+
+    /// An accessor with a default for a missing field: the default is not a reading when the member
+    /// is absent, so it is flagged.
+    fn plain<T: std::fmt::Debug>(&mut self, name: &str, member: u16, v: T) {
+        if member == FieldTable::ABSENT {
+            println!("    {name}: {v:?} (member ABSENT, a default)");
+            self.defaulted.push(name.to_string());
+        } else {
+            println!("    {name}: {v:?}");
+        }
+    }
+}
+
+const POWER_NAMES: [&str; 5] = ["mana", "rage", "focus", "energy", "happiness"];
+
+fn print_own(own: &OwnPlayer, character: &Character, verify: Option<(u32, Vector3d, f32)>) {
+    let f = &own.fields;
+    let t = f.table();
+    let mut shown = Shown::default();
+    println!("own player (typed accessors only):");
+    println!("    object type: {:?}", f.object_type());
+    println!("    created as: {:?}", f.created_as());
+    shown.value("scale", t.object_scale_x, f.object_scale_x());
+    shown.value("level", t.unit_level, f.unit_level());
+    shown.value("race", t.unit_bytes_0, f.unit_race());
+    shown.value("class", t.unit_bytes_0, f.unit_class());
+    shown.value("gender", t.unit_bytes_0, f.unit_gender());
+    shown.plain("power type", t.unit_bytes_0, f.unit_power_type());
+    shown.value("health", t.unit_health, f.unit_health());
+    shown.value("max health", t.unit_maxhealth, f.unit_max_health());
+    for ty in 0..5u8 {
+        let base = t.unit_power1;
+        shown.value(
+            &format!("power {ty} ({}) raw", POWER_NAMES[usize::from(ty)]),
+            base,
+            f.unit_power(ty),
+        );
+        shown.value(
+            &format!("max power {ty} ({}) raw", POWER_NAMES[usize::from(ty)]),
+            t.unit_maxpower1,
+            f.unit_max_power(ty),
+        );
+    }
+    shown.value(
+        "faction template",
+        t.unit_factiontemplate,
+        f.unit_faction_template(),
+    );
+    shown.value("display id", t.unit_displayid, f.unit_displayid());
+    shown.value(
+        "native display id",
+        t.unit_nativedisplayid,
+        f.unit_native_displayid(),
+    );
+    shown.plain("unit flags", t.unit_flags, format!("{:#x}", f.unit_flags()));
+    shown.value("target", t.unit_target, f.unit_target());
+    shown.plain(
+        "mount display id",
+        t.unit_mountdisplayid,
+        f.unit_mount_display_id(),
+    );
+    shown.value("base health", t.unit_base_health, f.unit_base_health());
+    shown.plain("aura state", t.unit_aurastate, f.unit_aura_state());
+    shown.plain(
+        "bounding radius",
+        t.unit_boundingradius,
+        f.unit_bounding_radius(),
+    );
+    shown.plain("combat reach", t.unit_combatreach, f.unit_combat_reach());
+    shown.plain("npc flags", t.unit_npc_flags, f.unit_npc_flags());
+    shown.plain("stand state", t.unit_bytes_1, f.unit_stand_state());
+    shown.plain("shapeshift form", t.unit_bytes_1, f.unit_shapeshift_form());
+    shown.value("sheath state", t.unit_bytes_2, f.unit_sheath_state());
+    shown.value("strength", t.unit_stat0, f.unit_stat(0));
+    shown.value("armor", t.unit_resistances, f.unit_resistance(0));
+    shown.value("attack power", t.unit_attack_power, f.unit_attack_power());
+    shown.value("min damage", t.unit_mindamage, f.unit_min_damage());
+    shown.value("max damage", t.unit_maxdamage, f.unit_max_damage());
+    shown.value(
+        "main-hand attack time",
+        t.unit_baseattacktime,
+        f.unit_base_attack_time(0),
+    );
+    shown.value("aura 0", t.unit_aura, f.unit_aura(0));
+    shown.value("skin", t.player_bytes, f.player_skin());
+    shown.value("face", t.player_bytes, f.player_face());
+    shown.value("hair style", t.player_bytes, f.player_hair_style());
+    shown.value("hair color", t.player_bytes, f.player_hair_color());
+    shown.value("facial hair", t.player_bytes_2, f.player_facial_hair());
+    shown.value("rest state", t.player_bytes_2, f.player_rest_state());
+    shown.plain(
+        "player flags",
+        t.player_flags,
+        format!("{:#x}", f.player_flags()),
+    );
+    shown.value("money (copper)", t.player_field_coinage, f.player_money());
+    shown.value("xp", t.player_xp, f.player_xp());
+    shown.value(
+        "next level xp",
+        t.player_next_level_xp,
+        f.player_next_level_xp(),
+    );
+    shown.value(
+        "dodge %",
+        t.player_dodge_percentage,
+        f.player_dodge_percentage(),
+    );
+    shown.value("skill slot 0", t.player_skill_info_1_1, f.player_skill(0));
+    shown.value(
+        "inventory slot 3 (shirt) guid",
+        t.player_inv_slot_head,
+        f.player_inv_slot(3),
+    );
+    shown.value(
+        "quest log slot 0",
+        t.player_quest_log_1_1,
+        f.player_quest_log(0),
+    );
+    shown.value(
+        "combo points",
+        t.player_field_bytes,
+        f.player_combo_points(),
+    );
+    shown.value(
+        "visible item 0",
+        t.player_visible_item_1_creator,
+        f.player_visible_item_entry(0),
+    );
+    println!("movement block:");
+    match own.position {
+        Some((p, o)) => println!(
+            "    position ({:.2}, {:.2}, {:.2}) facing {:.5}",
+            p.x, p.y, p.z, o
+        ),
+        None => println!("    position: none"),
+    }
+    println!(
+        "    movement flags: {:?}",
+        own.flags.map(|v| format!("{v:#x}"))
+    );
+    match own.speeds {
+        Some([walk, run, run_back, swim, swim_back, turn]) => {
+            println!("    walk {walk}  run {run}  run_back {run_back}  swim {swim}  swim_back {swim_back}  turn_rate {turn}");
+        }
+        None => println!("    speeds: none"),
+    }
+    match own.flight {
+        Some([fly, fly_back]) => println!("    flight {fly}  flight_back {fly_back}"),
+        None => println!("    flight speeds: none"),
+    }
+    if let Some((map, p, o)) = verify {
+        println!(
+            "compare: verify-world map {map} ({:.2}, {:.2}, {:.2}) facing {:.5}; list map {} zone {} ({:.2}, {:.2}, {:.2})",
+            p.x, p.y, p.z, o, character.map, character.zone,
+            character.position.x, character.position.y, character.position.z
+        );
+    }
+    println!(
+        "accessors that returned None: {} {:?}",
+        shown.none.len(),
+        shown.none
+    );
+    println!(
+        "accessors that fell back to a default on an ABSENT member: {} {:?}",
+        shown.defaulted.len(),
+        shown.defaulted
+    );
+    let absent = t.absent_members();
+    println!(
+        "table members ABSENT for this build: {} {:?}",
+        absent.len(),
+        absent
+    );
+}
+
+fn is_timeout(error: &str) -> bool {
+    error.contains("os error 35") || error.contains("os error 11") || error.contains("timed out")
+}
+
+/// Log the named character in, read until its create block has arrived and 5 s more, report, and
+/// log out. Sends nothing but the login and the logout request.
+fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -> Result<()> {
+    let character = characters
+        .iter()
+        .find(|c| c.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| anyhow!("WOW_CHAR {name} is not on the character list"))?
+        .clone();
+    println!(
+        "entering the world as {} ({:#x})",
+        character.name, character.guid
+    );
+    world.set_read_timeout(Some(Duration::from_secs(1)))?;
+    world.player_login(character.guid)?;
+
+    let begin = Instant::now();
+    let mut own: Option<OwnPlayer> = None;
+    let mut own_at: Option<Instant> = None;
+    let mut verify: Option<(u32, Vector3d, f32)> = None;
+    let mut creates: BTreeMap<String, u32> = BTreeMap::new();
+    let mut by_update_type: BTreeMap<&str, u32> = BTreeMap::new();
+    let mut out_of_range_guids = 0usize;
+    let mut near_guids = 0usize;
+    let mut move_flags: BTreeMap<String, u32> = BTreeMap::new();
+    let mut splines = 0u32;
+    let mut other: BTreeMap<u16, u32> = BTreeMap::new();
+    let mut typed: BTreeMap<String, u32> = BTreeMap::new();
+    let mut parse_errors: Vec<String> = Vec::new();
+    let mut first_own_at = None;
+    loop {
+        if own_at.is_some_and(|t| t.elapsed() >= Duration::from_secs(5)) {
+            break;
+        }
+        if begin.elapsed() >= Duration::from_secs(60) {
+            println!("giving up: no own-player create within 60 s");
+            break;
+        }
+        let packet = match world.recv() {
+            Ok(p) => p,
+            Err(e) => {
+                let text = format!("{e:#}");
+                if is_timeout(&text) {
+                    continue;
+                }
+                if text.contains("parsing opcode") {
+                    println!("  parse error: {text}");
+                    parse_errors.push(text);
+                    continue;
+                }
+                return Err(e.context("reading the world stream"));
+            }
+        };
+        match packet {
+            ServerPacket::LoginVerifyWorld {
+                map,
+                position,
+                orientation,
+            } => {
+                println!(
+                    "verify-world: map {map} position ({:.2}, {:.2}, {:.2}) facing {orientation:.5}",
+                    position.x, position.y, position.z
+                );
+                verify = Some((map, position, orientation));
+            }
+            ServerPacket::CharacterLoginFailed { result } => {
+                bail!("the server refused the login: reason {result}")
+            }
+            ServerPacket::UpdateObject { objects } => {
+                for object in objects {
+                    match object {
+                        Object::Create {
+                            guid,
+                            object_type,
+                            movement,
+                            mask,
+                        } => {
+                            *by_update_type.entry("create").or_default() += 1;
+                            *creates.entry(format!("{object_type:?}")).or_default() += 1;
+                            if let Some(m) = movement.mover {
+                                *move_flags.entry(format!("{:#x}", m.flags)).or_default() += 1;
+                            }
+                            splines += u32::from(movement.spline.is_some());
+                            if guid == character.guid && own.is_none() {
+                                own = Some(OwnPlayer {
+                                    fields: mask,
+                                    position: movement.position,
+                                    flags: movement.mover.map(|m| m.flags),
+                                    speeds: movement.speeds,
+                                    flight: movement.flight_speeds,
+                                });
+                                own_at = Some(Instant::now());
+                                first_own_at = Some(begin.elapsed());
+                            }
+                        }
+                        Object::Values { .. } => *by_update_type.entry("values").or_default() += 1,
+                        Object::Movement { .. } => {
+                            *by_update_type.entry("movement").or_default() += 1
+                        }
+                        Object::OutOfRange { guids } => {
+                            *by_update_type.entry("out of range").or_default() += 1;
+                            out_of_range_guids += guids.len();
+                        }
+                        Object::Near { guids } => {
+                            *by_update_type.entry("near").or_default() += 1;
+                            near_guids += guids.len();
+                        }
+                    }
+                }
+            }
+            ServerPacket::Other { opcode } => *other.entry(opcode).or_default() += 1,
+            other_packet => *typed.entry(other_packet.name()).or_default() += 1,
+        }
+    }
+
+    match &own {
+        Some(own) => {
+            println!(
+                "own player create arrived {:.2} s after the login request",
+                first_own_at.map_or(0.0, |d| d.as_secs_f64())
+            );
+            print_own(own, &character, verify);
+        }
+        None => println!("the own player's create never arrived"),
+    }
+    println!("objects created, by type: {creates:?}");
+    println!(
+        "movement flags on living creates: {move_flags:?}; creates riding a spline: {splines}"
+    );
+    println!("update blocks, by update type: {by_update_type:?} (out-of-range guids {out_of_range_guids}, near guids {near_guids})");
+    println!("typed packets other than updates: {typed:?}");
+    let mut ranked: Vec<(u16, u32)> = other.iter().map(|(&op, &n)| (op, n)).collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    println!(
+        "`Other` opcodes ({} distinct, by count; names from cmangos-tbc, else the 1.12.1 table):",
+        ranked.len()
+    );
+    for (op, n) in ranked {
+        println!(
+            "    {op:#06x} x{n}  {}",
+            tbc_opcode_name(op)
+                .map(str::to_string)
+                .or_else(|| {
+                    messages::opcode_name(op).map(|n| format!("(1.12.1 table only: {n})"))
+                })
+                .unwrap_or_else(|| "(no name known)".to_string())
+        );
+    }
+    println!("parse errors: {}", parse_errors.len());
+
+    let logout_began = Instant::now();
+    let result = world.logout(Duration::from_secs(25));
+    match result {
+        Ok(()) => println!(
+            "logout: SMSG_LOGOUT_COMPLETE after {:.1} s",
+            logout_began.elapsed().as_secs_f64()
+        ),
+        Err(e) => println!("logout: {e:#}"),
+    }
+    Ok(())
+}
+
+/// Names of the 2.4.3 opcodes the entry run reads, from cmangos-tbc `Opcodes.h`: the 1.12.1 table
+/// names several of these numbers otherwise or not at all (0x209, 0x33B), so it is only a fallback.
+fn tbc_opcode_name(opcode: u16) -> Option<&'static str> {
+    Some(match opcode {
+        0x042 => "SMSG_LOGIN_SETTIMESPEED",
+        0x067 => "SMSG_CONTACT_LIST",
+        0x096 => "SMSG_MESSAGECHAT",
+        0x0DD => "SMSG_MONSTER_MOVE",
+        0x0FA => "SMSG_TRIGGER_CINEMATIC",
+        0x0FD => "SMSG_TUTORIAL_FLAGS",
+        0x122 => "SMSG_INITIALIZE_FACTIONS",
+        0x127 => "SMSG_SET_PROFICIENCY",
+        0x129 => "SMSG_ACTION_BUTTONS",
+        0x12A => "SMSG_INITIAL_SPELLS",
+        0x131 => "SMSG_SPELL_START",
+        0x132 => "SMSG_SPELL_GO",
+        0x137 => "SMSG_UPDATE_AURA_DURATION",
+        0x14F => "SMSG_SPELLBREAKLOG",
+        0x155 => "SMSG_BINDPOINTUPDATE",
+        0x1CB => "SMSG_NOTIFICATION",
+        0x209 => "SMSG_ACCOUNT_DATA_TIMES",
+        0x21E => "SMSG_SET_REST_START",
+        0x24C => "SMSG_SPELLLOGEXECUTE",
+        0x293 => "SMSG_MEETINGSTONE_LEAVE",
+        0x2C2 => "SMSG_INIT_WORLD_STATES",
+        0x2F4 => "SMSG_WEATHER",
+        0x329 => "MSG_SET_DUNGEON_DIFFICULTY",
+        0x332 => "SMSG_EXPECTED_SPAM_RECORDS",
+        0x33A => "SMSG_DEFENSE_MESSAGE",
+        0x33B => "SMSG_INSTANCE_DIFFICULTY",
+        0x33D => "SMSG_MOTD",
+        0x36C => "SMSG_LFG_UPDATE",
+        0x390 => "SMSG_TIME_SYNC_REQ",
+        0x3A3 => "SMSG_INIT_EXTRA_AURA_INFO",
+        0x3A4 => "SMSG_SET_EXTRA_AURA_INFO",
+        0x3A6 => "SMSG_CLEAR_EXTRA_AURA_INFO",
+        0x3C8 => "SMSG_FEATURE_SYSTEM_STATUS",
+        0x41D => "SMSG_SEND_UNLEARN_SPELLS",
+        _ => return None,
+    })
 }

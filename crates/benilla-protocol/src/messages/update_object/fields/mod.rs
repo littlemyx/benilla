@@ -299,8 +299,8 @@ impl ObjectFields {
 
     pub(super) fn read(r: &mut impl Read, table: &'static FieldTable) -> io::Result<Self> {
         let amount_of_blocks = read_u8(r)?;
-        // Mask words of the widest descriptor; no object needs more.
-        let max_mask_words = usize::from(table.player_end).div_ceil(32);
+        // Mask words of the widest descriptor of any build; no object needs more.
+        let max_mask_words = usize::from(MAX_PLAYER_END).div_ceil(32);
         let mut present = Vec::with_capacity(capacity_hint(amount_of_blocks, max_mask_words));
         for _ in 0..amount_of_blocks {
             present.push(read_u32_le(r)?);
@@ -356,7 +356,7 @@ impl ObjectFields {
     /// The piece in equipment slot `slot` (0..18) as `(ItemDisplayInfo id, InventoryType)`, packed
     /// `display | type << 24` (`Player.cpp:4822`); unlike `PLAYER_VISIBLE_ITEM`, not an item entry.
     pub fn corpse_item(&self, slot: u8) -> Option<(u32, u8)> {
-        let raw = self.get_u32(self.table.corpse_item + u16::from(slot))?;
+        let raw = self.get_u32(at(self.table.corpse_item, u16::from(slot)))?;
         let display = raw & 0x00ff_ffff;
         (display != 0).then_some((display, (raw >> 24) as u8))
     }
@@ -453,18 +453,21 @@ impl ObjectFields {
         Some((
             [
                 self.get_f32(self.table.dynamicobject_pos_x)?,
-                self.get_f32(self.table.dynamicobject_pos_x + 1)?,
-                self.get_f32(self.table.dynamicobject_pos_x + 2)?,
+                self.get_f32(at(self.table.dynamicobject_pos_x, 1))?,
+                self.get_f32(at(self.table.dynamicobject_pos_x, 2))?,
             ],
             self.get_f32(self.table.dynamicobject_facing).unwrap_or(0.0),
         ))
     }
 
-    /// Whether the mask carries the field, ignoring the created store's absent-is-zero.
+    /// Whether the mask carries the field, ignoring the created store's absent-is-zero. A member
+    /// the build lacks ([`FieldTable::ABSENT`]) is never carried.
     fn contains(&self, index: u16) -> bool {
-        self.present
-            .get(usize::from(index / 32))
-            .is_some_and(|w| w & (1u32 << (index % 32)) != 0)
+        index != FieldTable::ABSENT
+            && self
+                .present
+                .get(usize::from(index / 32))
+                .is_some_and(|w| w & (1u32 << (index % 32)) != 0)
     }
 
     fn get_raw(&self, index: u16) -> Option<u32> {
@@ -486,7 +489,7 @@ impl ObjectFields {
     fn get_guid(&self, index: u16) -> Option<u64> {
         // Raw on purpose: a guid is present iff its low half is, even on a created store.
         let lo = self.get_raw(index)?;
-        let hi = self.get_u32(index + 1).unwrap_or(0);
+        let hi = self.get_u32(at(index, 1)).unwrap_or(0);
         Some(u64::from(lo) | (u64::from(hi) << 32))
     }
 
@@ -508,7 +511,7 @@ impl ObjectFields {
     /// One slot's `UNIT_FIELD_AURAFLAGS` nibble; an absent word reads 0, as in the client.
     fn get_aura_nibble(&self, slot: u8) -> u8 {
         let word = self
-            .get_u32(self.table.unit_auraflags + u16::from(slot >> 3))
+            .get_u32(at(self.table.unit_auraflags, u16::from(slot >> 3)))
             .unwrap_or(0);
         ((word >> ((slot & 7) * 4)) & 0x0F) as u8
     }
@@ -516,7 +519,7 @@ impl ObjectFields {
     /// One slot's byte of `UNIT_FIELD_AURALEVELS` or `UNIT_FIELD_AURAAPPLICATIONS`; an absent word
     /// reads 0.
     fn get_aura_byte(&self, base: u16, slot: u8) -> u8 {
-        let word = self.get_u32(base + u16::from(slot >> 2)).unwrap_or(0);
+        let word = self.get_u32(at(base, u16::from(slot >> 2))).unwrap_or(0);
         (word >> ((slot & 3) * 8)) as u8
     }
 
@@ -611,7 +614,18 @@ mod player;
 mod table;
 mod unit;
 
-pub use table::{build_field_table, field_table, FieldTable, FIELDS_5875};
+use table::MAX_PLAYER_END;
+
+/// A table index `offset` past `base`, [`FieldTable::ABSENT`] when the member is absent or the sum
+/// leaves the index space, so no accessor's slot arithmetic overflows or lands on a real field.
+fn at(base: u16, offset: u16) -> u16 {
+    match base.checked_add(offset) {
+        Some(index) if base != FieldTable::ABSENT && index != FieldTable::ABSENT => index,
+        _ => FieldTable::ABSENT,
+    }
+}
+
+pub use table::{build_field_table, field_table, FieldTable, FIELDS_5875, FIELDS_8606};
 pub use unit::{power_display_scale, OwnerFallback};
 
 #[cfg(test)]

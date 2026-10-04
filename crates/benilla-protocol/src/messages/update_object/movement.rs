@@ -42,6 +42,13 @@ const UPDATE_FLAG_HIGH_GUID: u8 = 0x08;
 const UPDATE_FLAG_ALL: u8 = 0x10;
 const UPDATE_FLAG_LIVING: u8 = 0x20;
 const UPDATE_FLAG_HAS_POSITION: u8 = 0x40;
+/// 2.4.3 movement-flag bits (cmangos-tbc `Object.h`, wow_messages `MovementFlags`), which differ
+/// from 1.12.1's. The jump block rides `FALLING`: cmangos-tbc reads it there where wow_messages
+/// names 0x2000; the server is the arbiter, and the airborne-at-create case is the one that tells.
+const TBC_MOVEMENT_FLAG_ON_TRANSPORT: u32 = 0x0000_0200;
+const TBC_MOVEMENT_FLAG_FALLING: u32 = 0x0000_1000;
+const TBC_MOVEMENT_FLAG_FLYING: u32 = 0x0200_0000;
+const TBC_MOVEMENT_FLAG_SPLINE_ENABLED: u32 = 0x0800_0000;
 const SPLINE_FLAG_FINAL_POINT: u32 = 0x1_0000;
 const SPLINE_FLAG_FINAL_TARGET: u32 = 0x2_0000;
 const SPLINE_FLAG_FINAL_ANGLE: u32 = 0x4_0000;
@@ -90,6 +97,8 @@ pub struct MovementBlock {
     pub mover: Option<MoverState>,
     /// A `LIVING` block's speeds in wire order `[walk, run, run_back, swim, swim_back, turn_rate]`.
     pub speeds: Option<[f32; 6]>,
+    /// A 2.4.3 `LIVING` block's `[flight, flight_back]`, which its speed list adds; `None` in 1.12.1.
+    pub flight_speeds: Option<[f32; 2]>,
     /// A ship's or elevator's path progress in ms at create, the anchor its cycle runs from
     /// (`Object.cpp:590-605`); no other object sets `UPDATE_FLAG_TRANSPORT`.
     pub transport_progress: Option<u32>,
@@ -106,7 +115,6 @@ impl MovementBlock {
         let mut mover = None;
         let mut speeds = None;
         let mut transport = None;
-        let mut transport_progress = None;
         let mut spline = None;
 
         if update_flag & UPDATE_FLAG_LIVING != 0 {
@@ -145,36 +153,7 @@ impl MovementBlock {
             }
             speeds = Some(s);
             if flags & MOVEMENT_FLAG_SPLINE_ENABLED != 0 {
-                let spline_flags = read_u32_le(r)?;
-                // The final facing (`packet_builder.cpp:162-167`); a unit on a path faces along it.
-                if spline_flags & SPLINE_FLAG_FINAL_ANGLE != 0 {
-                    let _ = read_f32_le(r)?;
-                } else if spline_flags & SPLINE_FLAG_FINAL_TARGET != 0 {
-                    let _ = read_u64_le(r)?;
-                } else if spline_flags & SPLINE_FLAG_FINAL_POINT != 0 {
-                    let _ = Vector3d::read(r)?;
-                }
-                let time_passed_ms = read_u32_le(r)?;
-                let duration_ms = read_u32_le(r)?;
-                let id = read_u32_le(r)?;
-                let amount_of_nodes = read_u32_le(r)?;
-                let mut nodes = Vec::with_capacity(capacity_hint(amount_of_nodes, 0xFFFF));
-                for _ in 0..amount_of_nodes {
-                    let v = Vector3d::read(r)?;
-                    nodes.push([v.x, v.y, v.z]);
-                }
-                // The final destination repeats the path's last point, or is zero on a cyclic path.
-                let _final_node = Vector3d::read(r)?;
-                // Drop the two virtual control points; under four nodes there is no path to ride.
-                spline = (nodes.len() >= 4).then(|| CreateSpline {
-                    path: nodes[1..nodes.len() - 1].to_vec(),
-                    id,
-                    time_passed_ms,
-                    duration_ms,
-                    flying: spline_flags & SPLINE_FLAG_FLYING != 0,
-                    cyclic: spline_flags & SPLINE_FLAG_CYCLIC != 0,
-                    run_mode: spline_flags & SPLINE_FLAG_RUNMODE != 0,
-                });
+                spline = read_create_spline(r)?;
             }
         } else if update_flag & UPDATE_FLAG_HAS_POSITION != 0 {
             let pos = Vector3d::read(r)?;
@@ -182,26 +161,143 @@ impl MovementBlock {
             position = Some((pos, orientation));
         }
 
-        if update_flag & UPDATE_FLAG_HIGH_GUID != 0 {
-            let _ = read_u32_le(r)?;
-        }
-        if update_flag & UPDATE_FLAG_ALL != 0 {
-            let _ = read_u32_le(r)?;
-        }
-        if update_flag & UPDATE_FLAG_MELEE_ATTACKING != 0 {
-            let _ = read_packed_guid(r)?;
-        }
-        if update_flag & UPDATE_FLAG_TRANSPORT != 0 {
-            transport_progress = Some(read_u32_le(r)?);
-        }
+        let transport_progress = read_trailing(r, update_flag)?;
 
         Ok(Self {
             position,
             mover,
             speeds,
+            flight_speeds: None,
             transport_progress,
             transport,
             spline,
         })
     }
+
+    /// The 2.4.3 form: the same block with an extra flags byte, a transport time, eight speeds, and
+    /// the flag bits of that build (`MovementInfo::Write`, `BuildMovementUpdate`).
+    pub(super) fn read_tbc(r: &mut impl Read) -> io::Result<Self> {
+        let update_flag = read_u8(r)?;
+        let mut position = None;
+        let mut mover = None;
+        let mut speeds = None;
+        let mut flight_speeds = None;
+        let mut transport = None;
+        let mut spline = None;
+
+        if update_flag & UPDATE_FLAG_LIVING != 0 {
+            let flags = read_u32_le(r)?;
+            // The extra movement flags (`moveFlags2`); no consumer takes them.
+            let _flags2 = read_u8(r)?;
+            let _timestamp = read_u32_le(r)?;
+            let living_position = Vector3d::read(r)?;
+            let living_orientation = read_f32_le(r)?;
+            position = Some((living_position, living_orientation));
+
+            if flags & TBC_MOVEMENT_FLAG_ON_TRANSPORT != 0 {
+                transport = Some(TransportPose {
+                    guid: read_u64_le(r)?,
+                    pos: Vector3d::read(r)?,
+                    orientation: read_f32_le(r)?,
+                });
+                // The transport's clock stamp; `TransportPose` has no field for it.
+                let _transport_time = read_u32_le(r)?;
+            }
+            // Swimming or the flying bit carries a pitch.
+            let pitch = if flags & (MOVEMENT_FLAG_SWIMMING | TBC_MOVEMENT_FLAG_FLYING) != 0 {
+                read_f32_le(r)?
+            } else {
+                0.0
+            };
+            mover = Some(MoverState { flags, pitch });
+            let _fall_time = read_f32_le(r)?;
+            if flags & TBC_MOVEMENT_FLAG_FALLING != 0 {
+                for _ in 0..4 {
+                    let _ = read_f32_le(r)?; // z_speed, cos_angle, sin_angle, xy_speed
+                }
+            }
+            if flags & MOVEMENT_FLAG_SPLINE_ELEVATION != 0 {
+                let _ = read_f32_le(r)?;
+            }
+            // Walk, run, run back, swim, swim back, flight, flight back, turn rate.
+            let mut s = [0.0f32; 8];
+            for slot in &mut s {
+                *slot = read_f32_le(r)?;
+            }
+            speeds = Some([s[0], s[1], s[2], s[3], s[4], s[7]]);
+            flight_speeds = Some([s[5], s[6]]);
+            if flags & TBC_MOVEMENT_FLAG_SPLINE_ENABLED != 0 {
+                spline = read_create_spline(r)?;
+            }
+        } else if update_flag & UPDATE_FLAG_HAS_POSITION != 0 {
+            let pos = Vector3d::read(r)?;
+            let orientation = read_f32_le(r)?;
+            position = Some((pos, orientation));
+        }
+
+        let transport_progress = read_trailing(r, update_flag)?;
+
+        Ok(Self {
+            position,
+            mover,
+            speeds,
+            flight_speeds,
+            transport_progress,
+            transport,
+            spline,
+        })
+    }
+}
+
+/// The spline of a `SPLINE_ENABLED` living block, in the same bytes in both builds
+/// (`packet_builder.cpp` `WriteCreate`).
+fn read_create_spline(r: &mut impl Read) -> io::Result<Option<CreateSpline>> {
+    let spline_flags = read_u32_le(r)?;
+    // The final facing (`packet_builder.cpp:162-167`); a unit on a path faces along it.
+    if spline_flags & SPLINE_FLAG_FINAL_ANGLE != 0 {
+        let _ = read_f32_le(r)?;
+    } else if spline_flags & SPLINE_FLAG_FINAL_TARGET != 0 {
+        let _ = read_u64_le(r)?;
+    } else if spline_flags & SPLINE_FLAG_FINAL_POINT != 0 {
+        let _ = Vector3d::read(r)?;
+    }
+    let time_passed_ms = read_u32_le(r)?;
+    let duration_ms = read_u32_le(r)?;
+    let id = read_u32_le(r)?;
+    let amount_of_nodes = read_u32_le(r)?;
+    let mut nodes = Vec::with_capacity(capacity_hint(amount_of_nodes, 0xFFFF));
+    for _ in 0..amount_of_nodes {
+        let v = Vector3d::read(r)?;
+        nodes.push([v.x, v.y, v.z]);
+    }
+    // The final destination repeats the path's last point, or is zero on a cyclic path.
+    let _final_node = Vector3d::read(r)?;
+    // Drop the two virtual control points; under four nodes there is no path to ride.
+    Ok((nodes.len() >= 4).then(|| CreateSpline {
+        path: nodes[1..nodes.len() - 1].to_vec(),
+        id,
+        time_passed_ms,
+        duration_ms,
+        flying: spline_flags & SPLINE_FLAG_FLYING != 0,
+        cyclic: spline_flags & SPLINE_FLAG_CYCLIC != 0,
+        run_mode: spline_flags & SPLINE_FLAG_RUNMODE != 0,
+    }))
+}
+
+/// What the update flags select after the living or position part, in the same order in both builds:
+/// 0x08 and 0x10 a `u32` each, 0x04 a packed guid, 0x02 the transport progress, returned.
+fn read_trailing(r: &mut impl Read, update_flag: u8) -> io::Result<Option<u32>> {
+    if update_flag & UPDATE_FLAG_HIGH_GUID != 0 {
+        let _ = read_u32_le(r)?;
+    }
+    if update_flag & UPDATE_FLAG_ALL != 0 {
+        let _ = read_u32_le(r)?;
+    }
+    if update_flag & UPDATE_FLAG_MELEE_ATTACKING != 0 {
+        let _ = read_packed_guid(r)?;
+    }
+    if update_flag & UPDATE_FLAG_TRANSPORT != 0 {
+        return Ok(Some(read_u32_le(r)?));
+    }
+    Ok(None)
 }
