@@ -213,7 +213,7 @@ pub(crate) static TABLES: &[Table] = &[
         name: "SpamMessages",
         shape: Shape::Schema(|l| text_filter_lists::schema("SpamMessages", l)),
     },
-    plain!("Spell", spells::spell_schema()),
+    wide!("Spell", spells::spell_schema_for),
     plain!("SpellCastTimes", spells::spell_cast_times_schema()),
     plain!("SpellCategory", spells::spell_category_schema()),
     // Sub-dword fields in 2.4.3: `chain_effects::load` reads the leading eight dwords by hand.

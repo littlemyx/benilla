@@ -902,7 +902,6 @@ mod tests {
         // the ids are renumbered, slot 1 is a locale mask and the name moved to slot 4 (measured on
         // 4 shared ids, no match; definitions project only).
         "Cfg_Categories",
-        "Spell",
     ];
 
     /// The registered tables whose file header disagrees with the schema (or hand-parsed shape)

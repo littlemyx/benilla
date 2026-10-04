@@ -51,7 +51,9 @@ use crate::Chain;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, i32_at, parse, str_at, u32_at};
+use crate::dbc::{f32_at, i32_at, parse, str_at, u32_at, unread};
+use crate::DbcLayout;
+use benilla_dbc::LOC_SLOTS_1_12_1;
 
 const SPELL: &str = "DBFilesClient\\Spell.dbc";
 
@@ -382,54 +384,100 @@ pub(crate) fn spell_category_schema() -> Schema {
     s
 }
 
-pub(crate) fn spell_schema() -> Schema {
-    let mut s = Schema::new("Spell");
-    for i in 0..SPELL_FIELDS {
-        if i == COL_NAME_ENUS {
-            s.add_field(SchemaField::new("NameEnUs", FieldType::String));
-        } else if i == COL_NAME_SUBTEXT_ENUS {
-            s.add_field(SchemaField::new("NameSubtextEnUs", FieldType::String));
-        } else if i == COL_DESCRIPTION_ENUS {
-            s.add_field(SchemaField::new("DescriptionEnUs", FieldType::String));
-        } else if i == COL_AURA_DESCRIPTION_ENUS {
-            s.add_field(SchemaField::new("AuraDescriptionEnUs", FieldType::String));
-        } else if i == COL_SPEED {
-            s.add_field(SchemaField::new("Speed", FieldType::Float32));
-        } else if (COL_EFFECT_REAL_POINTS_PER_LEVEL_1..COL_EFFECT_REAL_POINTS_PER_LEVEL_1 + 3)
-            .contains(&i)
-        {
-            s.add_field(SchemaField::new(
-                format!(
-                    "EffectRealPointsPerLevel{}",
-                    i - COL_EFFECT_REAL_POINTS_PER_LEVEL_1
-                ),
-                FieldType::Float32,
-            ));
-        } else if (COL_EFFECT_MULTIPLE_VALUE_1..COL_EFFECT_MULTIPLE_VALUE_1 + 3).contains(&i) {
-            s.add_field(SchemaField::new(
-                format!("EffectMultipleValue{}", i - COL_EFFECT_MULTIPLE_VALUE_1),
-                FieldType::Float32,
-            ));
-        } else if (COL_EFFECT_POINTS_PER_COMBO_POINT_1..COL_EFFECT_POINTS_PER_COMBO_POINT_1 + 3)
-            .contains(&i)
-        {
-            s.add_field(SchemaField::new(
-                format!(
-                    "EffectPointsPerComboPoint{}",
-                    i - COL_EFFECT_POINTS_PER_COMBO_POINT_1
-                ),
-                FieldType::Float32,
-            ));
-        } else if (COL_DAMAGE_MULTIPLIER_1..COL_DAMAGE_MULTIPLIER_1 + 3).contains(&i) {
-            s.add_field(SchemaField::new(
-                format!("DmgMultiplier{}", i - COL_DAMAGE_MULTIPLIER_1),
-                FieldType::Float32,
-            ));
-        } else {
-            s.add_field(SchemaField::new(format!("F{i}"), FieldType::UInt32));
+/// The columns 2.4.3 inserts before 1.12.1's column `i`: the name and the number. Measured against
+/// the 14842 shared spells, every read column's 2.4.3 slot is its 1.12.1 slot moved by these
+/// insertions, by the loss of the school id at column 1 and by the four localized strings'
+/// eight extra slots each; the emulator's `SpellEntry` column comments (the TBC one) and the
+/// definitions project's column list give the same positions (see the evidence table).
+fn tbc_inserted_before(i: usize) -> (&'static str, usize) {
+    match i {
+        // Two more attribute words after `AttributesExD`.
+        11 => ("AttributesExtra", 2),
+        // A facing flag word after the spell-focus requirement.
+        16 => ("FacingCaster", 1),
+        // The excluded caster and target aura states, before the casting time.
+        18 => ("ExcludedAuraStates", 2),
+        // A second misc-value array before the trigger spells.
+        109 => ("EffectMiscValueB", 3),
+        _ => ("", 0),
+    }
+}
+
+/// The table's columns for a layout. A read column is named `F<its 1.12.1 column>` in both, so
+/// [`SpellSlots`] finds it by name; 2.4.3 declares its inserted columns as gaps in their place, drops
+/// column 1 (the school id, which 2.4.3 stores as a mask in a column appended at the end) and ends
+/// in four columns not read (two required totem categories, a required area, the school mask).
+pub(crate) fn spell_schema_for(layout: DbcLayout) -> Schema {
+    let tbc = layout.is_tbc();
+    let mut s = layout.schema("Spell");
+    let mut i = 0;
+    while i < SPELL_FIELDS {
+        if tbc {
+            let (name, n) = tbc_inserted_before(i);
+            unread(&mut s, name, n);
+            if i == COL_SCHOOL {
+                i += 1;
+                continue;
+            }
         }
+        let name = format!("F{i}");
+        let is_float = i == COL_SPEED
+            || (COL_EFFECT_REAL_POINTS_PER_LEVEL_1..COL_EFFECT_REAL_POINTS_PER_LEVEL_1 + 3)
+                .contains(&i)
+            || (COL_EFFECT_MULTIPLE_VALUE_1..COL_EFFECT_MULTIPLE_VALUE_1 + 3).contains(&i)
+            || (COL_EFFECT_POINTS_PER_COMBO_POINT_1..COL_EFFECT_POINTS_PER_COMBO_POINT_1 + 3)
+                .contains(&i)
+            || (COL_DAMAGE_MULTIPLIER_1..COL_DAMAGE_MULTIPLIER_1 + 3).contains(&i);
+        if [
+            COL_NAME_ENUS,
+            COL_NAME_SUBTEXT_ENUS,
+            COL_DESCRIPTION_ENUS,
+            COL_AURA_DESCRIPTION_ENUS,
+        ]
+        .contains(&i)
+        {
+            // Nine slots in 1.12.1, seventeen in 2.4.3: the schema's layout sets the width.
+            s.add_field(SchemaField::new(name, FieldType::LocString));
+            i += LOC_SLOTS_1_12_1;
+            continue;
+        }
+        let ty = if is_float {
+            FieldType::Float32
+        } else {
+            FieldType::UInt32
+        };
+        s.add_field(SchemaField::new(name, ty));
+        i += 1;
+    }
+    if tbc {
+        unread(&mut s, "TotemCategoriesAreaSchoolMask", 4);
     }
     s
+}
+
+/// The 1.12.1 table (the synthetic-row and file-scan tests').
+#[cfg(test)]
+pub(crate) fn spell_schema() -> Schema {
+    spell_schema_for(DbcLayout::VANILLA_1_12_1)
+}
+
+/// The slot of each of 1.12.1's columns in a layout's file: `at(COL_X)` is where the loader reads
+/// what 1.12.1 holds at `COL_X`. A column the layout lacks (the school id in 2.4.3) answers a slot
+/// no record has, so a read of it yields the field's default.
+struct SpellSlots(Vec<usize>);
+
+impl SpellSlots {
+    fn of(schema: &Schema) -> Self {
+        Self(
+            (0..SPELL_FIELDS)
+                .map(|i| schema.slot_of(&format!("F{i}")).unwrap_or(usize::MAX / 2))
+                .collect(),
+        )
+    }
+
+    fn at(&self, column: usize) -> usize {
+        self.0[column]
+    }
 }
 
 /// Load the joined spell display catalog off the patch chain.
@@ -451,7 +499,10 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
     };
 
     let spell_bytes = chain.read_file(SPELL).context("reading Spell.dbc")?;
-    let spells_set = parse(&spell_bytes, spell_schema(), "Spell.dbc")?;
+    let schema = spell_schema_for(chain.dbc_layout());
+    let cols = SpellSlots::of(&schema);
+    let at = |column: usize| cols.at(column);
+    let spells_set = parse(&spell_bytes, schema, "Spell.dbc")?;
     let mut spells: HashMap<u32, SpellDisplay> = HashMap::new();
     let mut learned_spell: HashMap<u32, u32> = HashMap::new();
     let mut learn_effects: HashMap<u32, Vec<LearnEffect>> = HashMap::new();
@@ -460,8 +511,8 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
         let Some(id) = u32_at(r, 0) else { continue };
         // The learn-spell hop: the first LEARN_SPELL effect's trigger is the taught ability.
         for i in 0..3 {
-            if u32_at(r, COL_EFFECT_1 + i) == Some(SPELL_EFFECT_LEARN_SPELL) {
-                if let Some(taught) = u32_at(r, COL_EFFECT_TRIGGER_1 + i).filter(|&t| t != 0) {
+            if u32_at(r, at(COL_EFFECT_1) + i) == Some(SPELL_EFFECT_LEARN_SPELL) {
+                if let Some(taught) = u32_at(r, at(COL_EFFECT_TRIGGER_1) + i).filter(|&t| t != 0) {
                     learned_spell.entry(id).or_insert(taught);
                     break;
                 }
@@ -470,14 +521,14 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
         // Learn effects in slot order; a SKILL_STEP's step is base points plus die sides.
         let effects: Vec<LearnEffect> = (0..3)
             .filter_map(|i| {
-                let trigger = || u32_at(r, COL_EFFECT_TRIGGER_1 + i).filter(|&t| t != 0);
-                match u32_at(r, COL_EFFECT_1 + i)? {
+                let trigger = || u32_at(r, at(COL_EFFECT_TRIGGER_1) + i).filter(|&t| t != 0);
+                match u32_at(r, at(COL_EFFECT_1) + i)? {
                     SPELL_EFFECT_LEARN_SPELL => trigger().map(LearnEffect::Spell),
                     SPELL_EFFECT_LEARN_PET_SPELL => trigger().map(LearnEffect::PetSpell),
                     SPELL_EFFECT_SKILL_STEP => {
-                        let skill = i32_at(r, COL_EFFECT_MISC_1 + i).filter(|&m| m > 0)? as u32;
-                        let value = i32_at(r, COL_EFFECT_BASE_POINTS_1 + i).unwrap_or(0)
-                            + i32_at(r, COL_EFFECT_DIE_SIDES_1 + i).unwrap_or(0);
+                        let skill = i32_at(r, at(COL_EFFECT_MISC_1) + i).filter(|&m| m > 0)? as u32;
+                        let value = i32_at(r, at(COL_EFFECT_BASE_POINTS_1) + i).unwrap_or(0)
+                            + i32_at(r, at(COL_EFFECT_DIE_SIDES_1) + i).unwrap_or(0);
                         Some(LearnEffect::SkillStep {
                             skill,
                             step: value.max(0) as u32,
@@ -492,24 +543,24 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
         }
         // The language declaration (`0x4b2656`) reads slot 0 only, `+0xf4` and `+0x1a8`, unlike
         // the learn hop's scan of all three.
-        if u32_at(r, COL_EFFECT_1) == Some(SPELL_EFFECT_LANGUAGE) {
-            if let Some(lang) = i32_at(r, COL_EFFECT_MISC_1).filter(|&l| l > 0) {
+        if u32_at(r, at(COL_EFFECT_1)) == Some(SPELL_EFFECT_LANGUAGE) {
+            if let Some(lang) = i32_at(r, at(COL_EFFECT_MISC_1)).filter(|&l| l > 0) {
                 declared_language.insert(id, lang as u32);
             }
         }
-        let name = str_at(&spells_set, r, COL_NAME_ENUS).unwrap_or_default();
-        let rank = str_at(&spells_set, r, COL_NAME_SUBTEXT_ENUS);
-        let icon = u32_at(r, COL_ICON_ID)
+        let name = str_at(&spells_set, r, at(COL_NAME_ENUS)).unwrap_or_default();
+        let rank = str_at(&spells_set, r, at(COL_NAME_SUBTEXT_ENUS));
+        let icon = u32_at(r, at(COL_ICON_ID))
             .filter(|&i| i != 0)
             .and_then(|i| icons.get(&i).cloned());
-        let visual = u32_at(r, COL_VISUAL_ID).unwrap_or(0);
-        let speed = f32_at(r, COL_SPEED).unwrap_or(0.0);
-        let attributes = u32_at(r, COL_ATTRIBUTES).unwrap_or(0);
+        let visual = u32_at(r, at(COL_VISUAL_ID)).unwrap_or(0);
+        let speed = f32_at(r, at(COL_SPEED)).unwrap_or(0.0);
+        let attributes = u32_at(r, at(COL_ATTRIBUTES)).unwrap_or(0);
         // Read once; the shapeshift-form derivation below reuses `effect_apply_aura`.
         let effect_apply_aura: [u32; 3] =
-            std::array::from_fn(|i| u32_at(r, COL_EFFECT_APPLY_AURA_1 + i).unwrap_or(0));
+            std::array::from_fn(|i| u32_at(r, at(COL_EFFECT_APPLY_AURA_1) + i).unwrap_or(0));
         let effect_trigger_spell: [u32; 3] =
-            std::array::from_fn(|i| u32_at(r, COL_EFFECT_TRIGGER_1 + i).unwrap_or(0));
+            std::array::from_fn(|i| u32_at(r, at(COL_EFFECT_TRIGGER_1) + i).unwrap_or(0));
         spells.insert(
             id,
             SpellDisplay {
@@ -520,138 +571,146 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
                 visual,
                 speed,
                 attributes,
-                attributes_ex: u32_at(r, COL_ATTRIBUTES_EX).unwrap_or(0),
-                attributes_ex2: u32_at(r, COL_ATTRIBUTES_EX2).unwrap_or(0),
-                attributes_ex3: u32_at(r, COL_ATTRIBUTES_EX3).unwrap_or(0),
-                attributes_ex4: u32_at(r, COL_ATTRIBUTES_EX4).unwrap_or(0),
-                school: u32_at(r, COL_SCHOOL).unwrap_or(0),
-                mechanic: u32_at(r, COL_MECHANIC).unwrap_or(0),
+                attributes_ex: u32_at(r, at(COL_ATTRIBUTES_EX)).unwrap_or(0),
+                attributes_ex2: u32_at(r, at(COL_ATTRIBUTES_EX2)).unwrap_or(0),
+                attributes_ex3: u32_at(r, at(COL_ATTRIBUTES_EX3)).unwrap_or(0),
+                attributes_ex4: u32_at(r, at(COL_ATTRIBUTES_EX4)).unwrap_or(0),
+                // 2.4.3 has no school id: it keeps a school mask in another column, so the school
+                // reads 0 (physical) there.
+                school: u32_at(r, at(COL_SCHOOL)).unwrap_or(0),
+                mechanic: u32_at(r, at(COL_MECHANIC)).unwrap_or(0),
                 effect_mechanic: std::array::from_fn(|i| {
-                    u32_at(r, COL_EFFECT_MECHANIC_1 + i).unwrap_or(0)
+                    u32_at(r, at(COL_EFFECT_MECHANIC_1) + i).unwrap_or(0)
                 }),
-                prevention_type: u32_at(r, COL_PREVENTION_TYPE).unwrap_or(0),
-                spell_family: u32_at(r, COL_SPELL_FAMILY_NAME).unwrap_or(0),
+                prevention_type: u32_at(r, at(COL_PREVENTION_TYPE)).unwrap_or(0),
+                spell_family: u32_at(r, at(COL_SPELL_FAMILY_NAME)).unwrap_or(0),
                 // Low dword first: the reference reads bit i at `[rec + 4 * (i >> 5) + 0x284]`.
-                spell_family_flags: u64::from(u32_at(r, COL_SPELL_FAMILY_FLAGS_LOW).unwrap_or(0))
-                    | u64::from(u32_at(r, COL_SPELL_FAMILY_FLAGS_LOW + 1).unwrap_or(0)) << 32,
+                spell_family_flags: u64::from(
+                    u32_at(r, at(COL_SPELL_FAMILY_FLAGS_LOW)).unwrap_or(0),
+                ) | u64::from(
+                    u32_at(r, at(COL_SPELL_FAMILY_FLAGS_LOW) + 1).unwrap_or(0),
+                ) << 32,
                 passive: attributes & ATTR_PASSIVE != 0,
-                cast_ui: u32_at(r, COL_CAST_UI).unwrap_or(0),
-                effects: [0, 1, 2].map(|i| u32_at(r, COL_EFFECT_1 + i).unwrap_or(0)),
-                base_level: u32_at(r, COL_BASE_LEVEL).unwrap_or(0),
-                max_level: u32_at(r, COL_MAX_LEVEL).unwrap_or(0),
-                spell_level: u32_at(r, COL_SPELL_LEVEL).unwrap_or(0),
+                cast_ui: u32_at(r, at(COL_CAST_UI)).unwrap_or(0),
+                effects: [0, 1, 2].map(|i| u32_at(r, at(COL_EFFECT_1) + i).unwrap_or(0)),
+                base_level: u32_at(r, at(COL_BASE_LEVEL)).unwrap_or(0),
+                max_level: u32_at(r, at(COL_MAX_LEVEL)).unwrap_or(0),
+                spell_level: u32_at(r, at(COL_SPELL_LEVEL)).unwrap_or(0),
                 // The first OPEN_LOCK effect, in any slot, and its `EffectMiscValue` LockType.
                 open_lock: (0..3).find_map(|i| {
-                    (u32_at(r, COL_EFFECT_1 + i)? == SPELL_EFFECT_OPEN_LOCK).then(|| OpenLock {
-                        lock_type: u32_at(r, COL_EFFECT_MISC_1 + i).unwrap_or(0),
+                    (u32_at(r, at(COL_EFFECT_1) + i)? == SPELL_EFFECT_OPEN_LOCK).then(|| OpenLock {
+                        lock_type: u32_at(r, at(COL_EFFECT_MISC_1) + i).unwrap_or(0),
                         effect: i,
                     })
                 }),
-                dispel: u32_at(r, COL_DISPEL).unwrap_or(0),
-                category: u32_at(r, COL_CATEGORY).unwrap_or(0),
+                dispel: u32_at(r, at(COL_DISPEL)).unwrap_or(0),
+                category: u32_at(r, at(COL_CATEGORY)).unwrap_or(0),
                 // Resolved at load, read off the armed record (`0x6e1563`).
-                category_wildcard: u32_at(r, COL_CATEGORY)
+                category_wildcard: u32_at(r, at(COL_CATEGORY))
                     .is_some_and(|c| wildcard_categories.contains(&c)),
-                recovery_ms: u32_at(r, COL_RECOVERY_TIME).unwrap_or(0),
-                interrupt_flags: u32_at(r, COL_INTERRUPT_FLAGS).unwrap_or(0),
-                aura_interrupt_flags: u32_at(r, COL_AURA_INTERRUPT_FLAGS).unwrap_or(0),
-                channel_interrupt_flags: u32_at(r, COL_CHANNEL_INTERRUPT_FLAGS).unwrap_or(0),
-                category_recovery_ms: u32_at(r, COL_CATEGORY_RECOVERY_TIME).unwrap_or(0),
-                start_recovery_category: u32_at(r, COL_START_RECOVERY_CATEGORY).unwrap_or(0),
-                start_recovery_ms: u32_at(r, COL_START_RECOVERY_TIME).unwrap_or(0),
-                power_type: u32_at(r, COL_POWER_TYPE).unwrap_or(0),
-                mana_cost: u32_at(r, COL_MANA_COST).unwrap_or(0),
-                mana_cost_pct: u32_at(r, COL_MANA_COST_PCT).unwrap_or(0),
-                mana_cost_per_level: u32_at(r, COL_MANA_COST_PER_LEVEL).unwrap_or(0),
-                mana_per_second: u32_at(r, COL_MANA_PER_SECOND).unwrap_or(0),
-                range_index: u32_at(r, COL_RANGE_INDEX).unwrap_or(0),
-                modal_next_spell: u32_at(r, COL_MODAL_NEXT_SPELL).unwrap_or(0),
-                targets: u32_at(r, COL_TARGETS).unwrap_or(0),
-                target_creature_type: u32_at(r, COL_TARGET_CREATURE_TYPE).unwrap_or(0),
-                implicit_target_a1: u32_at(r, COL_IMPLICIT_TARGET_A1).unwrap_or(0),
+                recovery_ms: u32_at(r, at(COL_RECOVERY_TIME)).unwrap_or(0),
+                interrupt_flags: u32_at(r, at(COL_INTERRUPT_FLAGS)).unwrap_or(0),
+                aura_interrupt_flags: u32_at(r, at(COL_AURA_INTERRUPT_FLAGS)).unwrap_or(0),
+                channel_interrupt_flags: u32_at(r, at(COL_CHANNEL_INTERRUPT_FLAGS)).unwrap_or(0),
+                category_recovery_ms: u32_at(r, at(COL_CATEGORY_RECOVERY_TIME)).unwrap_or(0),
+                start_recovery_category: u32_at(r, at(COL_START_RECOVERY_CATEGORY)).unwrap_or(0),
+                start_recovery_ms: u32_at(r, at(COL_START_RECOVERY_TIME)).unwrap_or(0),
+                power_type: u32_at(r, at(COL_POWER_TYPE)).unwrap_or(0),
+                mana_cost: u32_at(r, at(COL_MANA_COST)).unwrap_or(0),
+                mana_cost_pct: u32_at(r, at(COL_MANA_COST_PCT)).unwrap_or(0),
+                mana_cost_per_level: u32_at(r, at(COL_MANA_COST_PER_LEVEL)).unwrap_or(0),
+                mana_per_second: u32_at(r, at(COL_MANA_PER_SECOND)).unwrap_or(0),
+                range_index: u32_at(r, at(COL_RANGE_INDEX)).unwrap_or(0),
+                modal_next_spell: u32_at(r, at(COL_MODAL_NEXT_SPELL)).unwrap_or(0),
+                targets: u32_at(r, at(COL_TARGETS)).unwrap_or(0),
+                target_creature_type: u32_at(r, at(COL_TARGET_CREATURE_TYPE)).unwrap_or(0),
+                implicit_target_a1: u32_at(r, at(COL_IMPLICIT_TARGET_A1)).unwrap_or(0),
                 effect_implicit_target_a: std::array::from_fn(|i| {
-                    u32_at(r, COL_IMPLICIT_TARGET_A1 + i).unwrap_or(0)
+                    u32_at(r, at(COL_IMPLICIT_TARGET_A1) + i).unwrap_or(0)
                 }),
                 effect_implicit_target_b: std::array::from_fn(|i| {
-                    u32_at(r, COL_IMPLICIT_TARGET_B1 + i).unwrap_or(0)
+                    u32_at(r, at(COL_IMPLICIT_TARGET_B1) + i).unwrap_or(0)
                 }),
-                stances: u32_at(r, COL_STANCES).unwrap_or(0),
-                stances_not: u32_at(r, COL_STANCES_NOT).unwrap_or(0),
-                caster_aura_state: u32_at(r, COL_CASTER_AURA_STATE).unwrap_or(0),
-                target_aura_state: u32_at(r, COL_TARGET_AURA_STATE).unwrap_or(0),
-                totems: std::array::from_fn(|i| u32_at(r, COL_TOTEM_1 + i).unwrap_or(0)),
+                stances: u32_at(r, at(COL_STANCES)).unwrap_or(0),
+                stances_not: u32_at(r, at(COL_STANCES_NOT)).unwrap_or(0),
+                caster_aura_state: u32_at(r, at(COL_CASTER_AURA_STATE)).unwrap_or(0),
+                target_aura_state: u32_at(r, at(COL_TARGET_AURA_STATE)).unwrap_or(0),
+                totems: std::array::from_fn(|i| u32_at(r, at(COL_TOTEM_1) + i).unwrap_or(0)),
                 reagents: std::array::from_fn(|i| {
                     (
-                        u32_at(r, COL_REAGENT_1 + i).unwrap_or(0),
-                        u32_at(r, COL_REAGENT_COUNT_1 + i).unwrap_or(0),
+                        u32_at(r, at(COL_REAGENT_1) + i).unwrap_or(0),
+                        u32_at(r, at(COL_REAGENT_COUNT_1) + i).unwrap_or(0),
                     )
                 }),
-                equipped_item_class: u32_at(r, COL_EQUIPPED_ITEM_CLASS).unwrap_or(0) as i32,
-                equipped_item_subclass_mask: u32_at(r, COL_EQUIPPED_ITEM_SUBCLASS_MASK)
+                equipped_item_class: u32_at(r, at(COL_EQUIPPED_ITEM_CLASS)).unwrap_or(0) as i32,
+                equipped_item_subclass_mask: u32_at(r, at(COL_EQUIPPED_ITEM_SUBCLASS_MASK))
                     .unwrap_or(0),
-                equipped_item_inventory_type_mask: u32_at(r, COL_EQUIPPED_ITEM_INVENTORY_TYPE_MASK)
-                    .unwrap_or(0),
-                requires_spell_focus: u32_at(r, COL_REQUIRES_SPELL_FOCUS).unwrap_or(0),
+                equipped_item_inventory_type_mask: u32_at(
+                    r,
+                    at(COL_EQUIPPED_ITEM_INVENTORY_TYPE_MASK),
+                )
+                .unwrap_or(0),
+                requires_spell_focus: u32_at(r, at(COL_REQUIRES_SPELL_FOCUS)).unwrap_or(0),
                 // The first MOD_SHAPESHIFT effect's `EffectMiscValue` is the form (`0x4b4690`).
                 shapeshift_form: (0..3).find_map(|i| {
                     (effect_apply_aura[i] == SPELL_AURA_MOD_SHAPESHIFT)
-                        .then(|| u32_at(r, COL_EFFECT_MISC_1 + i).unwrap_or(0))
+                        .then(|| u32_at(r, at(COL_EFFECT_MISC_1) + i).unwrap_or(0))
                 }),
-                stance_bar_order: u32_at(r, COL_STANCE_BAR_ORDER).unwrap_or(0) as i32,
-                active_icon_id: u32_at(r, COL_ACTIVE_ICON_ID).unwrap_or(0),
-                active_icon: u32_at(r, COL_ACTIVE_ICON_ID)
+                stance_bar_order: u32_at(r, at(COL_STANCE_BAR_ORDER)).unwrap_or(0) as i32,
+                active_icon_id: u32_at(r, at(COL_ACTIVE_ICON_ID)).unwrap_or(0),
+                active_icon: u32_at(r, at(COL_ACTIVE_ICON_ID))
                     .filter(|&i| i != 0)
                     .and_then(|i| icons.get(&i).cloned()),
-                description: str_at(&spells_set, r, COL_DESCRIPTION_ENUS),
-                aura_description: str_at(&spells_set, r, COL_AURA_DESCRIPTION_ENUS),
-                duration_index: u32_at(r, COL_DURATION_INDEX).unwrap_or(0),
-                casting_time_index: u32_at(r, COL_CASTING_TIME_INDEX).unwrap_or(0),
-                proc_flags: u32_at(r, COL_PROC_FLAGS).unwrap_or(0),
-                proc_chance: u32_at(r, COL_PROC_CHANCE).unwrap_or(0),
-                proc_charges: u32_at(r, COL_PROC_CHARGES).unwrap_or(0),
-                stack_amount: u32_at(r, COL_STACK_AMOUNT).unwrap_or(0),
-                max_target_level: u32_at(r, COL_MAX_TARGET_LEVEL).unwrap_or(0),
-                max_affected_targets: u32_at(r, COL_MAX_AFFECTED_TARGETS).unwrap_or(0),
+                description: str_at(&spells_set, r, at(COL_DESCRIPTION_ENUS)),
+                aura_description: str_at(&spells_set, r, at(COL_AURA_DESCRIPTION_ENUS)),
+                duration_index: u32_at(r, at(COL_DURATION_INDEX)).unwrap_or(0),
+                casting_time_index: u32_at(r, at(COL_CASTING_TIME_INDEX)).unwrap_or(0),
+                proc_flags: u32_at(r, at(COL_PROC_FLAGS)).unwrap_or(0),
+                proc_chance: u32_at(r, at(COL_PROC_CHANCE)).unwrap_or(0),
+                proc_charges: u32_at(r, at(COL_PROC_CHARGES)).unwrap_or(0),
+                stack_amount: u32_at(r, at(COL_STACK_AMOUNT)).unwrap_or(0),
+                max_target_level: u32_at(r, at(COL_MAX_TARGET_LEVEL)).unwrap_or(0),
+                max_affected_targets: u32_at(r, at(COL_MAX_AFFECTED_TARGETS)).unwrap_or(0),
                 effect_base_points: std::array::from_fn(|i| {
-                    i32_at(r, COL_EFFECT_BASE_POINTS_1 + i).unwrap_or(0)
+                    i32_at(r, at(COL_EFFECT_BASE_POINTS_1) + i).unwrap_or(0)
                 }),
                 effect_die_sides: std::array::from_fn(|i| {
-                    i32_at(r, COL_EFFECT_DIE_SIDES_1 + i).unwrap_or(0)
+                    i32_at(r, at(COL_EFFECT_DIE_SIDES_1) + i).unwrap_or(0)
                 }),
                 effect_base_dice: std::array::from_fn(|i| {
-                    i32_at(r, COL_EFFECT_BASE_DICE_1 + i).unwrap_or(0)
+                    i32_at(r, at(COL_EFFECT_BASE_DICE_1) + i).unwrap_or(0)
                 }),
                 effect_dice_per_level: std::array::from_fn(|i| {
-                    i32_at(r, COL_EFFECT_DICE_PER_LEVEL_1 + i).unwrap_or(0)
+                    i32_at(r, at(COL_EFFECT_DICE_PER_LEVEL_1) + i).unwrap_or(0)
                 }),
                 effect_real_points_per_level: std::array::from_fn(|i| {
-                    f32_at(r, COL_EFFECT_REAL_POINTS_PER_LEVEL_1 + i).unwrap_or(0.0)
+                    f32_at(r, at(COL_EFFECT_REAL_POINTS_PER_LEVEL_1) + i).unwrap_or(0.0)
                 }),
                 effect_amplitude: std::array::from_fn(|i| {
-                    u32_at(r, COL_EFFECT_AMPLITUDE_1 + i).unwrap_or(0)
+                    u32_at(r, at(COL_EFFECT_AMPLITUDE_1) + i).unwrap_or(0)
                 }),
                 effect_apply_aura,
                 effect_radius_index: std::array::from_fn(|i| {
-                    u32_at(r, COL_EFFECT_RADIUS_INDEX_1 + i).unwrap_or(0)
+                    u32_at(r, at(COL_EFFECT_RADIUS_INDEX_1) + i).unwrap_or(0)
                 }),
                 effect_chain_targets: std::array::from_fn(|i| {
-                    u32_at(r, COL_EFFECT_CHAIN_TARGETS_1 + i).unwrap_or(0)
+                    u32_at(r, at(COL_EFFECT_CHAIN_TARGETS_1) + i).unwrap_or(0)
                 }),
                 effect_multiple_value: std::array::from_fn(|i| {
-                    f32_at(r, COL_EFFECT_MULTIPLE_VALUE_1 + i).unwrap_or(0.0)
+                    f32_at(r, at(COL_EFFECT_MULTIPLE_VALUE_1) + i).unwrap_or(0.0)
                 }),
                 damage_multiplier: std::array::from_fn(|i| {
-                    f32_at(r, COL_DAMAGE_MULTIPLIER_1 + i).unwrap_or(0.0)
+                    f32_at(r, at(COL_DAMAGE_MULTIPLIER_1) + i).unwrap_or(0.0)
                 }),
                 effect_points_per_combo_point: std::array::from_fn(|i| {
-                    f32_at(r, COL_EFFECT_POINTS_PER_COMBO_POINT_1 + i).unwrap_or(0.0)
+                    f32_at(r, at(COL_EFFECT_POINTS_PER_COMBO_POINT_1) + i).unwrap_or(0.0)
                 }),
                 effect_trigger_spell,
                 effect_item_type: std::array::from_fn(|i| {
-                    u32_at(r, COL_EFFECT_ITEM_TYPE_1 + i).unwrap_or(0)
+                    u32_at(r, at(COL_EFFECT_ITEM_TYPE_1) + i).unwrap_or(0)
                 }),
                 effect_misc_value: std::array::from_fn(|i| {
-                    i32_at(r, COL_EFFECT_MISC_1 + i).unwrap_or(0)
+                    i32_at(r, at(COL_EFFECT_MISC_1) + i).unwrap_or(0)
                 }),
             },
         );

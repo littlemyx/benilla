@@ -1586,3 +1586,200 @@ fn creature_type_mask_rule() {
     );
     assert!(masked(1).admits_creature_type(33), "bit 32 wraps to bit 0");
 }
+
+/// 2.4.3's Spell.dbc, 216 fields: a row both builds ship (Fireball rank 1) and one 2.x added
+/// (Fireball rank 13), the shapeshift and learn derivations, and a spell for each column the
+/// build moved (totems, reagents, equipped items, aura states, chain targets, combo points).
+/// Expectations are read off the raw file at the emulator's column positions, independently.
+#[test]
+fn the_2_4_3_spell_table_reads_through_its_inserted_columns() {
+    let data = crate::wow_data_tbc_or_skip!();
+    let mut chain = crate::open_chain(&data).expect("open chain");
+    let cat = load_spell_catalog(&mut chain).expect("load Spell/SpellIcon");
+    assert_eq!(cat.len(), 28315);
+
+    let fireball = cat.get(133).expect("Fireball rank 1");
+    assert_eq!(fireball.name, "Fireball");
+    assert_eq!(fireball.rank.as_deref(), Some("Rank 1"));
+    assert!(fireball.icon.is_some());
+    assert_eq!(
+        (fireball.visual, fireball.speed, fireball.attributes),
+        (67, 24.0, 0x10000)
+    );
+    assert_eq!(
+        (
+            fireball.casting_time_index,
+            fireball.duration_index,
+            fireball.range_index
+        ),
+        (16, 35, 35)
+    );
+    assert_eq!(
+        (
+            fireball.mana_cost,
+            fireball.power_type,
+            fireball.proc_chance
+        ),
+        (30, 0, 101)
+    );
+    assert_eq!(
+        (
+            fireball.max_level,
+            fireball.base_level,
+            fireball.spell_level
+        ),
+        (5, 1, 1)
+    );
+    assert_eq!(fireball.effects, [2, 6, 0]);
+    assert_eq!(fireball.effect_base_points, [13, 0, 0]);
+    assert_eq!(fireball.effect_die_sides, [9, 1, 0]);
+    assert_eq!(fireball.effect_base_dice, [1, 1, 0]);
+    assert_eq!(fireball.effect_real_points_per_level, [0.6, 0.0, 0.0]);
+    assert_eq!(
+        (fireball.effect_apply_aura, fireball.effect_amplitude),
+        ([0, 3, 0], [0, 2000, 0])
+    );
+    assert_eq!((fireball.spell_family, fireball.spell_family_flags), (3, 1));
+    assert_eq!(
+        (fireball.start_recovery_category, fireball.start_recovery_ms),
+        (133, 1500)
+    );
+    assert_eq!(
+        (fireball.prevention_type, fireball.interrupt_flags),
+        (1, 15)
+    );
+    assert!(fireball
+        .description
+        .as_deref()
+        .is_some_and(|d| d.starts_with("Hurls a fiery ball")));
+    assert!(fireball
+        .aura_description
+        .as_deref()
+        .is_some_and(|d| d.contains("Fire damage every")));
+    // 2.4.3 keeps a school mask where 1.12.1 had a school id, so the school reads 0 here.
+    assert_eq!(fireball.school, 0);
+
+    let rank13 = cat.get(27070).expect("Fireball rank 13, new in 2.x");
+    assert_eq!(rank13.rank.as_deref(), Some("Rank 13"));
+    assert_eq!(
+        (
+            rank13.mana_cost,
+            rank13.casting_time_index,
+            rank13.duration_index
+        ),
+        (425, 22, 31)
+    );
+    assert_eq!(
+        (rank13.max_level, rank13.base_level, rank13.spell_level),
+        (70, 66, 66)
+    );
+    assert_eq!(rank13.effect_base_points, [632, 20, 0]);
+    assert_eq!(rank13.effect_die_sides, [173, 1, 0]);
+    assert_eq!(rank13.effect_real_points_per_level, [4.0, 0.0, 0.0]);
+
+    // Bloodlust, a 2.x shaman spell: three effect slots through the shifted effect arrays.
+    let bloodlust = cat.get(2825).expect("Bloodlust");
+    assert_eq!(
+        (bloodlust.dispel, bloodlust.mana_cost, bloodlust.recovery_ms),
+        (1, 750, 600_000)
+    );
+    assert_eq!(bloodlust.effects, [6, 6, 6]);
+    assert_eq!(bloodlust.effect_apply_aura, [192, 61, 65]);
+    assert_eq!(bloodlust.effect_implicit_target_a, [22; 3]);
+    assert_eq!(bloodlust.effect_implicit_target_b, [33; 3]);
+    assert_eq!(bloodlust.effect_radius_index, [12; 3]);
+    assert_eq!(
+        (bloodlust.spell_family, bloodlust.spell_family_flags),
+        (11, 0x40 << 32)
+    );
+    assert_eq!((bloodlust.visual, bloodlust.attributes), (7870, 0x50000));
+
+    // Cat Form: the form derives from an aura effect's misc value; the stance columns follow the
+    // attribute words 2.4.3 appended.
+    let cat_form = cat.get(768).expect("Cat Form");
+    assert_eq!(cat_form.shapeshift_form, Some(1));
+    assert_eq!(cat_form.effect_misc_value, [1, 17, 0]);
+    assert_eq!((cat_form.stances, cat_form.stances_not), (0, 0x4000_0002));
+    assert_eq!(
+        (
+            cat_form.attributes,
+            cat_form.attributes_ex,
+            cat_form.attributes_ex4
+        ),
+        (0x50010, 0x18000, 0x200000)
+    );
+    assert_eq!(
+        (
+            cat_form.mana_cost_pct,
+            cat_form.stance_bar_order,
+            cat_form.active_icon_id
+        ),
+        (35, 2, 122)
+    );
+    assert_eq!(
+        cat.get(71).map(|s| s.stance_bar_order),
+        Some(1),
+        "Defensive Stance"
+    );
+    let wrath = cat.get(5176).expect("Wrath");
+    assert_eq!(
+        (wrath.stances, wrath.stances_not, wrath.attributes_ex2),
+        (0x4000_0000, 2, 0x80000)
+    );
+
+    // The learn hop and the skill step, as in the 1.12.1 wrappers.
+    assert_eq!(cat.learned_spell(2020), Some(2018));
+    assert_eq!(
+        cat.learn_effects(2020),
+        &[
+            LearnEffect::Spell(2018),
+            LearnEffect::SkillStep {
+                skill: 164,
+                step: 1
+            }
+        ]
+    );
+    let blizzard = cat.get(10).expect("Blizzard");
+    assert_eq!(blizzard.effect_trigger_spell, [0, 42208, 0]);
+    assert_eq!(
+        (blizzard.effect_radius_index, blizzard.effect_apply_aura),
+        ([14, 0, 0], [4, 23, 0])
+    );
+    assert_eq!(blizzard.channel_interrupt_flags, 31756);
+    assert_eq!(
+        cat.get(2584)
+            .map(|s| (s.aura_interrupt_flags, s.attributes_ex3)),
+        Some((524_288, 0x100000))
+    );
+
+    // Columns the build moved, one spell each.
+    assert_eq!(cat.get(68).map(|s| s.totems), Some([1963, 0]));
+    assert_eq!(cat.get(818).map(|s| s.totems), Some([4471, 0]));
+    assert_eq!(cat.get(130).map(|s| s.reagents[0]), Some((17056, 1)));
+    assert_eq!(
+        cat.get(53)
+            .map(|s| (s.equipped_item_class, s.equipped_item_subclass_mask)),
+        Some((2, 0x8000))
+    );
+    assert_eq!(cat.get(18).map(|s| s.requires_spell_focus), Some(1));
+    assert_eq!(cat.get(2538).map(|s| s.requires_spell_focus), Some(4));
+    assert_eq!(
+        cat.get(1495).map(|s| s.caster_aura_state),
+        Some(1),
+        "Mongoose Bite"
+    );
+    assert_eq!(
+        cat.get(66).map(|s| s.mana_cost_pct),
+        Some(16),
+        "Invisibility"
+    );
+    let chain_lightning = cat.get(421).expect("Chain Lightning");
+    assert_eq!(chain_lightning.effect_chain_targets, [3, 0, 0]);
+    assert_eq!(chain_lightning.damage_multiplier, [0.7, 1.0, 1.0]);
+    assert_eq!(
+        cat.get(1079).map(|s| s.effect_points_per_combo_point),
+        Some([4.0, 0.0, 0.0]),
+        "Rip"
+    );
+    assert_eq!(cat.get(6603).map(|s| s.effects), Some([78, 0, 0]), "Attack");
+}
