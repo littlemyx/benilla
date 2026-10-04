@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, u32_at};
-use crate::Chain;
+use crate::dbc::{f32_at, parse, u32_at, unread};
+use crate::{Chain, DbcLayout};
 
 const TAXI_PATH_NODE: &str = "DBFilesClient\\TaxiPathNode.dbc";
 
@@ -59,8 +59,10 @@ impl TaxiPathNodes {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("TaxiPathNode");
+/// 9 fields in 1.12.1; 2.4.3 appends an arrival and a departure event id (measured: the nine read
+/// columns keep their slots on the 8719 shared nodes; the emulator's format agrees).
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("TaxiPathNode");
     for name in ["ID", "PathID", "NodeIndex", "MapID"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
@@ -70,6 +72,9 @@ pub(crate) fn schema() -> Schema {
     for name in ["Flags", "Delay"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
+    if layout.is_tbc() {
+        unread(&mut s, "Events", 2);
+    }
     s
 }
 
@@ -78,7 +83,7 @@ pub fn load_taxi_path_nodes(chain: &mut Chain) -> Result<TaxiPathNodes> {
     let bytes = chain
         .read_file(TAXI_PATH_NODE)
         .context("reading TaxiPathNode.dbc")?;
-    let rs = parse(&bytes, schema(), "TaxiPathNode")?;
+    let rs = parse(&bytes, schema(chain.dbc_layout()), "TaxiPathNode")?;
     let mut paths: HashMap<u32, Vec<TaxiPathNode>> = HashMap::new();
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -161,5 +166,34 @@ mod tests {
 
         let path292 = cat.path(292).expect("path 292 exists");
         assert!(!path292.is_empty(), "path 292 is non-empty");
+    }
+
+    /// 2.4.3's nodes: 516 paths, the Outland ones on map 530 with their stops, read through the
+    /// two appended event columns.
+    #[test]
+    fn the_2_4_3_taxi_paths_reach_outland() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let nodes = load_taxi_path_nodes(&mut chain).expect("load TaxiPathNode");
+        assert_eq!(nodes.len(), 516, "paths");
+        let outland = nodes.path(488).expect("an Outland path");
+        assert_eq!(outland.len(), 16);
+        assert_eq!(
+            (outland[0].id, outland[0].node_index, outland[0].map_id),
+            (12857, 0, 530)
+        );
+        assert_eq!(
+            outland[0].pos.map(|c| (c * 10.0).round() / 10.0),
+            [7593.4, -6788.0, 87.2]
+        );
+        assert_eq!(outland[15].node_index, 15);
+        // A stop: flag 2 with a delay of a minute.
+        let stop = nodes
+            .path(241)
+            .expect("path 241")
+            .iter()
+            .find(|n| n.node_index == 6)
+            .expect("node 6");
+        assert_eq!((stop.id, stop.flags, stop.delay), (5042, 2, 60));
     }
 }

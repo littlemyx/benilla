@@ -11,7 +11,8 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, str_at, u32_at, unread};
+use crate::DbcLayout;
 
 const CHAT_PROFANITY: &str = "DBFilesClient\\ChatProfanity.dbc";
 const SPAM_MESSAGES: &str = "DBFilesClient\\SpamMessages.dbc";
@@ -24,10 +25,16 @@ pub struct FilterPattern {
     pub pattern: String,
 }
 
-pub(crate) fn schema(name: &str) -> Schema {
-    let mut s = Schema::new(name);
+/// An id and a pattern; 2.4.3's `ChatProfanity` appends a language word, not read (measured on the
+/// 2040 shared ids: the pattern keeps its slot at 0.99). `SpamMessages` has the same two columns in
+/// both builds.
+pub(crate) fn schema(name: &str, layout: DbcLayout) -> Schema {
+    let mut s = layout.schema(name);
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("Pattern", FieldType::String));
+    if layout.is_tbc() && name == "ChatProfanity" {
+        unread(&mut s, "Language", 1);
+    }
     s.set_key_field("ID");
     s
 }
@@ -36,7 +43,7 @@ fn load(chain: &mut Chain, path: &str, name: &str) -> Result<Vec<FilterPattern>>
     let bytes = chain
         .read_file(path)
         .with_context(|| format!("reading {name}.dbc"))?;
-    let rs = parse(&bytes, schema(name), name)?;
+    let rs = parse(&bytes, schema(name, chain.dbc_layout()), name)?;
     let mut out = Vec::with_capacity(rs.records().len());
     for r in rs.records() {
         // File order is the list order, which masking depends on: patterns apply in list order,
@@ -94,5 +101,28 @@ mod tests {
             spam.iter().all(|p| p.pattern.contains(r"\s*")),
             "every shipped spam row spaces its letters to defeat spacing"
         );
+    }
+
+    /// 2.4.3's lists: the profanity table is twice as long, one pattern per language, with the
+    /// language word after the pattern; the spam list is five times 1.12.1's.
+    #[test]
+    fn the_2_4_3_lists_read_their_patterns() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let profanity = load_chat_profanity(&mut chain).expect("load ChatProfanity");
+        assert_eq!(profanity.len(), 4655);
+        assert_eq!(
+            (profanity[0].id, profanity[0].pattern.as_str()),
+            (1, "씨 퐁 자 지")
+        );
+        for id in [600, 4904, 9911] {
+            let row = profanity.iter().find(|p| p.id == id).expect("row");
+            assert_eq!(
+                row.pattern, r"\<twat\>",
+                "id {id}: one pattern in several languages"
+            );
+        }
+        let spam = load_spam_messages(&mut chain).expect("load SpamMessages");
+        assert_eq!(spam.len(), 136);
     }
 }

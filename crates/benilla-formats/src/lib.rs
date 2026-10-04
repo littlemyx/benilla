@@ -898,14 +898,11 @@ mod tests {
     /// localized-string widening (new columns). An entry leaves this list when its table is
     /// converted, and a table that fits while listed fails.
     const NOT_YET_2_4_3: &[&str] = &[
+        // Open column: Region (1.12.1 slot 1, the realm list's filter). No 2.4.3 slot matches it:
+        // the ids are renumbered, slot 1 is a locale mask and the name moved to slot 4 (measured on
+        // 4 shared ids, no match; definitions project only).
         "Cfg_Categories",
-        "ChatProfanity",
-        "CreatureSoundData",
-        "LightSkybox",
-        "Material",
         "Spell",
-        "TaxiPathNode",
-        "WorldMapArea",
     ];
 
     /// The registered tables whose file header disagrees with the schema (or hand-parsed shape)
