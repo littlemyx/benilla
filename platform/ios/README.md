@@ -68,3 +68,7 @@ input trace, so the checks are behavioural.
    pointer is drawn.
 9. Drag an action-bar button to another slot, holding the left button: it follows the pointer and
    drops where released. Move a frame by its title the same way.
+10. The 1.12 cursor draws at the pointer (the arrow on the login screen, the sword over a hostile),
+    a picked-up item's icon follows it, and the system arrow is hidden over the game. The log has
+    `system pointer hidden over the view`; hover still moves the cursor, and it vanishes in a
+    right-button look.
