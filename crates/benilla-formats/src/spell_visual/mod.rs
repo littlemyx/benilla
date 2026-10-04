@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, i32_at, parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{f32_at, i32_at, parse, slots, str_at, u32_at, unread};
+use crate::{Chain, DbcLayout};
 
 pub mod chain_effects;
 
@@ -20,7 +20,9 @@ const SPELL_VISUAL: &str = "DBFilesClient\\SpellVisual.dbc";
 const SPELL_VISUAL_KIT: &str = "DBFilesClient\\SpellVisualKit.dbc";
 const SPELL_VISUAL_EFFECT_NAME: &str = "DBFilesClient\\SpellVisualEffectName.dbc";
 
+#[cfg(test)]
 const SPELL_VISUAL_FIELDS: usize = 16;
+#[cfg(test)]
 const SPELL_VISUAL_KIT_FIELDS: usize = 35;
 
 /// Each emitter slot's M2 `AttachmentID`, kit fields 3-11 in order, as the client's slot loop
@@ -398,10 +400,41 @@ impl SpellVisualCatalog {
     }
 }
 
-pub(crate) fn spell_visual_schema() -> Schema {
-    n_u32_schema("SpellVisual", SPELL_VISUAL_FIELDS)
+/// `SpellVisual.dbc`: 16 fields in 1.12.1, 25 in 2.4.3. The five stage kits and the missile
+/// columns keep their slots (measured: 0.99 on the 2165 shared rows); the strike sound moves from
+/// slot 14 to 11 (1.0 on its 13 rows); the three area-effect columns (11 to 13 in 1.12.1) have no
+/// 2.4.3 column (no slot matches on their 217 to 226 non-zero rows: instant, impact and persistent
+/// area kits replaced them), and twelve columns follow the flags.
+pub(crate) fn spell_visual_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("SpellVisual");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    for name in [
+        "PrecastKit",
+        "CastKit",
+        "ImpactKit",
+        "StateKit",
+        "ChannelKit",
+        "MissileGate",
+    ] {
+        s.add_field(SchemaField::new(name, FieldType::UInt32));
+    }
+    s.add_field(SchemaField::new("MissileModel", FieldType::UInt32));
+    unread(&mut s, "MissilePath", 1);
+    s.add_field(SchemaField::new("MissileAttach", FieldType::UInt32));
+    s.add_field(SchemaField::new("MissileSound", FieldType::UInt32));
+    if layout.is_tbc() {
+        s.add_field(SchemaField::new("StrikeSound", FieldType::UInt32));
+        unread(&mut s, "FlagsAndAppended", 13);
+    } else {
+        for name in ["AreaGate", "AreaEffect", "AreaKit", "StrikeSound"] {
+            s.add_field(SchemaField::new(name, FieldType::UInt32));
+        }
+        unread(&mut s, "Flags", 1);
+    }
+    s
 }
 
+#[cfg(test)]
 fn n_u32_schema(name: &str, fields: usize) -> Schema {
     let mut s = Schema::new(name);
     for i in 0..fields {
@@ -424,38 +457,106 @@ pub(crate) fn effect_name_schema() -> Schema {
     s
 }
 
-/// `SpellVisualKit`: fields 0-14 are ids, 15-18 the signed `CharProcType` keys and 19-34 the
-/// float params, which the dispatcher (`0x60d7c0`) loads with `fld`.
-pub(crate) fn kit_schema() -> Schema {
-    let mut s = Schema::new("SpellVisualKit");
-    for i in 0..SPELL_VISUAL_KIT_FIELDS {
-        let ty = match i {
-            CHAR_PROC_TYPE_FIELD..CHAR_PROC_PARAM_FIELD => FieldType::Int32,
-            f if f >= CHAR_PROC_PARAM_FIELD => FieldType::Float32,
-            _ => FieldType::UInt32,
-        };
-        s.add_field(SchemaField::new(format!("F{i}"), ty));
+/// `SpellVisualKit`: 35 fields in 1.12.1, 38 in 2.4.3. The nine effect slots are ids (the six body
+/// attachments, then three special effects), then come a world effect, a sound, a shake, the four
+/// signed `CharProcType` keys and the 16 float params, which the dispatcher (`0x60d7c0`) loads with
+/// `fld`. 2.4.3 inserts a left and a right weapon effect between the breath and the specials, so
+/// everything from the specials on sits two slots later (measured: each moved column matches at
+/// 0.97 to 1.0 on the non-empty rows of the 1772 shared kits), and ends in a flag word.
+pub(crate) fn kit_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("SpellVisualKit");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    unread(&mut s, "KitType", 1);
+    s.add_field(SchemaField::new("AnimID", FieldType::UInt32));
+    for name in [
+        "HeadEffect",
+        "ChestEffect",
+        "BaseEffect",
+        "LeftHandEffect",
+        "RightHandEffect",
+        "BreathEffect",
+    ] {
+        s.add_field(SchemaField::new(name, FieldType::UInt32));
+    }
+    if layout.is_tbc() {
+        unread(&mut s, "WeaponEffects", 2);
+    }
+    s.add_field(SchemaField::new_array(
+        "SpecialEffect",
+        FieldType::UInt32,
+        3,
+    ));
+    s.add_field(SchemaField::new("WorldEffect", FieldType::UInt32));
+    s.add_field(SchemaField::new("SoundID", FieldType::UInt32));
+    s.add_field(SchemaField::new("ShakeID", FieldType::UInt32));
+    s.add_field(SchemaField::new_array(
+        "CharProcType",
+        FieldType::Int32,
+        KIT_CHAR_PROCS,
+    ));
+    for param in 0..4 {
+        s.add_field(SchemaField::new_array(
+            format!("CharParam{param}"),
+            FieldType::Float32,
+            KIT_CHAR_PROCS,
+        ));
+    }
+    if layout.is_tbc() {
+        unread(&mut s, "Flags", 1);
     }
     s
 }
 
-/// Kit field 15, `CharProcType[0]` (`+0x3c`).
-const CHAR_PROC_TYPE_FIELD: usize = 15;
-/// Kit field 19, `CharParamZero[0]` (`+0x4c`); `CharParamOne..Three[0]` follow at every
-/// [`KIT_CHAR_PROCS`] fields (`+0x5c`, `+0x6c`, `+0x7c`).
-const CHAR_PROC_PARAM_FIELD: usize = CHAR_PROC_TYPE_FIELD + KIT_CHAR_PROCS;
+/// Where a kit's columns sit under its schema.
+struct KitSlots {
+    anim: usize,
+    /// The six attachment effects, then the three special effects.
+    effects: [usize; 9],
+    world: usize,
+    sound: usize,
+    shake: usize,
+    proc_type: usize,
+    proc_param: usize,
+}
+
+impl KitSlots {
+    fn of(schema: &Schema) -> Result<Self> {
+        let [anim, head, special, world, sound, shake, proc_type, proc_param] = slots(
+            schema,
+            [
+                "AnimID",
+                "HeadEffect",
+                "SpecialEffect",
+                "WorldEffect",
+                "SoundID",
+                "ShakeID",
+                "CharProcType",
+                "CharParam0",
+            ],
+        )?;
+        Ok(Self {
+            anim,
+            effects: std::array::from_fn(|i| if i < 6 { head + i } else { special + i - 6 }),
+            world,
+            sound,
+            shake,
+            proc_type,
+            proc_param,
+        })
+    }
+}
 
 /// Kit `CharProc` slot `i`. The empty slot is -1; 0 is a real key, the channel beam, which the
 /// dispatcher's table (`0x60dc20`) routes to its beam case (`0x60da79`). A type-0 slot that is
 /// padding decodes `CharParamZero` to 0, which the client's null-row test (`0x6ecc2e`) no-ops.
-fn char_proc_slot(r: &benilla_dbc::Record, i: usize) -> Option<CharProc> {
-    let ty = i32_at(r, CHAR_PROC_TYPE_FIELD + i)?;
+fn char_proc_slot(r: &benilla_dbc::Record, cols: &KitSlots, i: usize) -> Option<CharProc> {
+    let ty = i32_at(r, cols.proc_type + i)?;
     if ty < 0 {
         return None;
     }
     let mut params = [0.0; 4];
     for (p, param) in params.iter_mut().enumerate() {
-        *param = f32_at(r, CHAR_PROC_PARAM_FIELD + p * KIT_CHAR_PROCS + i).unwrap_or(0.0);
+        *param = f32_at(r, cols.proc_param + p * KIT_CHAR_PROCS + i).unwrap_or(0.0);
     }
     Some(CharProc { ty, params })
 }
@@ -469,7 +570,21 @@ pub fn load_spell_visual_catalog(chain: &mut Chain) -> Result<SpellVisualCatalog
     let sv_bytes = chain
         .read_file(SPELL_VISUAL)
         .context("reading SpellVisual.dbc")?;
-    let sv_set = parse(&sv_bytes, spell_visual_schema(), "SpellVisual.dbc")?;
+    let sv_schema = spell_visual_schema(chain.dbc_layout());
+    let [stage_slot, gate_slot, model_slot, attach_slot, sound_slot, strike_slot] = slots(
+        &sv_schema,
+        [
+            "PrecastKit",
+            "MissileGate",
+            "MissileModel",
+            "MissileAttach",
+            "MissileSound",
+            "StrikeSound",
+        ],
+    )?;
+    // 2.4.3 has no area-effect columns, so those three stay 0 there.
+    let area_slot = sv_schema.slot_of("AreaGate");
+    let sv_set = parse(&sv_bytes, sv_schema, "SpellVisual.dbc")?;
     let mut visuals = HashMap::with_capacity(sv_set.records().len());
     for r in sv_set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -477,19 +592,19 @@ pub fn load_spell_visual_catalog(chain: &mut Chain) -> Result<SpellVisualCatalog
         visuals.insert(
             id,
             VisualStages {
-                precast: g(1),
-                cast: g(2),
-                impact: g(3),
-                state: g(4),
-                channel: g(5),
-                missile_model: g(7),
-                missile_attach: g(9),
-                missile_sound: u32_at(r, 10).and_then(some_unless_none),
-                strike_sound: u32_at(r, 14).and_then(some_unless_none),
-                missile_gate: g(6),
-                area_gate: g(11),
-                area_effect: g(12),
-                area_kit: g(13),
+                precast: g(stage_slot),
+                cast: g(stage_slot + 1),
+                impact: g(stage_slot + 2),
+                state: g(stage_slot + 3),
+                channel: g(stage_slot + 4),
+                missile_model: g(model_slot),
+                missile_attach: g(attach_slot),
+                missile_sound: u32_at(r, sound_slot).and_then(some_unless_none),
+                strike_sound: u32_at(r, strike_slot).and_then(some_unless_none),
+                missile_gate: g(gate_slot),
+                area_gate: area_slot.map_or(0, |at| g(at)),
+                area_effect: area_slot.map_or(0, |at| g(at + 1)),
+                area_kit: area_slot.map_or(0, |at| g(at + 2)),
             },
         );
     }
@@ -497,19 +612,23 @@ pub fn load_spell_visual_catalog(chain: &mut Chain) -> Result<SpellVisualCatalog
     let svk_bytes = chain
         .read_file(SPELL_VISUAL_KIT)
         .context("reading SpellVisualKit.dbc")?;
-    let svk_set = parse(&svk_bytes, kit_schema(), "SpellVisualKit.dbc")?;
+    let kit_schema = kit_schema(chain.dbc_layout());
+    let cols = KitSlots::of(&kit_schema)?;
+    let svk_set = parse(&svk_bytes, kit_schema, "SpellVisualKit.dbc")?;
     let mut kits = HashMap::with_capacity(svk_set.records().len());
     for r in svk_set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
-        let anim_id = u32_at(r, 2).and_then(some_unless_none).map(|a| a as u16);
-        let sound = u32_at(r, 13).and_then(some_unless_none);
+        let anim_id = u32_at(r, cols.anim)
+            .and_then(some_unless_none)
+            .map(|a| a as u16);
+        let sound = u32_at(r, cols.sound).and_then(some_unless_none);
         let mut effect_slots = [None; 9];
-        for (i, slot) in effect_slots.iter_mut().enumerate() {
-            *slot = u32_at(r, 3 + i).and_then(some_unless_none);
+        for (slot, &at) in effect_slots.iter_mut().zip(&cols.effects) {
+            *slot = u32_at(r, at).and_then(some_unless_none);
         }
         let mut char_proc_slots = [None; KIT_CHAR_PROCS];
         for (i, slot) in char_proc_slots.iter_mut().enumerate() {
-            *slot = char_proc_slot(r, i);
+            *slot = char_proc_slot(r, &cols, i);
         }
         kits.insert(
             id,
@@ -517,8 +636,8 @@ pub fn load_spell_visual_catalog(chain: &mut Chain) -> Result<SpellVisualCatalog
                 anim_id,
                 sound,
                 effect_slots,
-                world_effect: u32_at(r, 12).and_then(some_unless_none),
-                shake: u32_at(r, 14).and_then(some_unless_none),
+                world_effect: u32_at(r, cols.world).and_then(some_unless_none),
+                shake: u32_at(r, cols.shake).and_then(some_unless_none),
                 char_proc_slots,
             },
         );

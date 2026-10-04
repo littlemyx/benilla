@@ -6,11 +6,9 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
-use benilla_dbc::{FieldType, Schema, SchemaField};
+use anyhow::{bail, Context, Result};
 
-use crate::dbc::{f32_at, parse, str_at, u32_at};
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 
 const SPELL_CHAIN_EFFECTS: &str = "DBFilesClient\\SpellChainEffects.dbc";
 const SPELL_CHAIN_EFFECTS_FIELDS: usize = 8;
@@ -60,19 +58,15 @@ pub struct ChainProc {
     pub ty: i32,
 }
 
-pub(crate) fn chain_effects_schema() -> Schema {
-    let mut s = Schema::new("SpellChainEffects");
-    let mut add = |name: &str, ty| s.add_field(SchemaField::new(name.to_string(), ty));
-    add("ID", FieldType::UInt32);
-    add("AvgSegLen", FieldType::Float32);
-    add("HalfWidth", FieldType::Float32);
-    add("NoiseScale", FieldType::Float32);
-    add("ScrollPeriod", FieldType::Float32);
-    add("BoltLife", FieldType::UInt32);
-    add("BoltStagger", FieldType::UInt32);
-    add("Texture", FieldType::String);
-    debug_assert_eq!(s.fields.len(), SPELL_CHAIN_EFFECTS_FIELDS);
-    s
+/// The header shape of a build's table: 8 fields in 32 bytes in 1.12.1; 47 fields in 173 bytes in
+/// 2.4.3, where five colour and blend columns are bytes (39 dwords, 5 bytes, 3 dwords). The eight
+/// read columns are the first eight dwords of both, so a record is read by hand off its own stride.
+pub(crate) fn chain_effects_shape(layout: DbcLayout) -> (u32, u32) {
+    if layout.is_tbc() {
+        (47, 173)
+    } else {
+        (SPELL_CHAIN_EFFECTS_FIELDS as u32, 32)
+    }
 }
 
 /// Read `SpellChainEffects.dbc`; a textureless row stays, as the client's constructor never reads
@@ -81,20 +75,55 @@ pub(super) fn load(chain: &mut Chain) -> Result<HashMap<u32, ChainEffect>> {
     let bytes = chain
         .read_file(SPELL_CHAIN_EFFECTS)
         .with_context(|| format!("reading {SPELL_CHAIN_EFFECTS}"))?;
-    let set = parse(&bytes, chain_effects_schema(), "SpellChainEffects.dbc")?;
-    let mut rows = HashMap::with_capacity(set.records().len());
-    for r in set.records() {
-        let Some(id) = u32_at(r, 0) else { continue };
+    let (want_fields, want_size) = chain_effects_shape(chain.dbc_layout());
+    let header = |at: usize| {
+        bytes
+            .get(at..at + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().expect("four bytes")))
+    };
+    let (Some(count), Some(fields), Some(size), Some(string_size)) =
+        (header(4), header(8), header(12), header(16))
+    else {
+        bail!("SpellChainEffects.dbc: header truncated");
+    };
+    if &bytes[0..4] != b"WDBC" || fields != want_fields || size != want_size {
+        bail!(
+            "SpellChainEffects.dbc: unexpected layout (fields {fields}, record size {size}; \
+             expected {want_fields}/{want_size})"
+        );
+    }
+    let (count, size, string_size) = (count as usize, size as usize, string_size as usize);
+    let records_end = 20 + count * size;
+    if bytes.len() < records_end + string_size {
+        bail!("SpellChainEffects.dbc: records or string block run past the file");
+    }
+    let strings = &bytes[records_end..records_end + string_size];
+    let mut rows = HashMap::with_capacity(count);
+    for i in 0..count {
+        let at = 20 + i * size;
+        let word = |k: usize| {
+            u32::from_le_bytes(
+                bytes[at + 4 * k..at + 4 * k + 4]
+                    .try_into()
+                    .expect("four bytes"),
+            )
+        };
+        let float = |k: usize| f32::from_bits(word(k));
+        let texture = strings
+            .get(word(7) as usize..)
+            .and_then(|tail| tail.split(|&b| b == 0).next())
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+            .unwrap_or_default();
         rows.insert(
-            id,
+            word(0),
             ChainEffect {
-                avg_seg_len: f32_at(r, 1).unwrap_or(0.0),
-                half_width: f32_at(r, 2).unwrap_or(0.0),
-                noise_scale: f32_at(r, 3).unwrap_or(0.0),
-                scroll_period_s: f32_at(r, 4).unwrap_or(0.0),
-                bolt_life_ms: u32_at(r, 5).unwrap_or(0),
-                bolt_stagger_ms: u32_at(r, 6).unwrap_or(0),
-                texture: str_at(&set, r, 7).unwrap_or_default(),
+                avg_seg_len: float(1),
+                half_width: float(2),
+                noise_scale: float(3),
+                scroll_period_s: float(4),
+                bolt_life_ms: word(5),
+                bolt_stagger_ms: word(6),
+                texture,
             },
         );
     }

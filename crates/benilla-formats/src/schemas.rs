@@ -31,6 +31,10 @@ pub(crate) enum Shape {
     /// fields: the record size is not four bytes a field). The walk test reads the shape.
     #[cfg_attr(not(test), allow(dead_code))]
     Hand { field_count: u32, record_size: u32 },
+    /// Hand-parsed like `Hand`, with a header shape that differs by build: `(field_count,
+    /// record_size)` for the layout.
+    #[cfg_attr(not(test), allow(dead_code))]
+    HandByBuild(fn(DbcLayout) -> (u32, u32)),
 }
 
 /// One table, as one loader reads it. A table several loaders read has one entry per distinct
@@ -206,11 +210,12 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("Spell", spells::spell_schema()),
     plain!("SpellCastTimes", spells::spell_cast_times_schema()),
     plain!("SpellCategory", spells::spell_category_schema()),
-    plain!(
-        "SpellChainEffects",
-        spell_visual::chain_effects::chain_effects_schema()
-    ),
-    plain!("SpellDispelType", spells::spell_dispel_type_schema()),
+    // Sub-dword fields in 2.4.3: `chain_effects::load` reads the leading eight dwords by hand.
+    Table {
+        name: "SpellChainEffects",
+        shape: Shape::HandByBuild(spell_visual::chain_effects::chain_effects_shape),
+    },
+    wide!("SpellDispelType", spells::spell_dispel_type_schema),
     plain!("SpellDuration", spells::spell_duration_schema()),
     plain!(
         "SpellEffectCameraShakes",
@@ -218,17 +223,17 @@ pub(crate) static TABLES: &[Table] = &[
     ),
     wide!("SpellFocusObject", spell_focus::schema),
     plain!("SpellIcon", dbc::spell_icon_schema()),
-    plain!(
+    wide!(
         "SpellItemEnchantment",
-        item_visuals::spell_item_enchantment_schema()
+        item_visuals::spell_item_enchantment_schema
     ),
     wide!("SpellMechanic", spell_mechanic::schema),
     plain!("SpellRadius", spells::spell_radius_schema()),
     wide!("SpellRange", spells::spell_range_schema),
-    plain!("SpellShapeshiftForm", spells::shapeshift_form_schema()),
-    plain!("SpellVisual", spell_visual::spell_visual_schema()),
+    wide!("SpellShapeshiftForm", spells::shapeshift_form_schema),
+    wide!("SpellVisual", spell_visual::spell_visual_schema),
     plain!("SpellVisualEffectName", spell_visual::effect_name_schema()),
-    plain!("SpellVisualKit", spell_visual::kit_schema()),
+    wide!("SpellVisualKit", spell_visual::kit_schema),
     plain!("StableSlotPrices", stable_slot_prices::schema()),
     plain!("Stationery", stationery::stationery_schema()),
     plain!("Talent", talents::talent_schema()),
@@ -267,7 +272,7 @@ pub(crate) fn schema(table: &str, layout: DbcLayout) -> Option<Schema> {
         .filter(|t| t.name.eq_ignore_ascii_case(table))
         .find_map(|t| match t.shape {
             Shape::Schema(build) => Some(build(layout)),
-            Shape::Hand { .. } => None,
+            Shape::Hand { .. } | Shape::HandByBuild(_) => None,
         })
 }
 

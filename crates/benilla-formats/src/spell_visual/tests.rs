@@ -759,3 +759,115 @@ fn only_type_eight_arms_a_trail() {
         assert!(proc.as_weapon_trail().is_none(), "type {ty}");
     }
 }
+
+/// 2.4.3's four tables: the strike sound at its new slot, the area-effect columns gone, a kit's
+/// specials and charproc params behind the two inserted weapon-effect columns, and the beams read
+/// out of 173-byte records.
+#[test]
+fn the_2_4_3_spell_visual_tables_read_through_their_layout() {
+    let data = crate::wow_data_tbc_or_skip!();
+    let mut chain = crate::open_chain(&data).expect("open chain");
+    let cat = load_spell_visual_catalog(&mut chain).expect("load spell visuals");
+    assert_eq!(cat.len(), 4746);
+    assert_eq!(cat.kit_len(), 4162);
+    assert_eq!(cat.chain_effect_len(), 320);
+
+    // Fireball as in 1.12.1; the flags word follows the missile columns now.
+    assert_eq!(
+        *cat.stages(67).expect("Fireball's visual"),
+        VisualStages {
+            precast: 30,
+            cast: 38,
+            impact: 286,
+            state: 0,
+            channel: 0,
+            missile_model: 365,
+            missile_attach: 1,
+            missile_sound: Some(3011),
+            strike_sound: None,
+            missile_gate: 1,
+            area_gate: 0,
+            area_effect: 0,
+            area_kit: 0,
+        }
+    );
+    // The strike sound moved from field 14 to 11; Mining and Herb Gathering keep theirs.
+    assert_eq!(cat.stages(93).and_then(|s| s.strike_sound), Some(1143));
+    assert_eq!(cat.stages(91).and_then(|s| s.strike_sound), Some(1142));
+    // Blizzard's area columns do not exist in 2.4.3: its stages read, the area ones stay 0.
+    let blizzard = cat.stages(259).expect("Blizzard's visual");
+    assert_eq!(
+        (
+            blizzard.precast,
+            blizzard.cast,
+            blizzard.impact,
+            blizzard.channel
+        ),
+        (197, 5390, 413, 717)
+    );
+    assert_eq!(
+        (blizzard.area_gate, blizzard.area_effect, blizzard.area_kit),
+        (0, 0, 0)
+    );
+
+    // Kits: the anim and sound ids, then the specials, which sit after the weapon columns.
+    let cast = cat.kit(38).expect("Fireball's cast kit");
+    assert_eq!(cast.anim_id, Some(53));
+    assert_eq!(
+        cast.effects().collect::<Vec<_>>(),
+        [(0x15, 288), (0x16, 288)]
+    );
+    let special = cat.kit(3590).expect("a kit with a second special effect");
+    assert_eq!(special.effects().collect::<Vec<_>>(), [(0x18, 88)]);
+    let weapon_only = cat
+        .kit(7071)
+        .expect("a kit with only a right weapon effect");
+    assert_eq!(
+        (weapon_only.anim_id, weapon_only.sound),
+        (Some(110), Some(51))
+    );
+    assert_eq!(
+        weapon_only.effects().count(),
+        0,
+        "weapon effects are not read"
+    );
+    let blizzard_kit = cat.kit(609).expect("Blizzard's area kit");
+    assert_eq!(blizzard_kit.sound, Some(7));
+    let proc = blizzard_kit
+        .char_procs()
+        .find(|p| p.ty == 9)
+        .expect("shard emitter");
+    assert_eq!((proc.params[0], proc.params[1]), (0.0, 5.0));
+    let beam = cat
+        .kit(6397)
+        .expect("Chain Burn's kit")
+        .chain_proc()
+        .expect("a beam");
+    assert_eq!((beam.effect_id, beam.beams), (3, 3));
+
+    // Beams: Chain Lightning as in 1.12.1, Drain Life's scroll reversed harder, a new row 16.
+    let lightning = cat.chain_effect(1).expect("chain effect 1");
+    assert_eq!(
+        lightning.texture,
+        "Textures\\SpellChainEffects\\Lightning.blp"
+    );
+    assert_eq!(
+        (
+            lightning.avg_seg_len,
+            lightning.half_width,
+            lightning.noise_scale,
+            lightning.scroll_period_s
+        ),
+        (2.78, 0.5, 0.04, 1.0)
+    );
+    assert_eq!(
+        (lightning.bolt_life_ms, lightning.bolt_stagger_ms),
+        (1000, 300)
+    );
+    let drain = cat.chain_effect(8).expect("chain effect 8");
+    assert_eq!(drain.texture, "Textures\\SpellChainEffects\\SoulBeam.blp");
+    assert_eq!(drain.scroll_period_s, -2.0, "-0.5 in 1.12.1");
+    let new = cat.chain_effect(16).expect("a 2.x row 1.12.1 lacks");
+    assert_eq!((new.bolt_life_ms, new.bolt_stagger_ms), (164, 0));
+    assert!(cat.chain_effect(0).is_none());
+}

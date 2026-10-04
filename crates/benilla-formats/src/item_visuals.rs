@@ -10,11 +10,11 @@
 
 use std::collections::HashMap;
 
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at, unread};
 
 const ITEM_VISUALS: &str = "DBFilesClient\\ItemVisuals.dbc";
 const ITEM_VISUAL_EFFECTS: &str = "DBFilesClient\\ItemVisualEffects.dbc";
@@ -152,21 +152,21 @@ pub(crate) fn item_visual_effects_schema() -> Schema {
 
 /// `SpellItemEnchantment.dbc`: 24 fields, 96-byte records. The reference reads the enUS name at
 /// `+0x34` (field 13, `0x4960d0`), the visual at `+0x58` (field 22, `0x5d9be1`) and `Flags` at
-/// `+0x5c` (field 23).
-pub(crate) fn spell_item_enchantment_schema() -> Schema {
-    let mut s = Schema::new("SpellItemEnchantment");
+/// `+0x5c` (field 23). 2.4.3 has 34: the name is 17 slots wide, so the visual and the flags sit
+/// eight slots later, and two columns follow (a source item and a condition id, not read). The
+/// flag word keeps its low three bits on every shared row and gains bit 3 on 47 of them.
+pub(crate) fn spell_item_enchantment_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("SpellItemEnchantment");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     for group in ["Effect", "EffectPointsMin", "EffectPointsMax", "EffectArg"] {
-        for i in 0..3 {
-            s.add_field(SchemaField::new(format!("{group}{i}"), FieldType::UInt32));
-        }
+        s.add_field(SchemaField::new_array(group, FieldType::UInt32, 3));
     }
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s.add_field(SchemaField::new("ItemVisual", FieldType::UInt32));
     s.add_field(SchemaField::new("Flags", FieldType::UInt32));
+    if layout.is_tbc() {
+        unread(&mut s, "SourceAndCondition", 2);
+    }
     s
 }
 
@@ -208,24 +208,22 @@ pub fn load_enchant_catalog(chain: &mut Chain) -> Result<EnchantCatalog> {
     let bytes = chain
         .read_file(SPELL_ITEM_ENCHANTMENT)
         .with_context(|| format!("reading {SPELL_ITEM_ENCHANTMENT}"))?;
-    let rs = parse(
-        &bytes,
-        spell_item_enchantment_schema(),
-        "SpellItemEnchantment",
-    )?;
+    let schema = spell_item_enchantment_schema(chain.dbc_layout());
+    let [name_slot, visual_slot, flags_slot] = slots(&schema, ["Name", "ItemVisual", "Flags"])?;
+    let rs = parse(&bytes, schema, "SpellItemEnchantment")?;
     let mut visuals = HashMap::new();
     let mut names = HashMap::new();
     let mut flags = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
         // Every row, `Flags == 0` included: the keys are the row set.
-        flags.insert(id, u32_at(r, 23).unwrap_or(0));
-        let visual = u32_at(r, 22).unwrap_or(0) as i32;
+        flags.insert(id, u32_at(r, flags_slot).unwrap_or(0));
+        let visual = u32_at(r, visual_slot).unwrap_or(0) as i32;
         if visual != 0 {
             visuals.insert(id, visual);
         }
         // `str_at` drops an empty name.
-        if let Some(name) = str_at(&rs, r, 13) {
+        if let Some(name) = str_at(&rs, r, name_slot) {
             names.insert(id, name);
         }
     }
@@ -435,5 +433,41 @@ mod tests {
 
         // The row set the confirms gate on.
         assert!(e.has_row(2564) && e.has_row(1) && !e.has_row(999_999));
+    }
+
+    /// 2.4.3's enchant table: the visual and flags sit eight slots later. The bind and hide bits
+    /// keep their rows (1.12.1's low three flag bits survive on every shared row), the glow
+    /// follows its column, and a name 2.4.3 reworded reads through the wide string.
+    #[test]
+    fn the_2_4_3_enchants_read_names_visuals_and_flags() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let e = load_enchant_catalog(&mut chain).expect("load SpellItemEnchantment");
+        assert_eq!(e.name_count(), 2042);
+        assert_eq!(e.visual_count(), 163);
+        assert_eq!(e.name(1), Some("Rockbiter 3"));
+        assert_eq!(e.name(2564), Some("+15 Agility"), "'Agility +15' in 1.12.1");
+        assert_eq!(e.name(2673), Some("Mongoose"));
+        assert_eq!(e.visual(1900), Some(103), "Crusader's glow");
+        assert_eq!(e.visual(2488), None);
+        for id in [1u32, 7, 283, 2488, 2631, 2632] {
+            assert!(e.binds_the_item(id), "{id}");
+        }
+        for id in [1900u32, 2564, 3225] {
+            assert!(!e.binds_the_item(id), "{id}");
+        }
+        // Bit 1: the 1.12.1 twelve and five more rows 2.x added.
+        let hidden: std::collections::BTreeSet<u32> =
+            (0..4000).filter(|&id| e.tooltip_hides_name(id)).collect();
+        assert_eq!(
+            hidden,
+            [
+                124, 285, 303, 543, 563, 564, 1683, 1783, 1803, 1823, 1824, 1825, 2637, 2638, 2639,
+                2645, 3014
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert!(e.has_row(3225) && !e.has_row(999_999));
     }
 }

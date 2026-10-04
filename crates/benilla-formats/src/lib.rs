@@ -618,6 +618,10 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
         ),
         ("HelmetGeosetVisData.dbc", characters::helmet_vis_schema),
         ("ItemDisplayInfo.dbc", items::item_display_info_schema_for),
+        (
+            "SpellItemEnchantment.dbc",
+            item_visuals::spell_item_enchantment_schema,
+        ),
     ] {
         if base.eq_ignore_ascii_case(name) {
             return Some(ctor(DbcLayout::VANILLA_1_12_1));
@@ -633,10 +637,6 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
         (
             "ItemVisualEffects.dbc",
             item_visuals::item_visual_effects_schema,
-        ),
-        (
-            "SpellItemEnchantment.dbc",
-            item_visuals::spell_item_enchantment_schema,
         ),
         ("AreaTrigger.dbc", area_trigger::area_trigger_schema),
     ] {
@@ -904,12 +904,6 @@ mod tests {
         "LightSkybox",
         "Material",
         "Spell",
-        "SpellChainEffects",
-        "SpellDispelType",
-        "SpellItemEnchantment",
-        "SpellShapeshiftForm",
-        "SpellVisual",
-        "SpellVisualKit",
         "TaxiPathNode",
         "WorldMapArea",
     ];
@@ -936,6 +930,10 @@ mod tests {
                     field_count,
                     record_size,
                 } => header.field_count == *field_count && header.record_size == *record_size,
+                schemas::Shape::HandByBuild(shape) => {
+                    let (field_count, record_size) = shape(layout);
+                    header.field_count == field_count && header.record_size == record_size
+                }
             };
             if !fits {
                 misfits.insert(table.name);

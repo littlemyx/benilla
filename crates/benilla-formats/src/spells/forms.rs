@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{i32_at, parse, str_at, u32_at};
+use crate::dbc::{i32_at, parse, slots, str_at, u32_at, unread};
 
 const SHAPESHIFT_FORM: &str = "DBFilesClient\\SpellShapeshiftForm.dbc";
 
@@ -45,14 +45,22 @@ impl ShapeshiftForm {
     }
 }
 
-pub(crate) fn shapeshift_form_schema() -> Schema {
-    let mut schema = Schema::new("SpellShapeshiftForm");
-    for i in 0..14 {
-        match i {
-            // Column 2: the enUS slot of the name locstring (2..10, eight locales and a flag word).
-            2 => schema.add_field(SchemaField::new("Name", FieldType::String)),
-            _ => schema.add_field(SchemaField::new(format!("F{i}"), FieldType::UInt32)),
-        }
+/// 14 fields in 1.12.1; 2.4.3 has 35: the name is 17 slots wide, so the flags, creature type and
+/// attack icon sit eight slots later, and 13 columns follow the icon (a round time, four display
+/// ids and eight preset spells, not read). Position by the emulator's format and the definitions
+/// project's column list; the measured match is high for the bonus bar and icon and lower for
+/// the flags and creature type, whose values 2.4.3 changed (a stance bit on Tree of Life, a new
+/// flag bit on the druid forms).
+pub(crate) fn shapeshift_form_schema(layout: DbcLayout) -> Schema {
+    let mut schema = layout.schema("SpellShapeshiftForm");
+    schema.add_field(SchemaField::new("ID", FieldType::UInt32));
+    schema.add_field(SchemaField::new("BonusBar", FieldType::UInt32));
+    schema.add_field(SchemaField::new("Name", FieldType::LocString));
+    schema.add_field(SchemaField::new("Flags", FieldType::UInt32));
+    schema.add_field(SchemaField::new("CreatureType", FieldType::UInt32));
+    schema.add_field(SchemaField::new("AttackIcon", FieldType::UInt32));
+    if layout.is_tbc() {
+        unread(&mut schema, "Appended", 13);
     }
     schema
 }
@@ -64,7 +72,12 @@ pub fn load_shapeshift_forms(chain: &mut Chain) -> Result<HashMap<u32, Shapeshif
     let bytes = chain
         .read_file(SHAPESHIFT_FORM)
         .context("reading SpellShapeshiftForm.dbc")?;
-    let set = parse(&bytes, shapeshift_form_schema(), "SpellShapeshiftForm.dbc")?;
+    let schema = shapeshift_form_schema(chain.dbc_layout());
+    let [bar_slot, name_slot, flags_slot, type_slot, icon_slot] = slots(
+        &schema,
+        ["BonusBar", "Name", "Flags", "CreatureType", "AttackIcon"],
+    )?;
+    let set = parse(&bytes, schema, "SpellShapeshiftForm.dbc")?;
     // AttackIconID resolves through SpellIcon.dbc like a spell's own icon (`0x4e68af`-`0x4e68da`).
     let icons = crate::dbc::load_spell_icon_map(chain)?;
     let mut map = HashMap::new();
@@ -73,11 +86,11 @@ pub fn load_shapeshift_forms(chain: &mut Chain) -> Result<HashMap<u32, Shapeshif
             map.insert(
                 id,
                 ShapeshiftForm {
-                    bonus_bar: u32_at(r, 1).unwrap_or(0),
-                    name: str_at(&set, r, 2).unwrap_or_default(),
-                    flags: u32_at(r, 11).unwrap_or(0),
-                    creature_type: i32_at(r, 12).unwrap_or(0),
-                    attack_icon: u32_at(r, 13)
+                    bonus_bar: u32_at(r, bar_slot).unwrap_or(0),
+                    name: str_at(&set, r, name_slot).unwrap_or_default(),
+                    flags: u32_at(r, flags_slot).unwrap_or(0),
+                    creature_type: i32_at(r, type_slot).unwrap_or(0),
+                    attack_icon: u32_at(r, icon_slot)
                         .filter(|&i| i != 0)
                         .and_then(|i| icons.get(&i).cloned()),
                 },
@@ -85,4 +98,63 @@ pub fn load_shapeshift_forms(chain: &mut Chain) -> Result<HashMap<u32, Shapeshif
         }
     }
     Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 2.4.3: the flags, creature type and icon sit eight slots later; Tree of Life is a stance
+    /// there, and the flight forms are new.
+    #[test]
+    fn the_2_4_3_forms_read_through_the_shifted_columns() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let forms = load_shapeshift_forms(&mut chain).expect("load SpellShapeshiftForm");
+        assert_eq!(forms.len(), 32);
+
+        let cat = &forms[&1];
+        assert_eq!(
+            (
+                cat.name.as_str(),
+                cat.bonus_bar,
+                cat.flags,
+                cat.creature_type
+            ),
+            ("Cat Form", 1, 120, 1)
+        );
+        assert!(
+            cat.attack_icon.is_some(),
+            "the Attack action shows the cat's icon"
+        );
+        let tree = &forms[&2];
+        assert_eq!(
+            (
+                tree.name.as_str(),
+                tree.bonus_bar,
+                tree.flags,
+                tree.creature_type
+            ),
+            ("Tree of Life Form", 2, 81, 4)
+        );
+        assert!(tree.is_stance(), "Tree of Life is a stance in 2.4.3");
+        let flight = &forms[&29];
+        assert_eq!(
+            (flight.name.as_str(), flight.flags, flight.creature_type),
+            ("Flight Form", 8, 1)
+        );
+        assert_eq!(forms[&27].name, "Flight Form, Epic");
+        let moonkin = &forms[&31];
+        assert_eq!(
+            (moonkin.bonus_bar, moonkin.flags, moonkin.creature_type),
+            (4, 65, -1)
+        );
+        // A 1.12.1 stance through the same columns: stance, not cancelable.
+        let battle = &forms[&17];
+        assert_eq!(
+            (battle.bonus_bar, battle.flags, battle.creature_type),
+            (1, 7, -1)
+        );
+        assert!(battle.is_stance() && !battle.cancelable());
+    }
 }
