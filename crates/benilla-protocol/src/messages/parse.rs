@@ -167,9 +167,16 @@ const fn is_movement_relay(o: u16) -> bool {
 ///
 /// Retail sends the minimal form, 12 records of `{2, 1, 0, 0u32, 0}`. A truncated record ends the
 /// walk and keeps the whole records before it, so `statuses[i]` is always record i's.
-fn read_addon_info(r: &mut &[u8]) -> Vec<u8> {
+///
+/// With `banned_tail` (2.4.3), a final four zero bytes are the `u32` banned-addon count the
+/// wow_messages layout puts after the records; cmangos-tbc omits it, so both forms are read.
+pub(super) fn read_addon_info(r: &mut &[u8], banned_tail: bool) -> Vec<u8> {
     let mut statuses = Vec::new();
     while !r.is_empty() {
+        if banned_tail && *r == [0u8; 4] {
+            *r = &[];
+            break;
+        }
         let Ok(status) = read_u8(r) else { break };
         let Ok(info_provided) = read_u8(r) else { break };
         if info_provided != 0 {
@@ -221,10 +228,60 @@ pub fn parse_server_with_tail_as(
     opcode: u16,
     body: &[u8],
 ) -> io::Result<(ServerPacket, usize)> {
+    parse_server_with_tail_in(Dialect::Vanilla(fields), opcode, body)
+}
+
+/// How a build's server packets are read: 1.12.1 through its update-field table and the full
+/// dispatch, 2.4.3 through [`super::tbc::parse_tbc_body`]'s allow-list alone.
+#[derive(Clone, Copy)]
+enum Dialect {
+    Vanilla(&'static update_object::FieldTable),
+    Tbc,
+}
+
+/// [`parse_server_with_tail`] for `build`: `fields` is its update-field table, which only a build
+/// that has one reads (`None` for 2.4.3, whose parser never takes a table).
+pub fn parse_server_with_tail_for(
+    build: &benilla_build::ClientBuild,
+    fields: Option<&'static update_object::FieldTable>,
+    opcode: u16,
+    body: &[u8],
+) -> io::Result<(ServerPacket, usize)> {
+    let dialect = match (build.expansion, fields) {
+        (benilla_build::Expansion::Tbc, _) => Dialect::Tbc,
+        (_, Some(fields)) => Dialect::Vanilla(fields),
+        (_, None) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("no update-field table for build {}", build.build),
+            ))
+        }
+    };
+    parse_server_with_tail_in(dialect, opcode, body)
+}
+
+/// [`parse_server_for`] without the unread-tail count.
+pub fn parse_server_for(
+    build: &benilla_build::ClientBuild,
+    fields: Option<&'static update_object::FieldTable>,
+    opcode: u16,
+    body: &[u8],
+) -> io::Result<ServerPacket> {
+    parse_server_with_tail_for(build, fields, opcode, body).map(|(packet, _)| packet)
+}
+
+fn parse_server_with_tail_in(
+    dialect: Dialect,
+    opcode: u16,
+    body: &[u8],
+) -> io::Result<(ServerPacket, usize)> {
     let mut r = body;
     // The inflated leftover of the compressed update object, the one arm with a second stream.
     let mut inner_tail = 0;
-    let packet = parse_server_body(fields, opcode, &mut r, &mut inner_tail)?;
+    let packet = match dialect {
+        Dialect::Vanilla(fields) => parse_server_body(fields, opcode, &mut r, &mut inner_tail)?,
+        Dialect::Tbc => super::tbc::parse_tbc_body(opcode, &mut r)?,
+    };
     let tail = match packet {
         ServerPacket::Other { .. } => 0,
         _ => r.len() + inner_tail,
@@ -264,6 +321,7 @@ fn parse_server_body(
                 result,
                 queue_position: queued.then(|| read_u32_le(&mut r).ok()).flatten(),
                 billing_time_rested,
+                expansion: None,
             }
         }
         opcode::SMSG_CHAR_ENUM => {
@@ -1576,7 +1634,7 @@ fn parse_server_body(
             }
         }
         opcode::SMSG_ADDON_INFO => ServerPacket::AddonInfo {
-            statuses: read_addon_info(&mut r),
+            statuses: read_addon_info(&mut r, false),
         },
         other => ServerPacket::Other { opcode: other },
     };

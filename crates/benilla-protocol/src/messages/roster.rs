@@ -88,6 +88,17 @@ pub struct Character {
 
 impl Character {
     pub(super) fn read(r: &mut impl Read) -> io::Result<Self> {
+        Self::read_with(r, false)
+    }
+
+    /// The 2.4.3 entry: 20 equipment slots of `u32` display id, `u8` inventory type and `u32`
+    /// enchant aura id (two sources), the 20th being the first bag, which 1.12.1 writes after
+    /// the 19 slots. The enchant aura and the bag have no field and are dropped.
+    pub(super) fn read_tbc(r: &mut impl Read) -> io::Result<Self> {
+        Self::read_with(r, true)
+    }
+
+    fn read_with(r: &mut impl Read, tbc: bool) -> io::Result<Self> {
         let guid = read_u64_le(r)?;
         let name = read_cstring(r)?;
         let race = read_u8(r)?;
@@ -112,9 +123,15 @@ impl Character {
         for slot in &mut equipment {
             slot.display_id = read_u32_le(r)?;
             slot.inventory_type = read_u8(r)?;
+            if tbc {
+                let _enchant_aura_id = read_u32_le(r)?;
+            }
         }
         let _first_bag_display_id = read_u32_le(r)?;
         let _first_bag_inventory_id = read_u8(r)?;
+        if tbc {
+            let _first_bag_enchant_aura_id = read_u32_le(r)?;
+        }
         Ok(Self {
             guid,
             name,

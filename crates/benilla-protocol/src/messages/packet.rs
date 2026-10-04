@@ -70,6 +70,9 @@ pub enum ServerPacket {
         /// Rested billing minutes (`PlayerFrame.lua:246` divides by 60), returned unconverted by
         /// `GetBillingTimeRested()` (`0x48ec50`); `None` on a body too short for the group.
         billing_time_rested: Option<u32>,
+        /// The account's expansion byte after the billing group of a 2.4.3 `AUTH_OK` (`0` classic,
+        /// `1` Burning Crusade; two sources); `None` in 1.12.1, whose body has none.
+        expansion: Option<u8>,
     },
     CharEnum {
         characters: Vec<Character>,

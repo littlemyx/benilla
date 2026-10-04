@@ -71,8 +71,13 @@ pub struct WorldSession {
     tutorial_flags: Option<Vec<u8>>,
     /// `SMSG_ADDON_INFO`'s per-record status bytes in order; `None` until the server answers.
     addon_info: Option<Vec<u8>>,
-    /// The build's update-field indices, which every update object is read through.
-    fields: &'static FieldTable,
+    build: benilla_build::ClientBuild,
+    /// The build's update-field indices, which every update object is read through; `None` for a
+    /// build without a table (2.4.3), whose parser never takes one.
+    fields: Option<&'static FieldTable>,
+    /// The expansion byte of a 2.4.3 `AUTH_OK` (`0` classic, `1` Burning Crusade); `None` before
+    /// it and in 1.12.1.
+    expansion: Option<u8>,
 }
 
 impl WorldSession {
@@ -122,17 +127,21 @@ impl WorldSession {
             .set_read_timeout(Some(HANDSHAKE_READ_TIMEOUT))
             .context("setting handshake read timeout")?;
 
-        let server_seed = match recv_packet(&mut stream, None, messages::field_table(build))? {
-            ServerPacket::AuthChallenge { server_seed } => server_seed,
-            other => bail!("expected SMSG_AUTH_CHALLENGE, got {}", other.name()),
-        };
+        let server_seed =
+            match recv_packet(&mut stream, None, build, messages::build_field_table(build))? {
+                ServerPacket::AuthChallenge { server_seed } => server_seed,
+                other => bail!("expected SMSG_AUTH_CHALLENGE, got {}", other.name()),
+            };
 
         let username_n =
             NormalizedString::new(username).map_err(|e| anyhow!("invalid username: {e}"))?;
         let seed = ProofSeed::new();
         let client_seed = seed.seed();
-        let (client_proof, crypto) =
-            seed.into_client_header_crypto(&username_n, session_key, server_seed);
+        let (client_proof, crypto) = if matches!(build.expansion, benilla_build::Expansion::Tbc) {
+            seed.into_client_header_crypto_tbc(&username_n, session_key, server_seed)
+        } else {
+            seed.into_client_header_crypto(&username_n, session_key, server_seed)
+        };
 
         // Sent plain; header encryption starts right after. The addon block is required (cmangos
         // kicks a zero-size one); `STOCK_SECURE_ADDONS` is what a stock 1.12.1 install reports.
@@ -154,7 +163,9 @@ impl WorldSession {
             billing_time_rested: 0,
             tutorial_flags: None,
             addon_info: None,
-            fields: messages::field_table(build),
+            build: *build,
+            fields: messages::build_field_table(build),
+            expansion: None,
         };
 
         // AUTH_RESPONSE is not always first, so others are skipped; Warden data ends the connect.
@@ -163,8 +174,10 @@ impl WorldSession {
                 ServerPacket::AuthResponse {
                     result,
                     billing_time_rested,
+                    expansion,
                     ..
                 } if result == messages::AUTH_OK => {
+                    session.expansion = expansion;
                     // The reference keeps the last AUTH_RESPONSE's billing group.
                     session.billing_time_rested = billing_time_rested.unwrap_or(0);
                     break;
@@ -209,6 +222,12 @@ impl WorldSession {
         self.billing_time_rested
     }
 
+    /// The expansion byte the admitting 2.4.3 `SMSG_AUTH_RESPONSE` carried (`0` classic, `1`
+    /// Burning Crusade); `None` in 1.12.1, whose response has none.
+    pub fn expansion(&self) -> Option<u8> {
+        self.expansion
+    }
+
     /// The tutorial bank captured during the login handshake, if any.
     pub fn take_tutorial_flags(&mut self) -> Option<Vec<u8>> {
         self.tutorial_flags.take()
@@ -223,7 +242,12 @@ impl WorldSession {
 
     /// Read + decrypt + parse one server packet.
     pub fn recv(&mut self) -> Result<ServerPacket> {
-        let packet = recv_packet(&mut self.stream, Some(self.crypto.decrypter()), self.fields)?;
+        let packet = recv_packet(
+            &mut self.stream,
+            Some(self.crypto.decrypter()),
+            &self.build,
+            self.fields,
+        )?;
         // `SMSG_ADDON_INFO` can reach any of the handshake's read loops, so it is caught here.
         if let ServerPacket::AddonInfo { statuses } = &packet {
             self.addon_info = Some(statuses.clone());
@@ -792,6 +816,7 @@ impl WorldSession {
             WorldReader {
                 stream: read_stream,
                 decrypter,
+                build: self.build,
                 fields: self.fields,
             },
             WorldWriter {

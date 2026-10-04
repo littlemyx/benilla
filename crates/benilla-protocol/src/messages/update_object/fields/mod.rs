@@ -611,7 +611,7 @@ mod player;
 mod table;
 mod unit;
 
-pub use table::{field_table, FieldTable, FIELDS_5875};
+pub use table::{build_field_table, field_table, FieldTable, FIELDS_5875};
 pub use unit::{power_display_scale, OwnerFallback};
 
 #[cfg(test)]
