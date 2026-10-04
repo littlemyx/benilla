@@ -1,6 +1,6 @@
 //! The 1.12 world-packet header obfuscation. After `CMSG_AUTH_SESSION` every header, not the body,
 //! runs through a byte cipher keyed by the 40-byte session key, `i` cycling over the key and
-//! `last_c` the previous ciphertext byte, both starting at 0:
+//! `last_c` the previous ciphertext byte, both starting at 0 (the 2.4.3 key is [`crate::tbc_header`]'s):
 //!
 //! ```text
 //! encrypt: c = (p ^ key[i]) + last_c ;  decrypt: p = (c - last_c) ^ key[i]
@@ -44,6 +44,8 @@ fn world_server_proof(
 #[derive(Debug, Clone)]
 pub struct EncrypterHalf {
     session_key: [u8; SESSION_KEY_LENGTH],
+    /// How many leading bytes of `session_key` are the key: 40 in 1.12, 20 in 2.4.3.
+    key_len: u8,
     index: u8,
     previous: u8,
 }
@@ -54,7 +56,7 @@ impl EncrypterHalf {
         for byte in data {
             let encrypted =
                 (*byte ^ self.session_key[self.index as usize]).wrapping_add(self.previous);
-            self.index = (self.index + 1) % SESSION_KEY_LENGTH as u8;
+            self.index = (self.index + 1) % self.key_len;
             *byte = encrypted;
             self.previous = encrypted;
         }
@@ -84,6 +86,8 @@ impl EncrypterHalf {
 #[derive(Debug, Clone)]
 pub struct DecrypterHalf {
     session_key: [u8; SESSION_KEY_LENGTH],
+    /// How many leading bytes of `session_key` are the key: 40 in 1.12, 20 in 2.4.3.
+    key_len: u8,
     index: u8,
     previous: u8,
 }
@@ -95,7 +99,7 @@ impl DecrypterHalf {
             let encrypted = *byte;
             let decrypted =
                 encrypted.wrapping_sub(self.previous) ^ self.session_key[self.index as usize];
-            self.index = (self.index + 1) % SESSION_KEY_LENGTH as u8;
+            self.index = (self.index + 1) % self.key_len;
             self.previous = encrypted;
             *byte = decrypted;
         }
@@ -155,15 +159,35 @@ impl HeaderCrypto {
         Self::new(session_key)
     }
 
+    /// The 2.4.3 cipher from a session key alone: the key is [`crate::tbc_header`]'s derivation.
+    pub fn from_session_key_tbc(session_key: [u8; SESSION_KEY_LENGTH]) -> Self {
+        Self::tbc(&session_key)
+    }
+
+    fn tbc(session_key: &[u8; SESSION_KEY_LENGTH]) -> Self {
+        let derived = crate::tbc_header::derive_header_key(session_key);
+        let mut key = [0u8; SESSION_KEY_LENGTH];
+        key[..derived.len()].copy_from_slice(&derived);
+        Self::with_key(key, derived.len())
+    }
+
     fn new(session_key: [u8; SESSION_KEY_LENGTH]) -> Self {
+        Self::with_key(session_key, SESSION_KEY_LENGTH)
+    }
+
+    /// The cipher over the first `key_len` (1..=40) bytes of `key`.
+    pub(crate) fn with_key(key: [u8; SESSION_KEY_LENGTH], key_len: usize) -> Self {
+        let key_len = key_len.clamp(1, SESSION_KEY_LENGTH) as u8;
         Self {
             encrypt: EncrypterHalf {
-                session_key,
+                session_key: key,
+                key_len,
                 index: 0,
                 previous: 0,
             },
             decrypt: DecrypterHalf {
-                session_key,
+                session_key: key,
+                key_len,
                 index: 0,
                 previous: 0,
             },
@@ -199,5 +223,16 @@ impl ProofSeed {
     ) -> ([u8; 20], HeaderCrypto) {
         let proof = world_server_proof(username, &session_key, server_seed, self.seed);
         (proof, HeaderCrypto::new(session_key))
+    }
+
+    /// [`Self::into_client_header_crypto`] for 2.4.3: the same proof, the derived 20-byte key.
+    pub fn into_client_header_crypto_tbc(
+        self,
+        username: &NormalizedString,
+        session_key: [u8; SESSION_KEY_LENGTH],
+        server_seed: u32,
+    ) -> ([u8; 20], HeaderCrypto) {
+        let proof = world_server_proof(username, &session_key, server_seed, self.seed);
+        (proof, HeaderCrypto::tbc(&session_key))
     }
 }

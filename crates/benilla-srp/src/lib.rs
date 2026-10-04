@@ -19,6 +19,7 @@ use num_bigint::BigInt;
 use rand::{thread_rng, RngCore};
 use sha1::{Digest, Sha1};
 
+pub mod tbc_header;
 pub mod vanilla_header;
 
 pub use vanilla_header::{DecrypterHalf, EncrypterHalf, HeaderCrypto, ProofSeed};
