@@ -86,19 +86,43 @@ pub struct Character {
     pub pet_family: u32,
 }
 
+/// One equipment slot as the wire carries it: 1.12.1 has no enchant field, 2.4.3 adds a `u32`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharRecordSlot {
+    pub display_id: u32,
+    pub inventory_type: u8,
+    /// `SpellItemEnchantment.dbc` aura id of the visible enchant (2.4.3 only; 0 for none).
+    pub enchant_aura_id: Option<u32>,
+}
+
+/// A roster entry with the fields [`Character`] does not keep, for probes that print the record.
+#[derive(Debug, Clone)]
+pub struct CharRecord {
+    pub character: Character,
+    pub guild_id: u32,
+    pub first_login: u8,
+    /// The 19 equipment slots then the first bag: 20 entries in both builds' records.
+    pub slots: Vec<CharRecordSlot>,
+}
+
 impl Character {
     pub(super) fn read(r: &mut impl Read) -> io::Result<Self> {
-        Self::read_with(r, false)
+        Ok(Self::read_with(r, false)?.character)
     }
 
     /// The 2.4.3 entry: 20 equipment slots of `u32` display id, `u8` inventory type and `u32`
     /// enchant aura id (two sources), the 20th being the first bag, which 1.12.1 writes after
     /// the 19 slots. The enchant aura and the bag have no field and are dropped.
     pub(super) fn read_tbc(r: &mut impl Read) -> io::Result<Self> {
-        Self::read_with(r, true)
+        Ok(Self::read_with(r, true)?.character)
     }
 
-    fn read_with(r: &mut impl Read, tbc: bool) -> io::Result<Self> {
+    /// One entry with every field the wire carries, the ones [`Character`] drops included.
+    pub(super) fn read_record(r: &mut impl Read, tbc: bool) -> io::Result<CharRecord> {
+        Self::read_with(r, tbc)
+    }
+
+    fn read_with(r: &mut impl Read, tbc: bool) -> io::Result<CharRecord> {
         let guid = read_u64_le(r)?;
         let name = read_cstring(r)?;
         let race = read_u8(r)?;
@@ -113,26 +137,33 @@ impl Character {
         let zone = read_u32_le(r)?;
         let map = read_u32_le(r)?;
         let position = Vector3d::read(r)?;
-        let _guild_id = read_u32_le(r)?;
+        let guild_id = read_u32_le(r)?;
         let flags = read_u32_le(r)?;
-        let _first_login = read_u8(r)?;
+        let first_login = read_u8(r)?;
         let pet_display_id = read_u32_le(r)?;
         let pet_level = read_u32_le(r)?;
         let pet_family = read_u32_le(r)?;
         let mut equipment = [CharEnumItem::default(); 19];
+        let mut slots = Vec::with_capacity(20);
         for slot in &mut equipment {
             slot.display_id = read_u32_le(r)?;
             slot.inventory_type = read_u8(r)?;
-            if tbc {
-                let _enchant_aura_id = read_u32_le(r)?;
-            }
+            let enchant_aura_id = if tbc { Some(read_u32_le(r)?) } else { None };
+            slots.push(CharRecordSlot {
+                display_id: slot.display_id,
+                inventory_type: slot.inventory_type,
+                enchant_aura_id,
+            });
         }
-        let _first_bag_display_id = read_u32_le(r)?;
-        let _first_bag_inventory_id = read_u8(r)?;
-        if tbc {
-            let _first_bag_enchant_aura_id = read_u32_le(r)?;
-        }
-        Ok(Self {
+        let first_bag_display_id = read_u32_le(r)?;
+        let first_bag_inventory_type = read_u8(r)?;
+        let first_bag_enchant = if tbc { Some(read_u32_le(r)?) } else { None };
+        slots.push(CharRecordSlot {
+            display_id: first_bag_display_id,
+            inventory_type: first_bag_inventory_type,
+            enchant_aura_id: first_bag_enchant,
+        });
+        let character = Self {
             guid,
             name,
             race,
@@ -152,6 +183,12 @@ impl Character {
             pet_display_id,
             pet_level,
             pet_family,
+        };
+        Ok(CharRecord {
+            character,
+            guild_id,
+            first_login,
+            slots,
         })
     }
 }

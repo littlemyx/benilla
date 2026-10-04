@@ -51,6 +51,7 @@ mod summon;
 mod tabard;
 mod taxi;
 mod tbc;
+pub use tbc::{char_create_result, read_char_enum_records};
 mod trade;
 mod trainer;
 mod tutorial;
@@ -213,10 +214,10 @@ pub use reputation::{
     WATCHED_FACTION_NONE,
 };
 pub use roster::{
-    CharCreateReq, CharEnumItem, Character, CHARACTER_FLAG_GHOST, CHARACTER_FLAG_HIDE_CLOAK,
-    CHARACTER_FLAG_HIDE_HELM, CHARACTER_FLAG_RENAME, CHAR_CREATE_NAME_IN_USE,
-    CHAR_CREATE_SERVER_LIMIT, CHAR_CREATE_SUCCESS, CHAR_DELETE_SUCCESS, CLASS_WARRIOR, GENDER_MALE,
-    RACE_HUMAN,
+    CharCreateReq, CharEnumItem, CharRecord, CharRecordSlot, Character, CHARACTER_FLAG_GHOST,
+    CHARACTER_FLAG_HIDE_CLOAK, CHARACTER_FLAG_HIDE_HELM, CHARACTER_FLAG_RENAME,
+    CHAR_CREATE_NAME_IN_USE, CHAR_CREATE_SERVER_LIMIT, CHAR_CREATE_SUCCESS, CHAR_DELETE_SUCCESS,
+    CLASS_WARRIOR, GENDER_MALE, RACE_HUMAN,
 };
 pub use skills::unlearn_skill;
 pub use social::{

@@ -32,6 +32,16 @@ pub(super) fn recv_packet(
     build: &ClientBuild,
     fields: Option<&'static FieldTable>,
 ) -> Result<ServerPacket> {
+    recv_packet_raw(stream, decrypter, build, fields).map(|(packet, _, _)| packet)
+}
+
+/// [`recv_packet`], also returning the opcode and the undecoded body.
+pub(super) fn recv_packet_raw(
+    stream: &mut TcpStream,
+    decrypter: Option<&mut DecrypterHalf>,
+    build: &ClientBuild,
+    fields: Option<&'static FieldTable>,
+) -> Result<(ServerPacket, u16, Vec<u8>)> {
     let mut header = [0u8; 4];
     stream
         .read_exact(&mut header)
@@ -47,8 +57,9 @@ pub(super) fn recv_packet(
     stream
         .read_exact(&mut body)
         .map_err(|e| anyhow!("reading world body (opcode {opcode:#x}, {body_len} bytes): {e}"))?;
-    messages::parse_server_for(build, fields, opcode, &body)
-        .map_err(|e| anyhow!("parsing opcode {opcode:#x}: {e}"))
+    let packet = messages::parse_server_for(build, fields, opcode, &body)
+        .map_err(|e| anyhow!("parsing opcode {opcode:#x}: {e}"))?;
+    Ok((packet, opcode, body))
 }
 
 /// Write one client packet: a 6-byte header, its size counting opcode and body, then the body.

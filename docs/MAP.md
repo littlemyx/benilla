@@ -209,6 +209,7 @@
 - `WOW_COLUMN_COST` — benilla-assets/src/column_grid.rs
 - `WOW_CPU_CENSUS` — benilla-app/src/perf/census.rs
 - `WOW_CRASH_INJECT` — benilla-app/src/perf/crash_inject.rs
+- `WOW_CREATE` — benilla-protocol/examples/login_probe.rs
 - `WOW_CREATE_SPLINE` — benilla-app/src/net/motion/spline.rs
 - `WOW_CREATE_TEST` — benilla-app/src/portrait/glue_booth.rs, benilla-world/src/bgwin.rs
 - `WOW_CULLDUMP` — benilla-world/src/wmo_portal/mod.rs
