@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use benilla_srp::vanilla_header::{HeaderCrypto, ProofSeed};
 use benilla_srp::{NormalizedString, SESSION_KEY_LENGTH};
 
-use crate::messages::{self, opcode, Character, MoveMode, ServerPacket};
+use crate::messages::{self, opcode, Character, FieldTable, MoveMode, ServerPacket};
 
 use super::movement::{client_uptime_ms, movement_info, MOVEMENT_FLAG_FORWARD};
 use super::reader::WorldReader;
@@ -71,6 +71,8 @@ pub struct WorldSession {
     tutorial_flags: Option<Vec<u8>>,
     /// `SMSG_ADDON_INFO`'s per-record status bytes in order; `None` until the server answers.
     addon_info: Option<Vec<u8>>,
+    /// The build's update-field indices, which every update object is read through.
+    fields: &'static FieldTable,
 }
 
 impl WorldSession {
@@ -120,7 +122,7 @@ impl WorldSession {
             .set_read_timeout(Some(HANDSHAKE_READ_TIMEOUT))
             .context("setting handshake read timeout")?;
 
-        let server_seed = match recv_packet(&mut stream, None)? {
+        let server_seed = match recv_packet(&mut stream, None, messages::field_table(build))? {
             ServerPacket::AuthChallenge { server_seed } => server_seed,
             other => bail!("expected SMSG_AUTH_CHALLENGE, got {}", other.name()),
         };
@@ -152,6 +154,7 @@ impl WorldSession {
             billing_time_rested: 0,
             tutorial_flags: None,
             addon_info: None,
+            fields: messages::field_table(build),
         };
 
         // AUTH_RESPONSE is not always first, so others are skipped; Warden data ends the connect.
@@ -220,7 +223,7 @@ impl WorldSession {
 
     /// Read + decrypt + parse one server packet.
     pub fn recv(&mut self) -> Result<ServerPacket> {
-        let packet = recv_packet(&mut self.stream, Some(self.crypto.decrypter()))?;
+        let packet = recv_packet(&mut self.stream, Some(self.crypto.decrypter()), self.fields)?;
         // `SMSG_ADDON_INFO` can reach any of the handshake's read loops, so it is caught here.
         if let ServerPacket::AddonInfo { statuses } = &packet {
             self.addon_info = Some(statuses.clone());
@@ -789,6 +792,7 @@ impl WorldSession {
             WorldReader {
                 stream: read_stream,
                 decrypter,
+                fields: self.fields,
             },
             WorldWriter {
                 stream: self.stream,

@@ -10,7 +10,7 @@ use std::net::TcpStream;
 use anyhow::{anyhow, Result};
 use benilla_srp::vanilla_header::{DecrypterHalf, EncrypterHalf};
 
-use crate::messages::{self, ServerPacket};
+use crate::messages::{self, FieldTable, ServerPacket};
 
 mod movement;
 mod reader;
@@ -28,6 +28,7 @@ pub const WORLD_PORT: u16 = 8085;
 pub(super) fn recv_packet(
     stream: &mut TcpStream,
     decrypter: Option<&mut DecrypterHalf>,
+    fields: &'static FieldTable,
 ) -> Result<ServerPacket> {
     let mut header = [0u8; 4];
     stream
@@ -44,7 +45,8 @@ pub(super) fn recv_packet(
     stream
         .read_exact(&mut body)
         .map_err(|e| anyhow!("reading world body (opcode {opcode:#x}, {body_len} bytes): {e}"))?;
-    messages::parse_server(opcode, &body).map_err(|e| anyhow!("parsing opcode {opcode:#x}: {e}"))
+    messages::parse_server_as(fields, opcode, &body)
+        .map_err(|e| anyhow!("parsing opcode {opcode:#x}: {e}"))
 }
 
 /// Write one client packet: a 6-byte header, its size counting opcode and body, then the body.

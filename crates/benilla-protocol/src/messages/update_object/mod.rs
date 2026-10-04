@@ -10,10 +10,11 @@ mod movement;
 
 pub use fields::field;
 pub use fields::{
-    power_display_scale, quest_slot_state, CorpseLook, ObjectFields, OwnerFallback,
-    PlayerSkillSlot, QuestLogSlot, UnitAuraSlot, AURA_FLAG_CANCELABLE, AURA_FLAG_EFF_INDEX_MASK,
-    FIELD_PLAYER_SKILL_INFO_1_1, PLAYER_EXPLORED_ZONES_SLOTS, PLAYER_QUEST_LOG_SLOTS,
-    PLAYER_SKILL_SLOTS, UNIT_AURA_POSITIVE_SLOTS, UNIT_AURA_SLOTS,
+    field_table, power_display_scale, quest_slot_state, CorpseLook, FieldTable, ObjectFields,
+    OwnerFallback, PlayerSkillSlot, QuestLogSlot, UnitAuraSlot, AURA_FLAG_CANCELABLE,
+    AURA_FLAG_EFF_INDEX_MASK, FIELDS_5875, FIELD_PLAYER_SKILL_INFO_1_1,
+    PLAYER_EXPLORED_ZONES_SLOTS, PLAYER_QUEST_LOG_SLOTS, PLAYER_SKILL_SLOTS,
+    UNIT_AURA_POSITIVE_SLOTS, UNIT_AURA_SLOTS,
 };
 pub use movement::{CreateSpline, MovementBlock, MoverState, ObjectType};
 
@@ -43,12 +44,12 @@ pub enum Object {
 }
 
 impl Object {
-    fn read(r: &mut impl Read) -> io::Result<Self> {
+    fn read(r: &mut impl Read, table: &'static FieldTable) -> io::Result<Self> {
         let update_type = read_u8(r)?;
         Ok(match update_type {
             0 => Object::Values {
                 guid: read_packed_guid(r)?,
-                mask: ObjectFields::read(r)?,
+                mask: ObjectFields::read(r, table)?,
             },
             1 => Object::Movement {
                 guid: read_packed_guid(r)?,
@@ -60,7 +61,7 @@ impl Object {
                 let movement = MovementBlock::read(r)?;
                 // A create omits zero fields (vmangos `_SetCreateBits`), so absent reads 0, but
                 // only inside this type's own descriptor.
-                let mask = ObjectFields::read(r)?.into_created(object_type);
+                let mask = ObjectFields::read(r, table)?.into_created(object_type);
                 Object::Create {
                     guid,
                     object_type,
@@ -94,12 +95,15 @@ fn read_guid_list(r: &mut impl Read) -> io::Result<Vec<u64>> {
 }
 
 /// Parse an `SMSG_UPDATE_OBJECT` body: the count, the has-transport byte, then each `Object`.
-pub(super) fn read_update_object(r: &mut impl Read) -> io::Result<Vec<Object>> {
+pub(super) fn read_update_object(
+    r: &mut impl Read,
+    table: &'static FieldTable,
+) -> io::Result<Vec<Object>> {
     let amount_of_objects = read_u32_le(r)?;
     let _has_transport = read_u8(r)?;
     let mut objects = Vec::with_capacity(capacity_hint(amount_of_objects, 0xFFFF));
     for _ in 0..amount_of_objects {
-        objects.push(Object::read(r)?);
+        objects.push(Object::read(r, table)?);
     }
     Ok(objects)
 }
