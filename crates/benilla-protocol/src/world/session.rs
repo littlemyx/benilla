@@ -9,7 +9,7 @@ use crate::messages::{self, opcode, Character, FieldTable, MoveMode, ServerPacke
 use super::movement::{client_uptime_ms, movement_info, MOVEMENT_FLAG_FORWARD};
 use super::reader::WorldReader;
 use super::writer::WorldWriter;
-use super::{recv_packet, send_packet};
+use super::{recv_packet, recv_packet_raw, send_packet};
 
 /// Read timeout through `player_login`, where each step awaits one reply.
 const HANDSHAKE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -78,6 +78,11 @@ pub struct WorldSession {
     /// The expansion byte of a 2.4.3 `AUTH_OK` (`0` classic, `1` Burning Crusade); `None` before
     /// it and in 1.12.1.
     expansion: Option<u8>,
+    /// The first byte of the last `SMSG_CHAR_CREATE` body as the server sent it, before any
+    /// renumbering into 1.12.1's `WorldResult`.
+    char_create_code: Option<u8>,
+    /// The last `SMSG_CHAR_ENUM` body, undecoded, for [`Self::last_char_enum_records`].
+    char_enum_body: Option<Vec<u8>>,
 }
 
 impl WorldSession {
@@ -166,6 +171,8 @@ impl WorldSession {
             build: *build,
             fields: messages::build_field_table(build),
             expansion: None,
+            char_create_code: None,
+            char_enum_body: None,
         };
 
         // AUTH_RESPONSE is not always first, so others are skipped; Warden data ends the connect.
@@ -242,17 +249,39 @@ impl WorldSession {
 
     /// Read + decrypt + parse one server packet.
     pub fn recv(&mut self) -> Result<ServerPacket> {
-        let packet = recv_packet(
+        let (packet, op, body) = recv_packet_raw(
             &mut self.stream,
             Some(self.crypto.decrypter()),
             &self.build,
             self.fields,
         )?;
+        match op {
+            opcode::SMSG_CHAR_CREATE => self.char_create_code = body.first().copied(),
+            opcode::SMSG_CHAR_ENUM => self.char_enum_body = Some(body),
+            _ => {}
+        }
         // `SMSG_ADDON_INFO` can reach any of the handshake's read loops, so it is caught here.
         if let ServerPacket::AddonInfo { statuses } = &packet {
             self.addon_info = Some(statuses.clone());
         }
         Ok(packet)
+    }
+
+    /// The `SMSG_CHAR_CREATE` result byte exactly as the server sent it. [`Self::create_character`]
+    /// returns it in 1.12.1's numbering, which 2.4.3's differ from and sometimes do not reach.
+    pub fn last_char_create_code(&self) -> Option<u8> {
+        self.char_create_code
+    }
+
+    /// The last `SMSG_CHAR_ENUM` read in full: guild, first-login flag and every slot with its
+    /// enchant, the fields [`Character`] does not keep.
+    pub fn last_char_enum_records(&self) -> Result<Vec<messages::CharRecord>> {
+        let body = self
+            .char_enum_body
+            .as_deref()
+            .ok_or_else(|| anyhow!("no SMSG_CHAR_ENUM has been read"))?;
+        let tbc = matches!(self.build.expansion, benilla_build::Expansion::Tbc);
+        messages::read_char_enum_records(body, tbc).context("reading the character list")
     }
 
     /// The `SMSG_ADDON_INFO` statuses, taken once; `None` is real, as vmangos stays silent when it

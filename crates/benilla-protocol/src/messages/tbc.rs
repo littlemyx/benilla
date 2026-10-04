@@ -32,6 +32,9 @@ pub(super) fn parse_tbc_body(opcode: u16, cursor: &mut &[u8]) -> io::Result<Serv
             }
             ServerPacket::CharEnum { characters }
         }
+        opcode::SMSG_CHAR_CREATE => ServerPacket::CharCreate {
+            result: char_create_result(read_u8(&mut r)?),
+        },
         opcode::SMSG_ADDON_INFO => ServerPacket::AddonInfo {
             statuses: read_addon_info(&mut r, true),
         },
@@ -39,6 +42,45 @@ pub(super) fn parse_tbc_body(opcode: u16, cursor: &mut &[u8]) -> io::Result<Serv
     };
     *cursor = r;
     Ok(packet)
+}
+
+/// The 1.12.1 `WorldResult` for the 2.4.3 `SMSG_CHAR_CREATE` result `code`, so the typed result
+/// means the same in both builds: 2.4.3 renumbers the enum (one entry is inserted before
+/// `CHAR_LIST_RETRIEVING`), and the app reads 1.12.1 numbers. Two-source tables (cmangos-tbc
+/// `SharedDefines.h`, wow_messages `world_result.wowm`); the 1.12.1 side is wow_messages, since
+/// cmangos-classic marks several of its values unsure. A 2.4.3 code with no 1.12.1 counterpart
+/// becomes the generic refusal of its kind, never another code's meaning: a create refused for the
+/// race's expansion is `CHAR_CREATE_FAILED`, a name no 1.12.1 rule names is `CHAR_NAME_FAILURE`.
+/// The raw code stays available from `WorldSession::last_char_create_code`.
+pub fn char_create_result(code: u8) -> u8 {
+    const CREATE_FAILED: u8 = 0x30;
+    const NAME_FAILURE: u8 = 0x51;
+    match code {
+        // IN_PROGRESS .. ONLY_EXISTING: 2.4.3 is one above 1.12.1.
+        0x2E..=0x38 => code - 1,
+        // CHAR_CREATE_EXPANSION: a 2.4.3 rule (the race needs the expansion).
+        0x39 => CREATE_FAILED,
+        // CHAR_NAME_SUCCESS / FAILURE.
+        0x4A => 0x50,
+        0x4B => NAME_FAILURE,
+        // NO_NAME .. INVALID_SPACE: 1.12.1 numbers them 0x45..=0x4F.
+        0x4C..=0x56 => code - 7,
+        // CONSECUTIVE_SPACES and the three Russian-name rules: not in the 1.12.1 enum.
+        0x57..=0x5A => NAME_FAILURE,
+        _ => CREATE_FAILED,
+    }
+}
+
+/// Parse a `SMSG_CHAR_ENUM` body into full records (guild, first-login flag, every slot with its
+/// enchant), for probes; the dispatch above keeps only [`Character`]. `tbc` picks the 2.4.3 form.
+pub fn read_char_enum_records(body: &[u8], tbc: bool) -> io::Result<Vec<super::CharRecord>> {
+    let mut r = body;
+    let count = read_u8(&mut r)?;
+    let mut records = Vec::with_capacity(capacity_hint(count, 10));
+    for _ in 0..count {
+        records.push(Character::read_record(&mut r, tbc)?);
+    }
+    Ok(records)
 }
 
 /// The billing group and the expansion byte that follow it: `(time rested, expansion)`.
@@ -267,5 +309,104 @@ mod tests {
             .err()
             .expect("an error");
         assert!(err.to_string().contains("5875"), "{err}");
+    }
+
+    #[test]
+    fn a_char_create_result_is_told_in_1_12_1_numbers() {
+        // (2.4.3 code, 1.12.1 code), each pair named by the same enum entry in both tables.
+        let table = [
+            (0x2E, 0x2D), // IN_PROGRESS
+            (0x2F, 0x2E), // SUCCESS
+            (0x30, 0x2F), // ERROR
+            (0x31, 0x30), // FAILED
+            (0x32, 0x31), // NAME_IN_USE
+            (0x33, 0x32), // DISABLED
+            (0x34, 0x33), // PVP_TEAMS_VIOLATION
+            (0x35, 0x34), // SERVER_LIMIT
+            (0x36, 0x35), // ACCOUNT_LIMIT
+            (0x37, 0x36), // SERVER_QUEUE
+            (0x38, 0x37), // ONLY_EXISTING
+            (0x39, 0x30), // EXPANSION has no 1.12.1 entry: the generic failure
+            (0x4A, 0x50), // NAME_SUCCESS
+            (0x4B, 0x51), // NAME_FAILURE
+            (0x4C, 0x45), // NAME_NO_NAME
+            (0x4D, 0x46), // TOO_SHORT
+            (0x4E, 0x47), // TOO_LONG
+            (0x4F, 0x48), // INVALID_CHARACTER
+            (0x50, 0x49), // MIXED_LANGUAGES
+            (0x51, 0x4A), // PROFANE
+            (0x52, 0x4B), // RESERVED
+            (0x53, 0x4C), // INVALID_APOSTROPHE
+            (0x54, 0x4D), // MULTIPLE_APOSTROPHES
+            (0x55, 0x4E), // THREE_CONSECUTIVE
+            (0x56, 0x4F), // INVALID_SPACE
+            (0x57, 0x51), // CONSECUTIVE_SPACES: no 1.12.1 entry
+            (0x58, 0x51), // Russian rules: no 1.12.1 entry
+            (0x59, 0x51),
+            (0x5A, 0x51),
+            (0x00, 0x30), // anything else is the generic failure
+            (0xFF, 0x30),
+        ];
+        for (tbc, vanilla) in table {
+            assert_eq!(char_create_result(tbc), vanilla, "2.4.3 code {tbc:#04x}");
+            match parse(opcode::SMSG_CHAR_CREATE, &[tbc]).unwrap() {
+                ServerPacket::CharCreate { result } => assert_eq!(result, vanilla),
+                other => panic!("{}", other.name()),
+            }
+        }
+        assert_eq!(char_create_result(0x2F), super::super::CHAR_CREATE_SUCCESS);
+        assert_eq!(
+            char_create_result(0x32),
+            super::super::CHAR_CREATE_NAME_IN_USE
+        );
+        assert_eq!(
+            char_create_result(0x35),
+            super::super::CHAR_CREATE_SERVER_LIMIT
+        );
+    }
+
+    #[test]
+    fn the_1_12_1_char_create_result_is_not_renumbered() {
+        let packet = parse_server_for(
+            &VANILLA_1_12_1,
+            Some(&super::super::FIELDS_5875),
+            opcode::SMSG_CHAR_CREATE,
+            &[0x2F],
+        )
+        .unwrap();
+        match packet {
+            ServerPacket::CharCreate { result } => assert_eq!(result, 0x2F),
+            other => panic!("{}", other.name()),
+        }
+    }
+
+    #[test]
+    fn full_records_expose_the_20_slots_with_enchants() {
+        let mut body = vec![1u8];
+        body.extend(tbc_character("Zed", 7));
+        let records = read_char_enum_records(&body, true).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].slots.len(), 20);
+        assert!(records[0].slots.iter().all(|s| s.enchant_aura_id.is_some()));
+        assert_eq!(records[0].character.name, "Zed");
+    }
+
+    #[test]
+    fn the_char_create_request_is_the_same_bytes_in_both_builds() {
+        // The wow_messages test vector (one message tagged for 1.12.1 and 2.4.3).
+        let req = super::super::CharCreateReq {
+            name: "Deadbeef".into(),
+            race: 1,
+            class: 1,
+            gender: 1,
+            skin: 0x08,
+            face: 0x00,
+            hair_style: 0x0e,
+            hair_color: 0x02,
+            facial_hair: 0x04,
+        };
+        let mut want = b"Deadbeef\0".to_vec();
+        want.extend_from_slice(&[1, 1, 1, 0x08, 0, 0x0e, 0x02, 0x04, 0]);
+        assert_eq!(super::super::char_create(&req), want);
     }
 }
