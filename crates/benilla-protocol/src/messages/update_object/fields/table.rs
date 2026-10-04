@@ -17,6 +17,15 @@ macro_rules! field_table {
         }
 
         impl FieldTable {
+            /// The members this build has no checked counterpart of, by name.
+            pub fn absent_members(&self) -> Vec<&'static str> {
+                let mut absent = Vec::new();
+                $(if self.$name == Self::ABSENT {
+                    absent.push(stringify!($name));
+                })*
+                absent
+            }
+
             /// Every member as `(name, index)`, for the table's own tests.
             #[cfg(test)]
             pub(super) fn entries(&self) -> Vec<(&'static str, u16)> {
