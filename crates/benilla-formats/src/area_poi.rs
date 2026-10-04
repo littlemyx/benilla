@@ -2,15 +2,15 @@
 //! battleground nodes) behind the minimap's landmark blips and the world map's icons. Client-only:
 //! vmangos never loads it. 339 rows of 29 columns (116 B): `ID`, `Importance`, `Icon`,
 //! `FactionID`, `Pos[3]`, `ContinentID`, `Flags`, `AreaID`, then `Name` and `Description` as
-//! 9-column loc-strings (enUS, 7 other locales, flags), then `WorldStateID`.
+//! localized strings (9 slots in 1.12.1, 17 in 2.4.3), then `WorldStateID`.
 
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{f32_at, parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const AREA_POI: &str = "DBFilesClient\\AreaPOI.dbc";
 
@@ -66,8 +66,8 @@ impl AreaPoiCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("AreaPOI");
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("AreaPOI");
     for name in ["ID", "Importance", "Icon", "FactionID"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
@@ -75,15 +75,8 @@ pub(crate) fn schema() -> Schema {
     for name in ["ContinentID", "Flags", "AreaID"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
-    for (name_col, flags_col) in [("Name", "NameFlags"), ("Description", "DescriptionFlags")] {
-        s.add_field(SchemaField::new(name_col, FieldType::String)); // enUS (locale 0)
-        s.add_field(SchemaField::new_array(
-            format!("{name_col}OtherLocales"),
-            FieldType::String,
-            7,
-        ));
-        s.add_field(SchemaField::new(flags_col, FieldType::UInt32));
-    }
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
+    s.add_field(SchemaField::new("Description", FieldType::LocString));
     s.add_field(SchemaField::new("WorldStateID", FieldType::UInt32));
     s
 }
@@ -91,7 +84,9 @@ pub(crate) fn schema() -> Schema {
 /// Read `AreaPOI.dbc` off the patch chain into an [`AreaPoiCatalog`].
 pub fn load_area_poi_catalog(chain: &mut Chain) -> Result<AreaPoiCatalog> {
     let bytes = chain.read_file(AREA_POI).context("reading AreaPOI.dbc")?;
-    let rs = parse(&bytes, schema(), "AreaPOI")?;
+    let schema = schema(chain.dbc_layout());
+    let [desc_slot, world_state_slot] = slots(&schema, ["Description", "WorldStateID"])?;
+    let rs = parse(&bytes, schema, "AreaPOI")?;
     let mut rows = Vec::with_capacity(rs.records().len());
     let mut by_id = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
@@ -108,8 +103,8 @@ pub fn load_area_poi_catalog(chain: &mut Chain) -> Result<AreaPoiCatalog> {
             flags: u32_at(r, 8).unwrap_or(0),
             area_id: u32_at(r, 9).unwrap_or(0),
             name: str_at(&rs, r, 10).unwrap_or_default(),
-            description: str_at(&rs, r, 19).unwrap_or_default(),
-            world_state_id: u32_at(r, 28).unwrap_or(0),
+            description: str_at(&rs, r, desc_slot).unwrap_or_default(),
+            world_state_id: u32_at(r, world_state_slot).unwrap_or(0),
         };
         by_id.insert(id, rows.len());
         rows.push((id, poi));
@@ -156,5 +151,22 @@ mod tests {
         assert_eq!(stables.continent_id, 529, "Arathi Basin's map id");
         assert_eq!(stables.world_state_id, 1770);
         assert_eq!(stables.description, "In Conflict");
+    }
+
+    /// 2.4.3's table: 546 rows, and the Eye of the Storm flag node read through the wide strings.
+    #[test]
+    fn the_2_4_3_table_reads_its_names_and_world_states() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_area_poi_catalog(&mut chain).expect("load AreaPOI");
+        assert_eq!(cat.len(), 546);
+        let flag = cat.get(1962).expect("id 1962");
+        assert_eq!(flag.name, "Netherstorm Flag");
+        assert_eq!(flag.description, "Not Controlled");
+        assert_eq!(flag.continent_id, 566, "Eye of the Storm's map id");
+        assert_eq!(flag.area_id, 3820);
+        assert_eq!(flag.icon, 45);
+        assert_eq!(flag.world_state_id, 2757);
+        assert_eq!(flag.pos, [2174.5, 1569.48, 1160.43]);
     }
 }

@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, u32_at};
+use crate::{Chain, DbcLayout};
 
 const FACTION_TEMPLATE: &str = "DBFilesClient\\FactionTemplate.dbc";
 const FACTION: &str = "DBFilesClient\\Faction.dbc";
@@ -335,8 +335,8 @@ pub(crate) fn faction_template_schema() -> Schema {
 }
 
 /// `Faction.dbc`: 37 fields in build 5875 (vmangos `FactionEntry`).
-pub(crate) fn faction_schema() -> Schema {
-    let mut s = Schema::new("Faction");
+pub(crate) fn faction_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("Faction");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("ReputationIndex", FieldType::Int32));
     for i in 0..4 {
@@ -352,28 +352,19 @@ pub(crate) fn faction_schema() -> Schema {
         s.add_field(SchemaField::new(format!("RepFlags{i}"), FieldType::UInt32));
     }
     s.add_field(SchemaField::new("Team", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Desc{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("DescFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
+    s.add_field(SchemaField::new("Description", FieldType::LocString));
     s
 }
 
 /// `FactionGroup.dbc`: 12 fields, 48-byte rows; `MaskID` is a bit index, read by `0x48d540` at
 /// `+0x4` with the name at `+0xc`.
-pub(crate) fn faction_group_schema() -> Schema {
-    let mut s = Schema::new("FactionGroup");
+pub(crate) fn faction_group_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("FactionGroup");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("MaskID", FieldType::UInt32));
     s.add_field(SchemaField::new("InternalName", FieldType::String));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -389,6 +380,96 @@ pub(crate) fn chr_races_schema() -> Schema {
         s.add_field(SchemaField::new(format!("f{i}"), ty));
     }
     s
+}
+
+/// What `Faction.dbc` and `FactionGroup.dbc` give the catalog, the half of its load that reads
+/// the two build-widened tables.
+struct FactionTables {
+    factions: HashMap<u32, FactionInfo>,
+    names: HashMap<u32, String>,
+    descriptions: HashMap<u32, String>,
+    group_names: HashMap<u32, String>,
+    group_internal_names: HashMap<u32, String>,
+}
+
+fn load_faction_tables(chain: &mut Chain) -> Result<FactionTables> {
+    let bytes = chain
+        .read_file(FACTION)
+        .with_context(|| format!("reading {FACTION}"))?;
+    let schema = faction_schema(chain.dbc_layout());
+    let [rep_index, race0, class0, base0, flags0, team, name_slot, desc_slot] = slots(
+        &schema,
+        [
+            "ReputationIndex",
+            "RaceMask0",
+            "ClassMask0",
+            "Base0",
+            "RepFlags0",
+            "Team",
+            "Name",
+            "Description",
+        ],
+    )?;
+    let rs = parse(&bytes, schema, "Faction")?;
+    let mut factions = HashMap::with_capacity(rs.records().len());
+    let mut names = HashMap::with_capacity(rs.records().len());
+    let mut descriptions = HashMap::new();
+    for r in rs.records() {
+        if let Some(id) = u32_at(r, 0) {
+            let at = |i| u32_at(r, i).unwrap_or(0);
+            let iat = |i| u32_at(r, i).unwrap_or(0) as i32;
+            factions.insert(
+                id,
+                FactionInfo {
+                    rep_index: iat(rep_index),
+                    team: at(team),
+                    race_masks: [at(race0), at(race0 + 1), at(race0 + 2), at(race0 + 3)],
+                    class_masks: [at(class0), at(class0 + 1), at(class0 + 2), at(class0 + 3)],
+                    base: [iat(base0), iat(base0 + 1), iat(base0 + 2), iat(base0 + 3)],
+                    flags: [at(flags0), at(flags0 + 1), at(flags0 + 2), at(flags0 + 3)],
+                },
+            );
+            // The enUS name: the locale slot after the ID, the index, 16 slot columns and `Team`.
+            if let Some(name) = crate::dbc::str_at(&rs, r, name_slot) {
+                names.insert(id, name);
+            }
+            // The enUS description, past the name block; empty on most rows.
+            if let Some(desc) = crate::dbc::str_at(&rs, r, desc_slot) {
+                descriptions.insert(id, desc);
+            }
+        }
+    }
+
+    let bytes = chain
+        .read_file(FACTION_GROUP)
+        .with_context(|| format!("reading {FACTION_GROUP}"))?;
+    let schema = faction_group_schema(chain.dbc_layout());
+    let [mask_slot, internal_slot, group_name_slot] =
+        slots(&schema, ["MaskID", "InternalName", "Name"])?;
+    let rs = parse(&bytes, schema, "FactionGroup")?;
+    let mut group_names = HashMap::with_capacity(rs.records().len());
+    let mut group_internal_names = HashMap::with_capacity(rs.records().len());
+    for r in rs.records() {
+        let (Some(mask_id), Some(name)) = (
+            u32_at(r, mask_slot),
+            crate::dbc::str_at(&rs, r, group_name_slot),
+        ) else {
+            continue;
+        };
+        // `InternalName` and the localized `Name`; `UnitFactionGroup` returns both.
+        if let Some(internal) = crate::dbc::str_at(&rs, r, internal_slot) {
+            group_internal_names.insert(1u32 << mask_id, internal);
+        }
+        group_names.insert(1u32 << mask_id, name);
+    }
+
+    Ok(FactionTables {
+        factions,
+        names,
+        descriptions,
+        group_names,
+        group_internal_names,
+    })
 }
 
 /// Load the three faction tables and the race templates off the patch chain.
@@ -415,55 +496,13 @@ pub fn load_faction_catalog(chain: &mut Chain) -> Result<FactionCatalog> {
         }
     }
 
-    let bytes = chain
-        .read_file(FACTION)
-        .with_context(|| format!("reading {FACTION}"))?;
-    let rs = parse(&bytes, faction_schema(), "Faction")?;
-    let mut factions = HashMap::with_capacity(rs.records().len());
-    let mut names = HashMap::with_capacity(rs.records().len());
-    let mut descriptions = HashMap::new();
-    for r in rs.records() {
-        if let Some(id) = u32_at(r, 0) {
-            let at = |i| u32_at(r, i).unwrap_or(0);
-            let iat = |i| u32_at(r, i).unwrap_or(0) as i32;
-            factions.insert(
-                id,
-                FactionInfo {
-                    rep_index: iat(1),
-                    team: at(18),
-                    race_masks: [at(2), at(3), at(4), at(5)],
-                    class_masks: [at(6), at(7), at(8), at(9)],
-                    base: [iat(10), iat(11), iat(12), iat(13)],
-                    flags: [at(14), at(15), at(16), at(17)],
-                },
-            );
-            // Name0 (enUS), column 19: after the ID, the index, 16 slot columns and `Team`.
-            if let Some(name) = crate::dbc::str_at(&rs, r, 19) {
-                names.insert(id, name);
-            }
-            // Desc0 (enUS), column 28, past the name block; empty on most rows.
-            if let Some(desc) = crate::dbc::str_at(&rs, r, 28) {
-                descriptions.insert(id, desc);
-            }
-        }
-    }
-
-    let bytes = chain
-        .read_file(FACTION_GROUP)
-        .with_context(|| format!("reading {FACTION_GROUP}"))?;
-    let rs = parse(&bytes, faction_group_schema(), "FactionGroup")?;
-    let mut group_names = HashMap::with_capacity(rs.records().len());
-    let mut group_internal_names = HashMap::with_capacity(rs.records().len());
-    for r in rs.records() {
-        let (Some(mask_id), Some(name)) = (u32_at(r, 1), crate::dbc::str_at(&rs, r, 3)) else {
-            continue;
-        };
-        // Field 2 is `InternalName`, field 3 `Name0`; `UnitFactionGroup` returns both.
-        if let Some(internal) = crate::dbc::str_at(&rs, r, 2) {
-            group_internal_names.insert(1u32 << mask_id, internal);
-        }
-        group_names.insert(1u32 << mask_id, name);
-    }
+    let FactionTables {
+        factions,
+        names,
+        descriptions,
+        group_names,
+        group_internal_names,
+    } = load_faction_tables(chain)?;
 
     let bytes = chain
         .read_file(CHR_RACES)
@@ -750,6 +789,47 @@ mod tests {
                 .is_some_and(|d| d.starts_with("An organization focused on protecting Azeroth")),
             "Argent Dawn's description: {:?}",
             cat.faction_description(529)
+        );
+    }
+
+    /// 2.4.3's Faction and FactionGroup: the new Cenarion Expedition and Silvermoon City rows,
+    /// Stormwind's race masks widened to the new races, the two group names. (The catalog's own
+    /// load also reads ChrRaces, which is not converted yet.)
+    #[test]
+    fn the_2_4_3_faction_tables_read_through_the_wide_strings() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let t = load_faction_tables(&mut chain).expect("Faction and FactionGroup");
+        assert_eq!(t.names.len(), 322);
+        assert_eq!(
+            t.names.get(&942).map(String::as_str),
+            Some("Cenarion Expedition")
+        );
+        assert_eq!(
+            t.names.get(&911).map(String::as_str),
+            Some("Silvermoon City")
+        );
+        assert!(t
+            .descriptions
+            .get(&942)
+            .is_some_and(|d| d.starts_with("An exploratory force sent to Outland")));
+        let cenarion = &t.factions[&942];
+        assert_eq!(cenarion.rep_index, 64);
+        assert_eq!(cenarion.team, 980);
+        assert_eq!(cenarion.race_masks, [2047, 0, 0, 0]);
+        assert_eq!(cenarion.flags, [16, 0, 0, 0]);
+        let stormwind = &t.factions[&72];
+        assert_eq!(
+            stormwind.race_masks,
+            [1100, 690, 1, 0],
+            "5875 had 76, 178, 1, 0"
+        );
+        assert_eq!(stormwind.base, [3100, -42_000, 4000, 0]);
+        assert_eq!(t.group_names.get(&2).map(String::as_str), Some("Alliance"));
+        assert_eq!(t.group_names.get(&4).map(String::as_str), Some("Horde"));
+        assert_eq!(
+            t.group_internal_names.get(&2).map(String::as_str),
+            Some("Alliance")
         );
     }
 }

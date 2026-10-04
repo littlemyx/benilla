@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{parse, str_at};
+use crate::dbc::{parse, slots, str_at};
+use crate::DbcLayout;
 
 const GAME_TIPS: &str = "DBFilesClient\\GameTips.dbc";
 
@@ -38,22 +39,23 @@ impl GameTipsCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("GameTips");
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("GameTips");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
-    s.add_field(SchemaField::new_array("Text", FieldType::String, 8));
-    s.add_field(SchemaField::new("TextMask", FieldType::UInt32));
+    s.add_field(SchemaField::new("Text", FieldType::LocString));
     s.set_key_field("ID");
     s
 }
 
 pub fn load_game_tips(chain: &mut Chain) -> Result<GameTipsCatalog> {
     let bytes = chain.read_file(GAME_TIPS).context("reading GameTips.dbc")?;
-    let rs = parse(&bytes, schema(), "GameTips")?;
+    let schema = schema(chain.dbc_layout());
+    let [text_slot] = slots(&schema, ["Text"])?;
+    let rs = parse(&bytes, schema, "GameTips")?;
     let mut tips = Vec::with_capacity(rs.records().len());
     for r in rs.records() {
         // A row with an empty text slot is dropped, not shown blank; the shipped file has none.
-        match str_at(&rs, r, 1) {
+        match str_at(&rs, r, text_slot) {
             Some(text) if !text.trim().is_empty() => tips.push(text),
             _ => {}
         }
@@ -85,5 +87,22 @@ mod tests {
             cat.get(74).is_none(),
             "one past the end is None, not a panic"
         );
+    }
+
+    /// 2.4.3's table: 100 tips, and the file still opens on id 396, reworded for the question mark.
+    #[test]
+    fn the_2_4_3_table_is_a_hundred_tips() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_game_tips(&mut chain).expect("load GameTips");
+        assert_eq!(cat.len(), 100);
+        assert!(cat
+            .get(0)
+            .unwrap()
+            .contains("shown as a question mark on your mini-map"));
+        assert!(cat
+            .get(99)
+            .unwrap()
+            .contains("one Battle Elixir and one Guardian Elixir"));
     }
 }

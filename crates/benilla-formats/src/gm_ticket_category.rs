@@ -7,8 +7,8 @@
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const GM_TICKET_CATEGORY: &str = "DBFilesClient\\GMTicketCategory.dbc";
 
@@ -41,13 +41,10 @@ impl GmTicketCategoryCatalog {
     }
 }
 
-pub(crate) fn gm_ticket_category_schema() -> Schema {
-    let mut s = Schema::new("GMTicketCategory");
+pub(crate) fn gm_ticket_category_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("GMTicketCategory");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -57,11 +54,15 @@ pub fn load_gm_ticket_categories(chain: &mut Chain) -> Result<GmTicketCategoryCa
     let bytes = chain
         .read_file(GM_TICKET_CATEGORY)
         .with_context(|| format!("reading {GM_TICKET_CATEGORY}"))?;
-    let rs = parse(&bytes, gm_ticket_category_schema(), "GMTicketCategory")?;
+    let schema = gm_ticket_category_schema(chain.dbc_layout());
+    let [name_slot] = slots(&schema, ["Name"])?;
+    let rs = parse(&bytes, schema, "GMTicketCategory")?;
     let mut categories = Vec::with_capacity(rs.records().len());
     for r in rs.records() {
-        let (Some(id), Some(name)) = (u32_at(r, 0), str_at(&rs, r, 1).filter(|n| !n.is_empty()))
-        else {
+        let (Some(id), Some(name)) = (
+            u32_at(r, 0),
+            str_at(&rs, r, name_slot).filter(|n| !n.is_empty()),
+        ) else {
             continue;
         };
         categories.push(GmTicketCategory { id, name });
@@ -103,5 +104,23 @@ mod tests {
             "the wire ids and the painted order both matter — see the module doc"
         );
         assert_eq!(cat.len(), 10, "the whole shipped table");
+    }
+
+    /// 2.4.3's table: 37 rows, from `<not set>` (id 0) to `UI issue` (id 36), the 1.12.1 ten kept.
+    #[test]
+    fn the_2_4_3_table_has_thirty_seven_categories() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_gm_ticket_categories(&mut chain).expect("GMTicketCategory.dbc");
+        assert_eq!(cat.len(), 37);
+        let rows: Vec<(u32, &str)> = cat
+            .categories()
+            .iter()
+            .map(|c| (c.id, c.name.as_str()))
+            .collect();
+        assert_eq!(rows[0], (0, "<not set>"));
+        assert_eq!(rows[1], (1, "Stuck"));
+        assert_eq!(rows[11], (11, "Arena/Honor item issues"));
+        assert_eq!(rows[36], (36, "UI issue"));
     }
 }

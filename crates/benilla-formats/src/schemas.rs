@@ -62,7 +62,7 @@ macro_rules! wide {
 
 pub(crate) static TABLES: &[Table] = &[
     plain!("AnimationData", anim_data::schema()),
-    plain!("AreaPOI", area_poi::schema()),
+    wide!("AreaPOI", area_poi::schema),
     plain!("AreaTable", area_table::schema()),
     plain!("AreaTable", area_sound::area_schema()),
     Table {
@@ -70,7 +70,7 @@ pub(crate) static TABLES: &[Table] = &[
         shape: Shape::Schema(|l| dbc::id_name_schema("AreaTable", l, 11, 25)),
     },
     plain!("AreaTrigger", area_trigger::area_trigger_schema()),
-    plain!("AuctionHouse", auction_house::auction_house_schema()),
+    wide!("AuctionHouse", auction_house::auction_house_schema),
     plain!("BankBagSlotPrices", bank_bag_slot_prices::schema()),
     plain!("CameraShakes", camera_shakes::camera_shakes_schema()),
     plain!("Cfg_Categories", cfg_categories::cfg_categories_schema()),
@@ -111,7 +111,7 @@ pub(crate) static TABLES: &[Table] = &[
         "CreatureDisplayInfoExtra",
         creatures::creature_display_info_extra_schema()
     ),
-    plain!("CreatureFamily", creature_families::family_schema()),
+    wide!("CreatureFamily", creature_families::family_schema),
     plain!("CreatureModelData", creatures::creature_model_data_schema()),
     plain!("CreatureSoundData", creature_sound::csd_schema()),
     wide!("CreatureType", creature_types::creature_type_schema),
@@ -123,12 +123,12 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("DurabilityQuality", durability::qualities_schema()),
     plain!("Emotes", emotes::schema("Emotes", 7, &[1])),
     plain!("EmotesText", emote_text::emotes_text_schema()),
-    plain!("EmotesTextData", emote_text::emotes_text_data_schema()),
+    wide!("EmotesTextData", emote_text::emotes_text_data_schema),
     plain!("EmotesTextSound", emotes::schema("EmotesTextSound", 5, &[])),
     plain!("EnvironmentalDamage", environmental_damage::schema()),
-    plain!("Exhaustion", exhaustion::exhaustion_schema()),
-    plain!("Faction", factions::faction_schema()),
-    plain!("FactionGroup", factions::faction_group_schema()),
+    wide!("Exhaustion", exhaustion::exhaustion_schema),
+    wide!("Faction", factions::faction_schema),
+    wide!("FactionGroup", factions::faction_group_schema),
     plain!("FactionTemplate", factions::faction_template_schema()),
     plain!(
         "FootprintTextures",
@@ -139,10 +139,10 @@ pub(crate) static TABLES: &[Table] = &[
         footsteps::n_u32_schema("FootstepTerrainLookup", 5, &[])
     ),
     plain!("GameObjectDisplayInfo", gameobjects::schema()),
-    plain!("GameTips", game_tips::schema()),
-    plain!(
+    wide!("GameTips", game_tips::schema),
+    wide!(
         "GMTicketCategory",
-        gm_ticket_category::gm_ticket_category_schema()
+        gm_ticket_category::gm_ticket_category_schema
     ),
     plain!("GroundEffectDoodad", ground_effects::doodad_schema()),
     plain!("GroundEffectTexture", ground_effects::texture_schema()),
@@ -151,7 +151,7 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("ItemClass", itemclass::item_class_schema()),
     plain!("ItemDisplayInfo", items::item_display_info_schema()),
     plain!("ItemGroupSounds", item_sounds::item_group_sounds_schema()),
-    plain!("ItemPetFood", creature_families::food_schema()),
+    wide!("ItemPetFood", creature_families::food_schema),
     plain!(
         "ItemRandomProperties",
         item_random_properties::item_random_properties_schema()

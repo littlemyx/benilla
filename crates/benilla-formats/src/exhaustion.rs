@@ -6,8 +6,9 @@
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, str_at, u32_at};
+use crate::dbc::{f32_at, parse, slots, str_at, u32_at};
 use crate::Chain;
+use crate::DbcLayout;
 
 const EXHAUSTION: &str = "DBFilesClient\\Exhaustion.dbc";
 
@@ -21,17 +22,14 @@ pub struct ExhaustionRow {
     pub factor: f32,
 }
 
-pub(crate) fn exhaustion_schema() -> Schema {
-    let mut s = Schema::new("Exhaustion");
+pub(crate) fn exhaustion_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("Exhaustion");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("Xp", FieldType::UInt32));
     s.add_field(SchemaField::new("Factor", FieldType::Float32));
     s.add_field(SchemaField::new("OutdoorHours", FieldType::Float32));
     s.add_field(SchemaField::new("InnHours", FieldType::Float32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s.add_field(SchemaField::new("Threshold", FieldType::UInt32));
     s
 }
@@ -41,13 +39,15 @@ pub fn load_exhaustion(chain: &mut Chain) -> Result<Vec<ExhaustionRow>> {
     let bytes = chain
         .read_file(EXHAUSTION)
         .with_context(|| format!("reading {EXHAUSTION}"))?;
-    let rs = parse(&bytes, exhaustion_schema(), "Exhaustion")?;
+    let schema = exhaustion_schema(chain.dbc_layout());
+    let [factor_slot, name_slot] = slots(&schema, ["Factor", "Name"])?;
+    let rs = parse(&bytes, schema, "Exhaustion")?;
     let mut rows = Vec::with_capacity(rs.records().len());
     for r in rs.records() {
-        let (Some(id), Some(factor)) = (u32_at(r, 0), f32_at(r, 2)) else {
+        let (Some(id), Some(factor)) = (u32_at(r, 0), f32_at(r, factor_slot)) else {
             continue;
         };
-        let name = str_at(&rs, r, 5).unwrap_or_default();
+        let name = str_at(&rs, r, name_slot).unwrap_or_default();
         rows.push(ExhaustionRow { id, name, factor });
     }
     Ok(rows)
@@ -72,5 +72,20 @@ mod tests {
         assert_eq!(by_id[&4], ("XXXTired", 0.5));
         assert_eq!(by_id[&5], ("XXXExhausted", 0.25));
         assert_eq!(rows.len(), 5, "the whole shipped table");
+    }
+
+    /// 2.4.3's table: six rest states, the new one Refer-A-Friend at the rested ×2.
+    #[test]
+    fn the_2_4_3_table_adds_refer_a_friend() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let rows = load_exhaustion(&mut chain).expect("Exhaustion.dbc");
+        assert_eq!(rows.len(), 6);
+        let by_id: std::collections::HashMap<u32, (&str, f32)> = rows
+            .iter()
+            .map(|r| (r.id, (r.name.as_str(), r.factor)))
+            .collect();
+        assert_eq!(by_id[&1], ("Rested", 2.0));
+        assert_eq!(by_id[&6], ("Refer-A-Friend", 2.0));
     }
 }
