@@ -111,7 +111,7 @@ impl AreaTableCatalog {
     }
 }
 
-fn schema() -> Schema {
+pub(crate) fn schema() -> Schema {
     let mut s = Schema::new("AreaTable");
     for i in 0..25 {
         match i {

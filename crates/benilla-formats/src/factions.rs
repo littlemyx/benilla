@@ -313,7 +313,7 @@ impl FactionCatalog {
 
 /// `FactionTemplate.dbc`: 14 fields, 56-byte rows at the offsets `0x606640` reads (vmangos
 /// `FactionTemplateEntry`).
-fn faction_template_schema() -> Schema {
+pub(crate) fn faction_template_schema() -> Schema {
     let mut s = Schema::new("FactionTemplate");
     for (name, ty) in [
         ("ID", FieldType::UInt32),
@@ -335,7 +335,7 @@ fn faction_template_schema() -> Schema {
 }
 
 /// `Faction.dbc`: 37 fields in build 5875 (vmangos `FactionEntry`).
-fn faction_schema() -> Schema {
+pub(crate) fn faction_schema() -> Schema {
     let mut s = Schema::new("Faction");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("ReputationIndex", FieldType::Int32));
@@ -365,7 +365,7 @@ fn faction_schema() -> Schema {
 
 /// `FactionGroup.dbc`: 12 fields, 48-byte rows; `MaskID` is a bit index, read by `0x48d540` at
 /// `+0x4` with the name at `+0xc`.
-fn faction_group_schema() -> Schema {
+pub(crate) fn faction_group_schema() -> Schema {
     let mut s = Schema::new("FactionGroup");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("MaskID", FieldType::UInt32));
@@ -379,7 +379,7 @@ fn faction_group_schema() -> Schema {
 
 /// `ChrRaces.dbc`: 29 fields in build 5875. Only the id and `FactionID` (column 2) are read; the
 /// string columns are declared so the field count matches.
-fn chr_races_schema() -> Schema {
+pub(crate) fn chr_races_schema() -> Schema {
     let mut s = Schema::new("ChrRaces");
     for i in 0..29 {
         let ty = match i {

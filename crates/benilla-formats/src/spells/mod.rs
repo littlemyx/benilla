@@ -20,6 +20,12 @@ mod duration;
 mod forms;
 mod radius;
 mod ranges;
+pub(crate) use cast_times::spell_cast_times_schema;
+pub(crate) use dispel_types::spell_dispel_type_schema;
+pub(crate) use duration::spell_duration_schema;
+pub(crate) use forms::shapeshift_form_schema;
+pub(crate) use radius::spell_radius_schema;
+pub(crate) use ranges::spell_range_schema;
 mod soft_float;
 mod tokens;
 
@@ -369,7 +375,14 @@ impl SpellCatalog {
 
 /// 173 fields, `u32` but for `Speed`, the four float effect arrays and the four enUS string heads;
 /// the signed columns stay `u32`, as [`i32_at`] reads the same bits.
-fn spell_schema() -> Schema {
+pub(crate) fn spell_category_schema() -> Schema {
+    let mut s = Schema::new("SpellCategory");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new("Flags", FieldType::UInt32));
+    s
+}
+
+pub(crate) fn spell_schema() -> Schema {
     let mut s = Schema::new("Spell");
     for i in 0..SPELL_FIELDS {
         if i == COL_NAME_ENUS {
@@ -429,16 +442,7 @@ pub fn load_spell_catalog(chain: &mut Chain) -> Result<SpellCatalog> {
         let bytes = chain
             .read_file("DBFilesClient\\SpellCategory.dbc")
             .context("reading SpellCategory.dbc")?;
-        let mut s = benilla_dbc::Schema::new("SpellCategory");
-        s.add_field(benilla_dbc::SchemaField::new(
-            "ID",
-            benilla_dbc::FieldType::UInt32,
-        ));
-        s.add_field(benilla_dbc::SchemaField::new(
-            "Flags",
-            benilla_dbc::FieldType::UInt32,
-        ));
-        let rs = parse(&bytes, s, "SpellCategory.dbc")?;
+        let rs = parse(&bytes, spell_category_schema(), "SpellCategory.dbc")?;
         rs.records()
             .iter()
             .filter(|r| u32_at(r, 1).unwrap_or(0) & 0x2 != 0)

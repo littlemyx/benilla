@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, u32_at};
+use crate::{Chain, DbcLayout};
 
 const CREATURE_TYPE: &str = "DBFilesClient\\CreatureType.dbc";
 
@@ -31,13 +31,10 @@ impl CreatureTypeFlags {
     }
 }
 
-fn creature_type_schema() -> Schema {
-    let mut s = Schema::new("CreatureType");
+pub(crate) fn creature_type_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("CreatureType");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s.add_field(SchemaField::new("Flags", FieldType::UInt32));
     s
 }
@@ -47,11 +44,13 @@ pub fn load_creature_type_flags(chain: &mut Chain) -> Result<CreatureTypeFlags> 
     let bytes = chain
         .read_file(CREATURE_TYPE)
         .with_context(|| format!("reading {CREATURE_TYPE}"))?;
-    let rs = parse(&bytes, creature_type_schema(), "CreatureType")?;
+    let schema = creature_type_schema(chain.dbc_layout());
+    let [flags_slot] = slots(&schema, ["Flags"])?;
+    let rs = parse(&bytes, schema, "CreatureType")?;
     let mut flags = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         if let Some(id) = u32_at(r, 0) {
-            flags.insert(id, u32_at(r, 10).unwrap_or(0));
+            flags.insert(id, u32_at(r, flags_slot).unwrap_or(0));
         }
     }
     Ok(CreatureTypeFlags(flags))
@@ -72,5 +71,21 @@ mod tests {
             assert!(!flags.no_tab_target(id), "type {id} must be targetable");
         }
         assert!(!flags.no_tab_target(999), "unknown type is targetable");
+    }
+
+    /// 2.4.3's table: 13 types, the two added ones (Non-combat Pet 12, Gas Cloud 13) un-TAB-able
+    /// like Critter.
+    #[test]
+    fn the_2_4_3_flags_mark_critter_and_the_two_added_types() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let flags = load_creature_type_flags(&mut chain).expect("load CreatureType.dbc");
+        assert_eq!(flags.len(), 13, "2.4.3 ships 13 creature types");
+        for id in [8, 12, 13] {
+            assert!(flags.no_tab_target(id), "type {id} must be un-TAB-able");
+        }
+        for id in [1, 7, 11] {
+            assert!(!flags.no_tab_target(id), "type {id} must be targetable");
+        }
     }
 }

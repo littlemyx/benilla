@@ -120,7 +120,7 @@ impl EmoteSoundCatalog {
     }
 }
 
-fn schema(name: &str, n: usize, strings: &[usize]) -> Schema {
+pub(crate) fn schema(name: &str, n: usize, strings: &[usize]) -> Schema {
     let mut s = Schema::new(name);
     for i in 0..n {
         let ty = if strings.contains(&i) {

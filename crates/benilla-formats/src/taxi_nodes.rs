@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{f32_at, parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const TAXI_NODES: &str = "DBFilesClient\\TaxiNodes.dbc";
 
@@ -54,20 +54,14 @@ impl TaxiNodes {
     }
 }
 
-fn schema() -> Schema {
-    let mut s = Schema::new("TaxiNodes");
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("TaxiNodes");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("MapID", FieldType::UInt32));
     for name in ["X", "Y", "Z"] {
         s.add_field(SchemaField::new(name, FieldType::Float32));
     }
-    s.add_field(SchemaField::new("Name", FieldType::String)); // enUS (locale 0)
-    s.add_field(SchemaField::new_array(
-        "NameOtherLocales",
-        FieldType::String,
-        7,
-    ));
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString)); // enUS (locale 0)
     s.add_field(SchemaField::new("MountIdHorde", FieldType::UInt32));
     s.add_field(SchemaField::new("MountIdAlliance", FieldType::UInt32));
     s
@@ -78,20 +72,34 @@ pub fn load_taxi_nodes(chain: &mut Chain) -> Result<TaxiNodes> {
     let bytes = chain
         .read_file(TAXI_NODES)
         .context("reading TaxiNodes.dbc")?;
-    let rs = parse(&bytes, schema(), "TaxiNodes")?;
+    let schema = schema(chain.dbc_layout());
+    let [map_slot, x_slot, y_slot, z_slot, name_slot, horde_slot, alliance_slot] = slots(
+        &schema,
+        [
+            "MapID",
+            "X",
+            "Y",
+            "Z",
+            "Name",
+            "MountIdHorde",
+            "MountIdAlliance",
+        ],
+    )?;
+    let rs = parse(&bytes, schema, "TaxiNodes")?;
     let mut rows = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
-        let (Some(x), Some(y), Some(z)) = (f32_at(r, 2), f32_at(r, 3), f32_at(r, 4)) else {
+        let (Some(x), Some(y), Some(z)) = (f32_at(r, x_slot), f32_at(r, y_slot), f32_at(r, z_slot))
+        else {
             continue;
         };
         let node = TaxiNode {
             id,
-            map_id: u32_at(r, 1).unwrap_or(0),
+            map_id: u32_at(r, map_slot).unwrap_or(0),
             pos: [x, y, z],
-            name: str_at(&rs, r, 5).unwrap_or_default(),
-            mount_horde: u32_at(r, 14).unwrap_or(0),
-            mount_alliance: u32_at(r, 15).unwrap_or(0),
+            name: str_at(&rs, r, name_slot).unwrap_or_default(),
+            mount_horde: u32_at(r, horde_slot).unwrap_or(0),
+            mount_alliance: u32_at(r, alliance_slot).unwrap_or(0),
         };
         rows.insert(id, node);
     }
@@ -122,5 +130,33 @@ mod tests {
         // The other end of the hop the `TaxiPath` test pins.
         let sentinel_hill = cat.get(4).expect("node 4 exists");
         assert_eq!(sentinel_hill.name, "Sentinel Hill, Westfall");
+    }
+
+    /// The 2.4.3 table: 189 nodes, Outland's on map 530 with each team's mount.
+    #[test]
+    fn real_2_4_3_taxi_nodes_reach_outland() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_taxi_nodes(&mut chain).expect("load TaxiNodes");
+        assert_eq!(cat.len(), 189, "2.4.3 ships 189 taxi nodes");
+
+        let thrallmar = cat.get(99).expect("node 99 exists");
+        assert_eq!(thrallmar.name, "Thrallmar, Hellfire Peninsula");
+        assert_eq!(thrallmar.map_id, 530, "Outland");
+        assert_eq!(
+            (thrallmar.mount_horde, thrallmar.mount_alliance),
+            (2224, 0),
+            "the Horde wyvern mount"
+        );
+        assert!(thrallmar.pos.iter().all(|c| c.is_finite() && *c != 0.0));
+        let honor_hold = cat.get(100).expect("node 100 exists");
+        assert_eq!(honor_hold.name, "Honor Hold, Hellfire Peninsula");
+        assert_eq!(
+            (honor_hold.mount_horde, honor_hold.mount_alliance),
+            (0, 541),
+            "the Alliance gryphon mount"
+        );
+        // A node both builds ship, read the same through the wider name.
+        assert_eq!(cat.get(2).expect("node 2").name, "Stormwind, Elwynn");
     }
 }

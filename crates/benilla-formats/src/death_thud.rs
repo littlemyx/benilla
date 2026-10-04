@@ -56,7 +56,7 @@ impl DeathThudCatalog {
     }
 }
 
-fn n_u32_schema(name: &str, n: usize) -> Schema {
+pub(crate) fn n_u32_schema(name: &str, n: usize) -> Schema {
     let mut s = Schema::new(name);
     for i in 0..n {
         s.add_field(SchemaField::new(format!("f{i}"), FieldType::UInt32));

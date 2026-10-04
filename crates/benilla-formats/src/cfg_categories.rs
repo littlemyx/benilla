@@ -23,7 +23,7 @@ pub struct RealmCategory {
 
 /// `ID`, `Region`, eight locale names and their flags: the 11 columns × 0x2c bytes the loader
 /// (`0x5411b0`) gates on.
-fn cfg_categories_schema() -> Schema {
+pub(crate) fn cfg_categories_schema() -> Schema {
     let mut s = Schema::new("Cfg_Categories");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("Region", FieldType::UInt32));

@@ -36,6 +36,7 @@ mod cinematics;
 mod creatures;
 mod dbc;
 pub use dbc::DbcLayout;
+mod schemas;
 mod unit_blood;
 pub use camera_shakes::{load_camera_shakes, CameraShake, CameraShakeCatalog, SpellShakeGroup};
 pub use cinematics::{
@@ -591,7 +592,8 @@ pub fn blp_bytes_to_native_chain(bytes: &[u8]) -> Result<BlpMipChain> {
 }
 
 /// Our schema for a known 1.12 DBC by base filename, as DBC files carry no column types. A
-/// localized string is 9 dwords: 8 locale offsets and a flags word.
+/// localized string is 9 dwords: 8 locale offsets and a flags word. A few tables dump through a
+/// fully named schema of their own; the rest are the registry's ([`schemas`]).
 fn schema_for(dbc_name: &str) -> Option<Schema> {
     let base = dbc_name.rsplit(['/', '\\']).next().unwrap_or(dbc_name);
 
@@ -740,7 +742,8 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
         return Some(s);
     }
 
-    None
+    // Every other table a loader reads, as its loader declares it for 1.12.1.
+    schemas::schema(base, DbcLayout::VANILLA_1_12_1)
 }
 
 /// Write a DBC as CSV through our schema for it, returning `(record_count, field_count)`; an error
@@ -753,11 +756,8 @@ pub fn dbc_to_csv(dbc_bytes: &[u8], dbc_name: &str, out: &Path) -> Result<(u32, 
 
     let schema = schema_for(dbc_name).ok_or_else(|| {
         anyhow::anyhow!(
-            "no schema defined for '{dbc_name}' ({fields} fields); known: TaxiNodes.dbc, \
-             AreaTable.dbc, GameObjectDisplayInfo.dbc, TaxiPath.dbc, TaxiPathNode.dbc, \
-             TransportAnimation.dbc, CreatureDisplayInfo.dbc, CreatureDisplayInfoExtra.dbc, \
-             CreatureModelData.dbc, CharHairGeosets.dbc, CharacterFacialHairStyles.dbc, \
-             HelmetGeosetVisData.dbc, CharSections.dbc, ItemDisplayInfo.dbc"
+            "no schema defined for '{dbc_name}' ({fields} fields); known: {}",
+            schemas::names().collect::<Vec<_>>().join(", ")
         )
     })?;
 
@@ -886,6 +886,138 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The tables whose schema does not fit their 2.4.3 file yet: 54 that grew by more than
+    /// localized-string widening (new columns) or whose columns are not yet read by name. An entry
+    /// leaves this list when its table is converted, and a table that fits while listed fails.
+    const NOT_YET_2_4_3: &[&str] = &[
+        "AreaPOI",
+        "AreaTable",
+        "AuctionHouse",
+        "Cfg_Categories",
+        "CharacterFacialHairStyles",
+        "ChatProfanity",
+        "ChrClasses",
+        "ChrRaces",
+        "CreatureDisplayInfo",
+        "CreatureDisplayInfoExtra",
+        "CreatureFamily",
+        "CreatureModelData",
+        "CreatureSoundData",
+        "EmotesTextData",
+        "Exhaustion",
+        "Faction",
+        "FactionGroup",
+        "GameObjectDisplayInfo",
+        "GameTips",
+        "GMTicketCategory",
+        "HelmetGeosetVisData",
+        "ItemBagFamily",
+        "ItemClass",
+        "ItemDisplayInfo",
+        "ItemPetFood",
+        "ItemRandomProperties",
+        "ItemSet",
+        "ItemSubClass",
+        "ItemSubClassMask",
+        "Languages",
+        "LightSkybox",
+        "LockType",
+        "Map",
+        "Material",
+        "Package",
+        "PetLoyalty",
+        "PetPersonality",
+        "ServerMessages",
+        "SkillLine",
+        "SkillLineCategory",
+        "Spell",
+        "SpellChainEffects",
+        "SpellDispelType",
+        "SpellFocusObject",
+        "SpellItemEnchantment",
+        "SpellMechanic",
+        "SpellRange",
+        "SpellShapeshiftForm",
+        "SpellVisual",
+        "SpellVisualKit",
+        "TaxiPathNode",
+        "WMOAreaTable",
+        "WorldMapArea",
+        "WorldStateUI",
+    ];
+
+    /// The registered tables whose file header disagrees with the schema (or hand-parsed shape)
+    /// for the chain's layout, by table name.
+    fn tables_that_do_not_fit(data: &Path) -> std::collections::BTreeSet<&'static str> {
+        let chain = open_chain(data).expect("open chain");
+        let layout = chain.dbc_layout();
+        let mut misfits = std::collections::BTreeSet::new();
+        for table in schemas::TABLES {
+            let path = format!("DBFilesClient\\{}.dbc", table.name);
+            let bytes = chain
+                .read(&path)
+                .unwrap_or_else(|e| panic!("{path} is not in the chain: {e}"));
+            let parser = DbcParser::parse(&mut Cursor::new(bytes.as_slice()))
+                .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let header = *parser.header();
+            let fits = match &table.shape {
+                schemas::Shape::Schema(build) => {
+                    build(layout).expanded_len() == header.field_count as usize
+                }
+                schemas::Shape::Hand {
+                    field_count,
+                    record_size,
+                } => header.field_count == *field_count && header.record_size == *record_size,
+            };
+            if !fits {
+                misfits.insert(table.name);
+            }
+        }
+        misfits
+    }
+
+    #[test]
+    fn the_registry_names_every_table_the_loaders_read_once_per_name() {
+        assert_eq!(schemas::names().count(), 125, "125 tables are read");
+        let mut seen = std::collections::HashSet::new();
+        assert!(
+            NOT_YET_2_4_3.iter().all(|n| seen.insert(n)),
+            "a name once in NOT_YET_2_4_3"
+        );
+        for name in NOT_YET_2_4_3 {
+            assert!(schemas::names().any(|n| n == *name), "{name} is registered");
+        }
+    }
+
+    /// Every table the code reads fits the 1.12.1 install under its loader's schema.
+    #[test]
+    fn every_table_fits_the_1_12_1_install() {
+        let data = crate::wow_data_or_skip!();
+        let misfits = tables_that_do_not_fit(&data);
+        assert!(
+            misfits.is_empty(),
+            "1.12.1 files that do not fit: {misfits:?}"
+        );
+    }
+
+    /// On 2.4.3 exactly the tables of [`NOT_YET_2_4_3`] do not fit.
+    #[test]
+    fn the_2_4_3_install_fits_but_for_the_tables_not_yet_converted() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let misfits = tables_that_do_not_fit(&data);
+        let listed: std::collections::BTreeSet<&str> = NOT_YET_2_4_3.iter().copied().collect();
+        let unlisted: Vec<_> = misfits.difference(&listed).collect();
+        let fit_now: Vec<_> = listed.difference(&misfits).collect();
+        assert!(
+            unlisted.is_empty(),
+            "tables that do not fit 2.4.3 and are not in NOT_YET_2_4_3: {unlisted:?}"
+        );
+        assert!(
+            fit_now.is_empty(),
+            "tables in NOT_YET_2_4_3 that fit now, to be removed from it: {fit_now:?}"
+        );
     }
 
     #[test]

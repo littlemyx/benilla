@@ -112,7 +112,7 @@ impl PetLoyaltyNames {
     }
 }
 
-fn personality_schema() -> Schema {
+pub(crate) fn personality_schema() -> Schema {
     let mut s = Schema::new("PetPersonality");
     for i in 0..PERSONALITY_FIELDS {
         let ty = match i {
@@ -127,7 +127,7 @@ fn personality_schema() -> Schema {
     s
 }
 
-fn loyalty_schema() -> Schema {
+pub(crate) fn loyalty_schema() -> Schema {
     let mut s = Schema::new("PetLoyalty");
     for i in 0..LOYALTY_FIELDS {
         let ty = if i == NAME_FIELD {

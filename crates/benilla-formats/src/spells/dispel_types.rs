@@ -33,11 +33,7 @@ impl SpellDispelTypes {
     }
 }
 
-/// Load `SpellDispelType.dbc` off the patch chain, keeping only the rows the gate names.
-pub fn load_spell_dispel_types(chain: &mut Chain) -> Result<SpellDispelTypes> {
-    let bytes = chain
-        .read_file("DBFilesClient\\SpellDispelType.dbc")
-        .context("reading SpellDispelType.dbc")?;
+pub(crate) fn spell_dispel_type_schema() -> Schema {
     let mut schema = Schema::new("SpellDispelType");
     schema.add_field(SchemaField::new("ID", FieldType::UInt32));
     for i in 0..8 {
@@ -46,7 +42,15 @@ pub fn load_spell_dispel_types(chain: &mut Chain) -> Result<SpellDispelTypes> {
     schema.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
     schema.add_field(SchemaField::new("Named", FieldType::UInt32));
     schema.add_field(SchemaField::new("Unknown11", FieldType::String));
-    let set = parse(&bytes, schema, "SpellDispelType.dbc")?;
+    schema
+}
+
+/// Load `SpellDispelType.dbc` off the patch chain, keeping only the rows the gate names.
+pub fn load_spell_dispel_types(chain: &mut Chain) -> Result<SpellDispelTypes> {
+    let bytes = chain
+        .read_file("DBFilesClient\\SpellDispelType.dbc")
+        .context("reading SpellDispelType.dbc")?;
+    let set = parse(&bytes, spell_dispel_type_schema(), "SpellDispelType.dbc")?;
     let mut names = HashMap::new();
     for r in set.records() {
         let Some(id) = u32_at(r, 0) else { continue };

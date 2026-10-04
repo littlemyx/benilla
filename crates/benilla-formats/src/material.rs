@@ -59,7 +59,7 @@ impl MaterialCatalog {
     }
 }
 
-fn schema() -> Schema {
+pub(crate) fn schema() -> Schema {
     let mut s = Schema::new("Material");
     for name in ["ID", "Flags", "FoleySoundID"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));

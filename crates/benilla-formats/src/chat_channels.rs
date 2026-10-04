@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::DbcLayout;
 
 const CHAT_CHANNELS: &str = "DBFilesClient\\ChatChannels.dbc";
 
@@ -132,15 +133,13 @@ impl ChatChannelsCatalog {
     }
 }
 
-fn schema() -> Schema {
-    let mut s = Schema::new("ChatChannels");
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ChatChannels");
     s.add_field(SchemaField::new("ChannelID", FieldType::UInt32));
     s.add_field(SchemaField::new("Flags", FieldType::UInt32));
     s.add_field(SchemaField::new("FactionGroup", FieldType::UInt32));
-    s.add_field(SchemaField::new_array("Name", FieldType::String, 8));
-    s.add_field(SchemaField::new("NameMask", FieldType::UInt32));
-    s.add_field(SchemaField::new_array("Shortcut", FieldType::String, 8));
-    s.add_field(SchemaField::new("ShortcutMask", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
+    s.add_field(SchemaField::new("Shortcut", FieldType::LocString));
     s.set_key_field("ChannelID");
     s
 }
@@ -149,19 +148,23 @@ pub fn load_chat_channels_catalog(chain: &mut Chain) -> Result<ChatChannelsCatal
     let bytes = chain
         .read_file(CHAT_CHANNELS)
         .context("reading ChatChannels.dbc")?;
-    let rs = parse(&bytes, schema(), "ChatChannels")?;
+    let schema = schema(chain.dbc_layout());
+    let [flags_slot, name_slot, shortcut_slot] = slots(&schema, ["Flags", "Name", "Shortcut"])?;
+    let rs = parse(&bytes, schema, "ChatChannels")?;
     let mut rows = Vec::with_capacity(rs.records().len());
     for r in rs.records() {
-        let (Some(id), Some(flags), Some(pattern)) =
-            (u32_at(r, 0), u32_at(r, 1), str_at(&rs, r, 3))
-        else {
+        let (Some(id), Some(flags), Some(pattern)) = (
+            u32_at(r, 0),
+            u32_at(r, flags_slot),
+            str_at(&rs, r, name_slot),
+        ) else {
             continue;
         };
         rows.push(ChatChannelRow {
             id,
             flags,
             pattern,
-            shortcut: str_at(&rs, r, 12).unwrap_or_default(),
+            shortcut: str_at(&rs, r, shortcut_slot).unwrap_or_default(),
         });
     }
     Ok(ChatChannelsCatalog { rows })
@@ -197,6 +200,31 @@ mod tests {
         // The auto-join set is the reference's `chat-cache.txt` `ZONECHANNELS` mask.
         let mask: u32 = cat.auto_join_rows().map(|r| 1 << (r.id - 1)).sum();
         assert_eq!(mask, 0x0020_0003, "General + Trade + LocalDefense");
+    }
+
+    /// 2.4.3's rows: LookingForGroup moved to id 26 and carries the LFG bit, GuildRecruitment is 25.
+    #[test]
+    fn the_2_4_3_table_moves_looking_for_group_to_26() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_chat_channels_catalog(&mut chain).expect("load ChatChannels");
+        let got: Vec<(u32, u32, &str, &str)> = cat
+            .rows()
+            .iter()
+            .map(|r| (r.id, r.flags, r.pattern.as_str(), r.shortcut.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (1, 0x00003, "General - %s", "General"),
+                (2, 0x0003B, "Trade - %s", "Trade"),
+                (22, 0x10003, "LocalDefense - %s", "LocalDefense"),
+                (23, 0x10004, "WorldDefense", "WorldDefense"),
+                (25, 0x20032, "GuildRecruitment - %s", "GuildRecruitment"),
+                (26, 0x40001, "LookingForGroup", "LookingForGroup"),
+            ]
+        );
+        assert_eq!(cat.zone_channel_id("General - Shattrath City"), 1);
     }
 
     #[test]

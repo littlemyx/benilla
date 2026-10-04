@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const TALENT: &str = "DBFilesClient\\Talent.dbc";
 const TALENT_TAB: &str = "DBFilesClient\\TalentTab.dbc";
@@ -26,12 +26,6 @@ const COL_T_PREREQ: usize = 13;
 const COL_T_PREREQ_RANK: usize = 16;
 const COL_T_FLAGS: usize = 19;
 const COL_T_REQUIRED_SPELL: usize = 20;
-
-const TALENT_TAB_FIELDS: usize = 15;
-const COL_TT_NAME_ENUS: usize = 1;
-const COL_TT_RACE_MASK: usize = 11;
-const COL_TT_CLASS_MASK: usize = 12;
-const COL_TT_BACKGROUND: usize = 14;
 
 /// The vanilla rank ceiling (`MAX_TALENT_RANK`, vmangos `DBCStructure.h`).
 pub const MAX_TALENT_RANK: usize = 5;
@@ -120,7 +114,7 @@ impl TalentCatalog {
     }
 }
 
-fn talent_schema() -> Schema {
+pub(crate) fn talent_schema() -> Schema {
     let mut s = Schema::new("Talent");
     for i in 0..TALENT_FIELDS {
         s.add_field(SchemaField::new(format!("F{i}"), FieldType::UInt32));
@@ -128,17 +122,15 @@ fn talent_schema() -> Schema {
     s
 }
 
-fn talent_tab_schema() -> Schema {
-    let mut s = Schema::new("TalentTab");
-    for i in 0..TALENT_TAB_FIELDS {
-        if i == COL_TT_NAME_ENUS {
-            s.add_field(SchemaField::new("NameEnUs", FieldType::String));
-        } else if i == COL_TT_BACKGROUND {
-            s.add_field(SchemaField::new("BackgroundFile", FieldType::String));
-        } else {
-            s.add_field(SchemaField::new(format!("F{i}"), FieldType::UInt32));
-        }
-    }
+pub(crate) fn talent_tab_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("TalentTab");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new("NameEnUs", FieldType::LocString));
+    s.add_field(SchemaField::new("SpellIconID", FieldType::UInt32));
+    s.add_field(SchemaField::new("RaceMask", FieldType::UInt32));
+    s.add_field(SchemaField::new("ClassMask", FieldType::UInt32));
+    s.add_field(SchemaField::new("F13", FieldType::UInt32));
+    s.add_field(SchemaField::new("BackgroundFile", FieldType::String));
     s
 }
 
@@ -147,16 +139,21 @@ pub fn load_talent_catalog(chain: &mut Chain) -> Result<TalentCatalog> {
     let tab_bytes = chain
         .read_file(TALENT_TAB)
         .context("reading TalentTab.dbc")?;
-    let tab_set = parse(&tab_bytes, talent_tab_schema(), "TalentTab.dbc")?;
+    let tab_schema = talent_tab_schema(chain.dbc_layout());
+    let [name_slot, race_slot, class_slot, background_slot] = slots(
+        &tab_schema,
+        ["NameEnUs", "RaceMask", "ClassMask", "BackgroundFile"],
+    )?;
+    let tab_set = parse(&tab_bytes, tab_schema, "TalentTab.dbc")?;
     let mut tabs = Vec::new();
     for r in tab_set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
         tabs.push(TalentTabInfo {
             id,
-            name: str_at(&tab_set, r, COL_TT_NAME_ENUS).unwrap_or_default(),
-            race_mask: u32_at(r, COL_TT_RACE_MASK).unwrap_or(0),
-            class_mask: u32_at(r, COL_TT_CLASS_MASK).unwrap_or(0),
-            background: str_at(&tab_set, r, COL_TT_BACKGROUND).unwrap_or_default(),
+            name: str_at(&tab_set, r, name_slot).unwrap_or_default(),
+            race_mask: u32_at(r, race_slot).unwrap_or(0),
+            class_mask: u32_at(r, class_slot).unwrap_or(0),
+            background: str_at(&tab_set, r, background_slot).unwrap_or_default(),
         });
     }
 
@@ -190,6 +187,29 @@ pub fn load_talent_catalog(chain: &mut Chain) -> Result<TalentCatalog> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2.4.3's table: the Mage's three pages by class mask, with their art folders.
+    #[test]
+    fn the_2_4_3_mage_pages_read_through_the_wide_name() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_talent_catalog(&mut chain).expect("load Talent/TalentTab");
+        const HUMAN: u8 = 1;
+        const MAGE: u8 = 8;
+        let tabs = cat.tabs_for_class(HUMAN, MAGE);
+        assert_eq!(
+            tabs.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            vec!["Arcane", "Fire", "Frost"]
+        );
+        assert_eq!(
+            tabs.iter()
+                .map(|t| t.background.as_str())
+                .collect::<Vec<_>>(),
+            vec!["MageArcane", "MageFire", "MageFrost"]
+        );
+        // The shipped race mask widened to 2047: Blood Elf (10) and Draenei (11) join.
+        assert!(!cat.tabs_for_class(10, MAGE).is_empty());
+    }
 
     #[test]
     fn real_talent_tables_hold_the_grid_and_prereq_invariants() {

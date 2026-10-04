@@ -398,6 +398,10 @@ impl SpellVisualCatalog {
     }
 }
 
+pub(crate) fn spell_visual_schema() -> Schema {
+    n_u32_schema("SpellVisual", SPELL_VISUAL_FIELDS)
+}
+
 fn n_u32_schema(name: &str, fields: usize) -> Schema {
     let mut s = Schema::new(name);
     for i in 0..fields {
@@ -407,7 +411,7 @@ fn n_u32_schema(name: &str, fields: usize) -> Schema {
 }
 
 /// `SpellVisualEffectName`: id, name, model path, and two columns the client never reads.
-fn effect_name_schema() -> Schema {
+pub(crate) fn effect_name_schema() -> Schema {
     let mut s = Schema::new("SpellVisualEffectName");
     for i in 0..5 {
         let ty = if i == 1 || i == 2 {
@@ -422,7 +426,7 @@ fn effect_name_schema() -> Schema {
 
 /// `SpellVisualKit`: fields 0-14 are ids, 15-18 the signed `CharProcType` keys and 19-34 the
 /// float params, which the dispatcher (`0x60d7c0`) loads with `fld`.
-fn kit_schema() -> Schema {
+pub(crate) fn kit_schema() -> Schema {
     let mut s = Schema::new("SpellVisualKit");
     for i in 0..SPELL_VISUAL_KIT_FIELDS {
         let ty = match i {
@@ -465,11 +469,7 @@ pub fn load_spell_visual_catalog(chain: &mut Chain) -> Result<SpellVisualCatalog
     let sv_bytes = chain
         .read_file(SPELL_VISUAL)
         .context("reading SpellVisual.dbc")?;
-    let sv_set = parse(
-        &sv_bytes,
-        n_u32_schema("SpellVisual", SPELL_VISUAL_FIELDS),
-        "SpellVisual.dbc",
-    )?;
+    let sv_set = parse(&sv_bytes, spell_visual_schema(), "SpellVisual.dbc")?;
     let mut visuals = HashMap::with_capacity(sv_set.records().len());
     for r in sv_set.records() {
         let Some(id) = u32_at(r, 0) else { continue };

@@ -21,7 +21,7 @@ use atmosphere::{
     LP_OCEAN_SHALLOW_ALPHA, LP_SKYBOX, LP_WATER_DEEP_ALPHA, LP_WATER_SHALLOW_ALPHA,
 };
 pub use atmosphere::{ZERO_KEY_COLOR, ZERO_KEY_SCALAR};
-use tables::{band_schema, load_bands, load_float_bands, sample_color, sample_float, Band, DAY};
+use tables::{load_bands, load_float_bands, sample_color, sample_float, Band, DAY};
 
 const LIGHT: &str = "DBFilesClient\\Light.dbc";
 const INT_BAND: &str = "DBFilesClient\\LightIntBand.dbc";
@@ -176,7 +176,7 @@ pub struct LightCatalog {
     skyboxes: HashMap<u32, String>,
 }
 
-fn light_schema() -> Schema {
+pub(crate) fn light_schema() -> Schema {
     let mut s = Schema::new("Light");
     for (n, t) in [
         ("ID", FieldType::UInt32),
@@ -197,7 +197,24 @@ fn light_schema() -> Schema {
 
 /// `LightParams.dbc`: 9 fields, 36-byte records, types per the client's reader `0x589030`.
 /// `cloudTypeID` (+0x0C) is 0 in every 5875 record; the glow is +0x10.
-fn light_params_schema() -> Schema {
+pub(crate) fn light_skybox_schema() -> Schema {
+    let mut schema = Schema::new("LightSkybox");
+    schema.add_field(SchemaField::new("ID", FieldType::UInt32));
+    schema.add_field(SchemaField::new("Name", FieldType::String));
+    schema
+}
+
+/// `LightIntBand.dbc`'s schema: the shared band layout with integer values.
+pub(crate) fn int_band_schema() -> Schema {
+    tables::band_schema("LightIntBand", FieldType::UInt32)
+}
+
+/// `LightFloatBand.dbc`'s schema: the shared band layout with float values.
+pub(crate) fn float_band_schema() -> Schema {
+    tables::band_schema("LightFloatBand", FieldType::Float32)
+}
+
+pub(crate) fn light_params_schema() -> Schema {
     let mut s = Schema::new("LightParams");
     for (n, t) in [
         ("ID", FieldType::UInt32),
@@ -269,16 +286,8 @@ impl LightCatalog {
             }
             v
         };
-        let int_bands = load_bands(
-            chain,
-            INT_BAND,
-            band_schema("LightIntBand", FieldType::UInt32),
-        )?;
-        let float_bands = load_float_bands(
-            chain,
-            FLOAT_BAND,
-            band_schema("LightFloatBand", FieldType::Float32),
-        )?;
+        let int_bands = load_bands(chain, INT_BAND, int_band_schema())?;
+        let float_bands = load_float_bands(chain, FLOAT_BAND, float_band_schema())?;
         let (
             light_params_glow,
             light_params_highlight,
@@ -323,10 +332,7 @@ impl LightCatalog {
             let bytes = chain
                 .read_file(LIGHT_SKYBOX)
                 .with_context(|| format!("reading {LIGHT_SKYBOX}"))?;
-            let mut schema = Schema::new("LightSkybox");
-            schema.add_field(SchemaField::new("ID", FieldType::UInt32));
-            schema.add_field(SchemaField::new("Name", FieldType::String));
-            let rs = parse(&bytes, schema, "LightSkybox")?;
+            let rs = parse(&bytes, light_skybox_schema(), "LightSkybox")?;
             let mut m = HashMap::with_capacity(rs.records().len());
             for r in rs.records() {
                 if let (Some(id), Some(path)) = (u32_at(r, 0), str_at(&rs, r, 1)) {
