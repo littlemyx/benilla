@@ -9,8 +9,8 @@ use crate::Chain;
 const FRAMEXML_TOC: &str = "Interface\\FrameXML\\FrameXML.toc";
 
 /// The build `chain` was installed as, from its `FrameXML.toc` (the last `## Interface:` line
-/// wins, as the reference's TOC parse replaces an earlier value). A number no supported build
-/// states is an error, never a fallback.
+/// wins, as the reference's TOC parse replaces an earlier value). A number no known build
+/// states is an error, never a fallback; a known build the client cannot play still detects.
 pub fn detect_build(chain: &Chain) -> Result<ClientBuild> {
     let toc = chain
         .read(FRAMEXML_TOC)
@@ -42,7 +42,7 @@ fn interface_number(toc: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use benilla_build::VANILLA_1_12_1;
+    use benilla_build::{TBC_2_4_3, VANILLA_1_12_1};
 
     #[test]
     fn the_interface_directive_reads_as_the_toc_parse_reads_it() {
@@ -67,5 +67,12 @@ mod tests {
         let data = crate::wow_data_or_skip!();
         let chain = Chain::open(&data).expect("open the chain");
         assert_eq!(detect_build(&chain).expect("detect"), VANILLA_1_12_1);
+    }
+
+    #[test]
+    fn the_tbc_install_is_2_4_3() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let chain = Chain::open(&data).expect("open the chain");
+        assert_eq!(detect_build(&chain).expect("detect"), TBC_2_4_3);
     }
 }
