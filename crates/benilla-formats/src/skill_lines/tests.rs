@@ -363,3 +363,34 @@ fn a_higher_rank_is_known_only_forward_along_the_chain() {
         "an unchained spell has no chain"
     );
 }
+
+/// 2.4.3's tables: 135 lines with the new Jewelcrafting, the line and category names through the
+/// wide strings, and the icon after both (SpellIcon 1768).
+#[test]
+fn real_2_4_3_skill_lines_read_through_the_wide_strings() {
+    let data = crate::wow_data_tbc_or_skip!();
+    let mut chain = crate::open_chain(&data).expect("open chain");
+    let cat = load_skill_line_catalog(&mut chain).expect("load skill lines");
+    assert_eq!(cat.len(), 135);
+    let jewel = cat.line(755).expect("Jewelcrafting");
+    assert_eq!(jewel.name, "Jewelcrafting");
+    assert_eq!(jewel.category_id, 11);
+    assert_eq!(
+        jewel.icon.as_deref(),
+        Some("Interface\\Icons\\INV_Misc_Gem_01")
+    );
+    assert!(jewel
+        .description
+        .starts_with("Higher jewelcrafting skill allows you to learn"));
+    assert_eq!(
+        cat.line(759).map(|l| l.name.as_str()),
+        Some("Language: Draenei")
+    );
+    let smith = cat.line(164).expect("Blacksmithing");
+    assert_eq!(
+        smith.icon.as_deref(),
+        Some("Interface\\Icons\\Trade_BlackSmithing")
+    );
+    assert_eq!(cat.category(6), Some(("Weapon Skills", 5)));
+    assert_eq!(cat.category(11).map(|c| c.0), Some("Professions"));
+}

@@ -8,12 +8,10 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::DbcLayout;
 
 const PACKAGE: &str = "DBFilesClient\\Package.dbc";
-
-/// The column count the loader requires.
-const PACKAGE_FIELDS: usize = 12;
 
 /// One `Package.dbc` row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,32 +25,30 @@ pub struct PackageRow {
     pub name: String,
 }
 
-pub(crate) fn package_schema() -> Schema {
-    let mut schema = Schema::new("Package");
-    for i in 0..PACKAGE_FIELDS {
-        let ty = if i == 1 || i == 3 {
-            FieldType::String
-        } else {
-            FieldType::UInt32
-        };
-        schema.add_field(SchemaField::new(format!("F{i}"), ty));
-    }
+pub(crate) fn package_schema(layout: DbcLayout) -> Schema {
+    let mut schema = layout.schema("Package");
+    schema.add_field(SchemaField::new("ID", FieldType::UInt32));
+    schema.add_field(SchemaField::new("Icon", FieldType::String));
+    schema.add_field(SchemaField::new("Cost", FieldType::UInt32));
+    schema.add_field(SchemaField::new("Name", FieldType::LocString));
     schema
 }
 
 /// Load `Package.dbc`'s rows, in file order.
 pub fn load_packages(chain: &mut Chain) -> Result<Vec<PackageRow>> {
     let bytes = chain.read_file(PACKAGE).context("reading Package.dbc")?;
-    let set = parse(&bytes, package_schema(), "Package.dbc")?;
+    let schema = package_schema(chain.dbc_layout());
+    let [icon_slot, cost_slot, name_slot] = slots(&schema, ["Icon", "Cost", "Name"])?;
+    let set = parse(&bytes, schema, "Package.dbc")?;
     Ok(set
         .records()
         .iter()
         .filter_map(|r| {
             Some(PackageRow {
                 id: u32_at(r, 0)?,
-                icon: str_at(&set, r, 1).unwrap_or_default(),
-                cost: u32_at(r, 2)? as i32,
-                name: str_at(&set, r, 3).unwrap_or_default(),
+                icon: str_at(&set, r, icon_slot).unwrap_or_default(),
+                cost: u32_at(r, cost_slot)? as i32,
+                name: str_at(&set, r, name_slot).unwrap_or_default(),
             })
         })
         .collect())
@@ -65,6 +61,23 @@ mod tests {
     #[test]
     fn the_one_shipped_package_is_the_test_package() {
         let data = crate::wow_data_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let rows = load_packages(&mut chain).expect("load Package.dbc");
+        assert_eq!(
+            rows,
+            [PackageRow {
+                id: 2,
+                icon: "INV_BOX_04".into(),
+                cost: 10,
+                name: "Test Package".into(),
+            }]
+        );
+    }
+
+    /// 2.4.3's table: the same one test package, its name read after the cost.
+    #[test]
+    fn the_2_4_3_table_is_the_same_test_package() {
+        let data = crate::wow_data_tbc_or_skip!();
         let mut chain = crate::open_chain(&data).expect("open chain");
         let rows = load_packages(&mut chain).expect("load Package.dbc");
         assert_eq!(

@@ -177,13 +177,13 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("Map", maps::map_schema()),
     plain!("Material", material::schema()),
     plain!("NPCSounds", npc_greeting::npcsounds_schema()),
-    plain!("Package", packages::package_schema()),
+    wide!("Package", packages::package_schema),
     plain!(
         "PageTextMaterial",
         page_text_material::page_text_material_schema()
     ),
-    plain!("PetLoyalty", pet_stats::loyalty_schema()),
-    plain!("PetPersonality", pet_stats::personality_schema()),
+    wide!("PetLoyalty", pet_stats::loyalty_schema),
+    wide!("PetPersonality", pet_stats::personality_schema),
     Table {
         name: "QuestInfo",
         shape: Shape::Schema(|l| dbc::id_name_schema("QuestInfo", l, 1, 10)),
@@ -192,14 +192,11 @@ pub(crate) static TABLES: &[Table] = &[
         name: "QuestSort",
         shape: Shape::Schema(|l| dbc::id_name_schema("QuestSort", l, 1, 10)),
     },
-    plain!("ServerMessages", server_messages::schema()),
+    wide!("ServerMessages", server_messages::schema),
     plain!("SheatheSoundLookups", sheathe::schema()),
-    plain!("SkillLine", skill_lines::skill_line_schema()),
+    wide!("SkillLine", skill_lines::skill_line_schema),
     plain!("SkillLineAbility", skill_lines::skill_line_ability_schema()),
-    plain!(
-        "SkillLineCategory",
-        skill_lines::skill_line_category_schema()
-    ),
+    wide!("SkillLineCategory", skill_lines::skill_line_category_schema),
     plain!(
         "SkillRaceClassInfo",
         skill_lines::skill_race_class_info_schema()
@@ -222,15 +219,15 @@ pub(crate) static TABLES: &[Table] = &[
         "SpellEffectCameraShakes",
         camera_shakes::spell_effect_camera_shakes_schema()
     ),
-    plain!("SpellFocusObject", spell_focus::schema()),
+    wide!("SpellFocusObject", spell_focus::schema),
     plain!("SpellIcon", dbc::spell_icon_schema()),
     plain!(
         "SpellItemEnchantment",
         item_visuals::spell_item_enchantment_schema()
     ),
-    plain!("SpellMechanic", spell_mechanic::schema()),
+    wide!("SpellMechanic", spell_mechanic::schema),
     plain!("SpellRadius", spells::spell_radius_schema()),
-    plain!("SpellRange", spells::spell_range_schema()),
+    wide!("SpellRange", spells::spell_range_schema),
     plain!("SpellShapeshiftForm", spells::shapeshift_form_schema()),
     plain!("SpellVisual", spell_visual::spell_visual_schema()),
     plain!("SpellVisualEffectName", spell_visual::effect_name_schema()),
@@ -256,11 +253,11 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("VocalUISounds", vocal_ui_sounds::vocal_ui_sounds_schema()),
     plain!("WeaponImpactSounds", weapon_impact::schema()),
     plain!("WeaponSwingSounds2", weapon_swing::schema()),
-    plain!("WMOAreaTable", wmo_area::schema()),
+    wide!("WMOAreaTable", wmo_area::schema),
     plain!("WorldMapArea", world_map_area::schema()),
     plain!("WorldMapContinent", world_map_continent::schema()),
     plain!("WorldMapOverlay", world_map_overlay::schema()),
-    plain!("WorldStateUI", world_state_ui::schema()),
+    wide!("WorldStateUI", world_state_ui::schema),
     plain!("ZoneIntroMusicTable", area_sound::intro_schema()),
     plain!("ZoneMusic", area_sound::zone_music_schema()),
 ];

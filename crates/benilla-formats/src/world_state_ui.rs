@@ -8,8 +8,8 @@
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const WORLD_STATE_UI: &str = "DBFilesClient\\WorldStateUI.dbc";
 
@@ -71,29 +71,20 @@ impl WorldStateUiCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("WorldStateUI");
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("WorldStateUI");
     for name in ["ID", "MapID", "AreaID"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
     s.add_field(SchemaField::new("Icon", FieldType::String));
-    let loc = |s: &mut Schema, name: &str| {
-        s.add_field(SchemaField::new(name, FieldType::String)); // enUS (locale 0)
-        s.add_field(SchemaField::new_array(
-            format!("{name}OtherLocales"),
-            FieldType::String,
-            7,
-        ));
-        s.add_field(SchemaField::new(format!("{name}Flags"), FieldType::UInt32));
-    };
-    loc(&mut s, "Text");
-    loc(&mut s, "Tooltip");
-    // +0x58: loaded, never read.
+    s.add_field(SchemaField::new("Text", FieldType::LocString));
+    s.add_field(SchemaField::new("Tooltip", FieldType::LocString));
+    // +0x58 in 5875: loaded, never read.
     for name in ["UnreadCol22", "StateVariable", "Type"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
     s.add_field(SchemaField::new("DynamicIcon", FieldType::String));
-    loc(&mut s, "DynamicTooltip");
+    s.add_field(SchemaField::new("DynamicTooltip", FieldType::LocString));
     s.add_field(SchemaField::new("ExtendedUI", FieldType::String));
     s.add_field(SchemaField::new_array(
         "ExtendedUIStateVariable",
@@ -108,7 +99,23 @@ pub fn load_world_state_ui_catalog(chain: &mut Chain) -> Result<WorldStateUiCata
     let bytes = chain
         .read_file(WORLD_STATE_UI)
         .context("reading WorldStateUI.dbc")?;
-    let rs = parse(&bytes, schema(), "WorldStateUI")?;
+    let schema = schema(chain.dbc_layout());
+    let [icon, text, tooltip, state_variable, ui_type, dynamic_icon, dynamic_tooltip, extended_ui, extended_state0] =
+        slots(
+            &schema,
+            [
+                "Icon",
+                "Text",
+                "Tooltip",
+                "StateVariable",
+                "Type",
+                "DynamicIcon",
+                "DynamicTooltip",
+                "ExtendedUI",
+                "ExtendedUIStateVariable",
+            ],
+        )?;
+    let rs = parse(&bytes, schema, "WorldStateUI")?;
     let mut rows = Vec::with_capacity(rs.records().len());
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -117,18 +124,18 @@ pub fn load_world_state_ui_catalog(chain: &mut Chain) -> Result<WorldStateUiCata
             WorldStateUiRow {
                 map_id: u32_at(r, 1).unwrap_or(0),
                 area_id: u32_at(r, 2).unwrap_or(0),
-                icon: str_at(&rs, r, 3).unwrap_or_default(),
-                text: str_at(&rs, r, 4).unwrap_or_default(),
-                tooltip: str_at(&rs, r, 13).unwrap_or_default(),
-                state_variable: u32_at(r, 23).unwrap_or(0),
-                ui_type: u32_at(r, 24).unwrap_or(0),
-                dynamic_icon: str_at(&rs, r, 25).unwrap_or_default(),
-                dynamic_tooltip: str_at(&rs, r, 26).unwrap_or_default(),
-                extended_ui: str_at(&rs, r, 35).unwrap_or_default(),
+                icon: str_at(&rs, r, icon).unwrap_or_default(),
+                text: str_at(&rs, r, text).unwrap_or_default(),
+                tooltip: str_at(&rs, r, tooltip).unwrap_or_default(),
+                state_variable: u32_at(r, state_variable).unwrap_or(0),
+                ui_type: u32_at(r, ui_type).unwrap_or(0),
+                dynamic_icon: str_at(&rs, r, dynamic_icon).unwrap_or_default(),
+                dynamic_tooltip: str_at(&rs, r, dynamic_tooltip).unwrap_or_default(),
+                extended_ui: str_at(&rs, r, extended_ui).unwrap_or_default(),
                 extended_ui_state: [
-                    u32_at(r, 36).unwrap_or(0),
-                    u32_at(r, 37).unwrap_or(0),
-                    u32_at(r, 38).unwrap_or(0),
+                    u32_at(r, extended_state0).unwrap_or(0),
+                    u32_at(r, extended_state0 + 1).unwrap_or(0),
+                    u32_at(r, extended_state0 + 2).unwrap_or(0),
                 ],
             },
         ));
@@ -234,5 +241,31 @@ mod tests {
             with_macro, 9,
             "the always-up rows read the world-state table"
         );
+    }
+
+    /// 2.4.3's table: 61 rows, the Alterac-style tower row reworded, and Eye of the Storm's
+    /// capture-point row 139 with its extended UI and state variables after three wide strings.
+    #[test]
+    fn the_2_4_3_table_reads_the_capture_point_rows() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_world_state_ui_catalog(&mut chain).expect("load WorldStateUI");
+        assert_eq!(cat.len(), 61);
+        let row = |id: u32| {
+            cat.rows()
+                .find(|(i, _)| *i == id)
+                .map(|(_, r)| r)
+                .expect("row")
+        };
+        let tower = row(136);
+        assert_eq!(tower.text, "Controlled: %2327w");
+        assert_eq!(tower.tooltip, "Alliance Towers Controlled");
+        assert_eq!(tower.icon, "Interface\\WorldStateFrame\\AllianceTower");
+        let capture = row(139);
+        assert_eq!((capture.map_id, capture.area_id), (530, 3483));
+        assert_eq!(capture.text, "Progress: %2427w");
+        assert_eq!((capture.state_variable, capture.ui_type), (2473, 1));
+        assert_eq!(capture.extended_ui, "CAPTUREPOINT");
+        assert_eq!(capture.extended_ui_state, [2474, 2475, 0]);
     }
 }

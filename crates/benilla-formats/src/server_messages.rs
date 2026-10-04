@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::DbcLayout;
 
 const SERVER_MESSAGES: &str = "DBFilesClient\\ServerMessages.dbc";
 
@@ -54,11 +55,10 @@ impl ServerMessagesCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("ServerMessages");
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ServerMessages");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
-    s.add_field(SchemaField::new_array("Text", FieldType::String, 8));
-    s.add_field(SchemaField::new("TextMask", FieldType::UInt32));
+    s.add_field(SchemaField::new("Text", FieldType::LocString));
     s.set_key_field("ID");
     s
 }
@@ -67,10 +67,12 @@ pub fn load_server_messages_catalog(chain: &mut Chain) -> Result<ServerMessagesC
     let bytes = chain
         .read_file(SERVER_MESSAGES)
         .context("reading ServerMessages.dbc")?;
-    let rs = parse(&bytes, schema(), "ServerMessages")?;
+    let schema = schema(chain.dbc_layout());
+    let [text_slot] = slots(&schema, ["Text"])?;
+    let rs = parse(&bytes, schema, "ServerMessages")?;
     let mut rows = Vec::with_capacity(rs.records().len());
     for r in rs.records() {
-        let (Some(id), Some(text)) = (u32_at(r, 0), str_at(&rs, r, 1)) else {
+        let (Some(id), Some(text)) = (u32_at(r, 0), str_at(&rs, r, text_slot)) else {
             continue;
         };
         rows.push((id, text));
@@ -133,5 +135,24 @@ mod tests {
     #[test]
     fn an_empty_fill_never_formats() {
         assert_eq!(shipped().compose(1, ""), "[SERVER] Shutdown in %s");
+    }
+
+    /// 2.4.3's table: the same five rows, read through the wide string.
+    #[test]
+    fn the_2_4_3_table_is_the_same_five_rows() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_server_messages_catalog(&mut chain).expect("load ServerMessages");
+        let got: Vec<(u32, &str)> = cat.rows.iter().map(|(i, t)| (*i, t.as_str())).collect();
+        assert_eq!(
+            got,
+            vec![
+                (1, "[SERVER] Shutdown in %s"),
+                (2, "[SERVER] Restart in %s"),
+                (3, "%s"),
+                (4, "[SERVER] Shutdown cancelled"),
+                (5, "[SERVER] Restart cancelled"),
+            ]
+        );
     }
 }

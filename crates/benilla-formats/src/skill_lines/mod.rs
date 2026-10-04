@@ -18,17 +18,12 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const SKILL_LINE: &str = "DBFilesClient\\SkillLine.dbc";
 const SKILL_LINE_ABILITY: &str = "DBFilesClient\\SkillLineAbility.dbc";
 const SKILL_RACE_CLASS_INFO: &str = "DBFilesClient\\SkillRaceClassInfo.dbc";
-
-const SKILL_LINE_FIELDS: usize = 22;
-const COL_SL_NAME_ENUS: usize = 3;
-const COL_SL_DESC_ENUS: usize = 12;
-const COL_SL_SPELL_ICON: usize = 21;
 
 const SKILL_LINE_ABILITY_FIELDS: usize = 15;
 const COL_SLA_SKILL_ID: usize = 1;
@@ -42,9 +37,6 @@ const COL_SLA_TRIVIAL_LOW: usize = 11;
 const MAX_RANK_CHAIN: usize = 16;
 
 const SKILL_LINE_CATEGORY: &str = "DBFilesClient\\SkillLineCategory.dbc";
-const SKILL_LINE_CATEGORY_FIELDS: usize = 11;
-const COL_SLC_NAME_ENUS: usize = 1;
-const COL_SLC_ORDER: usize = 10;
 
 const SKILL_RACE_CLASS_INFO_FIELDS: usize = 8;
 const COL_SRCI_SKILL_ID: usize = 1;
@@ -361,17 +353,14 @@ impl SkillLineCatalog {
     }
 }
 
-pub(crate) fn skill_line_schema() -> Schema {
-    let mut s = Schema::new("SkillLine");
-    for i in 0..SKILL_LINE_FIELDS {
-        if i == COL_SL_NAME_ENUS {
-            s.add_field(SchemaField::new("NameEnUs", FieldType::String));
-        } else if i == COL_SL_DESC_ENUS {
-            s.add_field(SchemaField::new("DescEnUs", FieldType::String));
-        } else {
-            s.add_field(SchemaField::new(format!("F{i}"), FieldType::UInt32));
-        }
-    }
+pub(crate) fn skill_line_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("SkillLine");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new("CategoryID", FieldType::UInt32));
+    s.add_field(SchemaField::new("SkillCostsID", FieldType::UInt32));
+    s.add_field(SchemaField::new("NameEnUs", FieldType::LocString));
+    s.add_field(SchemaField::new("DescEnUs", FieldType::LocString));
+    s.add_field(SchemaField::new("SpellIconID", FieldType::UInt32));
     s
 }
 
@@ -383,16 +372,11 @@ pub(crate) fn skill_line_ability_schema() -> Schema {
     s
 }
 
-pub(crate) fn skill_line_category_schema() -> Schema {
-    let mut s = Schema::new("SkillLineCategory");
-    for i in 0..SKILL_LINE_CATEGORY_FIELDS {
-        let ty = if i == COL_SLC_NAME_ENUS {
-            FieldType::String
-        } else {
-            FieldType::UInt32
-        };
-        s.add_field(SchemaField::new(format!("F{i}"), ty));
-    }
+pub(crate) fn skill_line_category_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("SkillLineCategory");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
+    s.add_field(SchemaField::new("DisplayOrder", FieldType::UInt32));
     s
 }
 
@@ -402,17 +386,17 @@ fn load_categories(chain: &mut Chain) -> HashMap<u32, (String, u32)> {
     let Ok(bytes) = chain.read_file(SKILL_LINE_CATEGORY) else {
         return map;
     };
-    let Ok(set) = parse(
-        &bytes,
-        skill_line_category_schema(),
-        "SkillLineCategory.dbc",
-    ) else {
+    let schema = skill_line_category_schema(chain.dbc_layout());
+    let Ok([name_slot, order_slot]) = slots(&schema, ["Name", "DisplayOrder"]) else {
+        return map;
+    };
+    let Ok(set) = parse(&bytes, schema, "SkillLineCategory.dbc") else {
         return map;
     };
     for r in set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
-        if let Some(name) = str_at(&set, r, COL_SLC_NAME_ENUS) {
-            map.insert(id, (name, u32_at(r, COL_SLC_ORDER).unwrap_or(0)));
+        if let Some(name) = str_at(&set, r, name_slot) {
+            map.insert(id, (name, u32_at(r, order_slot).unwrap_or(0)));
         }
     }
     map
@@ -465,16 +449,21 @@ pub fn load_skill_line_catalog(chain: &mut Chain) -> Result<SkillLineCatalog> {
     let sl_bytes = chain
         .read_file(SKILL_LINE)
         .context("reading SkillLine.dbc")?;
-    let sl_set = parse(&sl_bytes, skill_line_schema(), "SkillLine.dbc")?;
+    let sl_schema = skill_line_schema(chain.dbc_layout());
+    let [category_slot, name_slot, desc_slot, icon_slot] = slots(
+        &sl_schema,
+        ["CategoryID", "NameEnUs", "DescEnUs", "SpellIconID"],
+    )?;
+    let sl_set = parse(&sl_bytes, sl_schema, "SkillLine.dbc")?;
     let mut lines: HashMap<u32, SkillLineInfo> = HashMap::new();
     for r in sl_set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
-        let name = str_at(&sl_set, r, COL_SL_NAME_ENUS).unwrap_or_default();
-        let icon = u32_at(r, COL_SL_SPELL_ICON)
+        let name = str_at(&sl_set, r, name_slot).unwrap_or_default();
+        let icon = u32_at(r, icon_slot)
             .filter(|&i| i != 0)
             .and_then(|i| icons.get(&i).cloned());
-        let category_id = u32_at(r, 1).unwrap_or(0);
-        let description = str_at(&sl_set, r, COL_SL_DESC_ENUS).unwrap_or_default();
+        let category_id = u32_at(r, category_slot).unwrap_or(0);
+        let description = str_at(&sl_set, r, desc_slot).unwrap_or_default();
         lines.insert(
             id,
             SkillLineInfo {

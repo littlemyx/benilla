@@ -10,20 +10,11 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{f32_at, parse, str_at, u32_at};
+use crate::dbc::{f32_at, parse, slots, str_at, u32_at};
+use crate::DbcLayout;
 
 const PET_PERSONALITY: &str = "DBFilesClient\\PetPersonality.dbc";
 const PET_LOYALTY: &str = "DBFilesClient\\PetLoyalty.dbc";
-
-/// `PetPersonality.dbc`'s column count, which `benilla-dbc` checks against the header.
-const PERSONALITY_FIELDS: usize = 19;
-const LOYALTY_FIELDS: usize = 10;
-/// The enUS `Name` column in both files, the `+4` in the client's `[row + 4*locale + 4]`.
-const NAME_FIELD: usize = 1;
-
-const THRESHOLD_FIELD: usize = 0x28 / 4;
-const DAMAGE_FIELD: usize = 0x34 / 4;
-const LOYALTY_RATE_FIELD: usize = 0x40 / 4;
 
 /// The personality the client falls back to when the id is out of range or its row is missing
 /// (`0x4be96c`), "Personality: Standard".
@@ -112,31 +103,29 @@ impl PetLoyaltyNames {
     }
 }
 
-pub(crate) fn personality_schema() -> Schema {
-    let mut s = Schema::new("PetPersonality");
-    for i in 0..PERSONALITY_FIELDS {
-        let ty = match i {
-            NAME_FIELD => FieldType::String,
-            i if (DAMAGE_FIELD..DAMAGE_FIELD + 3).contains(&i) => FieldType::Float32,
-            i if (LOYALTY_RATE_FIELD..LOYALTY_RATE_FIELD + 3).contains(&i) => FieldType::Float32,
-            // ID, the rest of the name block, and the thresholds, compared as integers.
-            _ => FieldType::UInt32,
-        };
-        s.add_field(SchemaField::new(format!("F{i}"), ty));
+pub(crate) fn personality_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("PetPersonality");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
+    for i in 0..3 {
+        s.add_field(SchemaField::new(format!("Threshold{i}"), FieldType::UInt32));
+    }
+    for i in 0..3 {
+        s.add_field(SchemaField::new(format!("Damage{i}"), FieldType::Float32));
+    }
+    for i in 0..3 {
+        s.add_field(SchemaField::new(
+            format!("LoyaltyRate{i}"),
+            FieldType::Float32,
+        ));
     }
     s
 }
 
-pub(crate) fn loyalty_schema() -> Schema {
-    let mut s = Schema::new("PetLoyalty");
-    for i in 0..LOYALTY_FIELDS {
-        let ty = if i == NAME_FIELD {
-            FieldType::String
-        } else {
-            FieldType::UInt32
-        };
-        s.add_field(SchemaField::new(format!("F{i}"), ty));
-    }
+pub(crate) fn loyalty_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("PetLoyalty");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -145,7 +134,10 @@ pub fn load_pet_personalities(chain: &mut Chain) -> Result<PetPersonalities> {
     let bytes = chain
         .read_file(PET_PERSONALITY)
         .with_context(|| format!("reading {PET_PERSONALITY}"))?;
-    let rs = parse(&bytes, personality_schema(), "PetPersonality.dbc")?;
+    let schema = personality_schema(chain.dbc_layout());
+    let [threshold0, damage0, loyalty_rate0] =
+        slots(&schema, ["Threshold0", "Damage0", "LoyaltyRate0"])?;
+    let rs = parse(&bytes, schema, "PetPersonality.dbc")?;
     let mut by_id = HashMap::new();
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -154,9 +146,9 @@ pub fn load_pet_personalities(chain: &mut Chain) -> Result<PetPersonalities> {
         by_id.insert(
             id,
             PetPersonality {
-                thresholds: triple_u32(THRESHOLD_FIELD),
-                damage: triple_f32(DAMAGE_FIELD),
-                loyalty_rate: triple_f32(LOYALTY_RATE_FIELD),
+                thresholds: triple_u32(threshold0),
+                damage: triple_f32(damage0),
+                loyalty_rate: triple_f32(loyalty_rate0),
             },
         );
     }
@@ -168,11 +160,13 @@ pub fn load_pet_loyalty_names(chain: &mut Chain) -> Result<PetLoyaltyNames> {
     let bytes = chain
         .read_file(PET_LOYALTY)
         .with_context(|| format!("reading {PET_LOYALTY}"))?;
-    let rs = parse(&bytes, loyalty_schema(), "PetLoyalty.dbc")?;
+    let schema = loyalty_schema(chain.dbc_layout());
+    let [name_slot] = slots(&schema, ["Name"])?;
+    let rs = parse(&bytes, schema, "PetLoyalty.dbc")?;
     let mut by_id = HashMap::new();
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
-        if let Some(name) = str_at(&rs, r, NAME_FIELD) {
+        if let Some(name) = str_at(&rs, r, name_slot) {
             by_id.insert(id, name);
         }
     }
@@ -264,5 +258,27 @@ mod tests {
         // Level 0 is "no loyalty yet" and the client answers nil, not the first row.
         assert_eq!(n.name(0), None);
         assert_eq!(n.name(9), None);
+    }
+
+    /// 2.4.3's tables: the same two personalities, the triples read after the 17-slot name, and
+    /// the eight loyalty names.
+    #[test]
+    fn the_2_4_3_tables_read_the_triples_after_the_wide_name() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let t = load_pet_personalities(&mut chain).expect("load PetPersonality.dbc");
+        assert_eq!(t.len(), 2);
+        let one = t.for_pet(Some(1)).expect("id 1");
+        assert_eq!(one.thresholds, [0, 333_000, 666_000]);
+        assert_eq!(one.damage, [0.75, 1.0, 1.25]);
+        assert_eq!(one.loyalty_rate, [-10.0, 5.0, 20.0]);
+        let three = t.for_pet(Some(3)).expect("id 3");
+        assert_eq!(three.thresholds, [0, 250_000, 750_000]);
+        assert_eq!(three.damage, [0.0, 1.0, 1.25]);
+        assert_eq!(three.loyalty_rate, [-1.0, 0.0, 2.0]);
+        let n = load_pet_loyalty_names(&mut chain).expect("load PetLoyalty.dbc");
+        assert_eq!(n.len(), 8);
+        assert_eq!(n.name(1), Some("(Loyalty Level 1) Rebellious"));
+        assert_eq!(n.name(3), Some("(Loyalty Level 3) Submissive"));
     }
 }
