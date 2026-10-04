@@ -4,133 +4,61 @@ use crate::wire::{capacity_hint, read_u32_le, read_u8, Vector3d};
 
 use super::movement::ObjectType;
 
-// Descriptor field indices for build 5875.
-const FIELD_OBJECT_TYPE: u16 = 2;
-const FIELD_OBJECT_SCALE_X: u16 = 4;
-// The creator of a spell-spawned object (bobber, ritual portal); 0 for a world spawn.
-const FIELD_GAMEOBJECT_CREATED_BY: u16 = 6;
-const FIELD_GAMEOBJECT_DISPLAYID: u16 = 8;
-const FIELD_GAMEOBJECT_FLAGS: u16 = 9;
-// The spawn's rotation quaternion (x, y, z, w), four floats.
-const FIELD_GAMEOBJECT_ROTATION: u16 = 10;
-pub const FIELD_GAMEOBJECT_STATE: u16 = 14;
-const FIELD_GAMEOBJECT_POS_X: u16 = 15;
-const FIELD_GAMEOBJECT_POS_Y: u16 = 16;
-const FIELD_GAMEOBJECT_POS_Z: u16 = 17;
-const FIELD_GAMEOBJECT_FACING: u16 = 18;
-// The client reads it at GameObject block byte 0x34. vmangos `UpdateFields_1_5_1.h` adds a
-// `GAMEOBJECT_TIMESTAMP` that would make it 20, but that is not the 5875 layout.
-const FIELD_GAMEOBJECT_DYN_FLAGS: u16 = 19;
-// The client reads it at `[go+0x110]+0x38`, between DYN_FLAGS and TYPE_ID.
-const FIELD_GAMEOBJECT_FACTION: u16 = 20;
-const FIELD_GAMEOBJECT_TYPE_ID: u16 = 21;
-// OBJECT_END + 0x10 (vmangos `UpdateFields_1_12_1.h:317`).
-const FIELD_GAMEOBJECT_LEVEL: u16 = 22;
-/// `CORPSE_FIELD_DYNAMIC_FLAGS`; bit 0 is lootable insignia. On a unit, index 36 is
-/// `UNIT_FIELD_BYTES_0`, so a field edge carries its object class.
-pub const FIELD_CORPSE_DYNAMIC_FLAGS: u16 = 36;
-// UNIT fields. The client reads FLAGS, COMBATREACH, DYNAMIC_FLAGS and NPC_FLAGS at unit block
-// bytes 0xa0, 0x1f0, 0x224 and 0x234.
-/// The unit's target; the client turns an idle unit to face it, and no packet carries that facing.
-const FIELD_UNIT_TARGET: u16 = 16;
-/// The unit this one charms (`UpdateFields_1_12_1.h:41`), descriptor byte 0.
-const FIELD_UNIT_CHARM: u16 = 6;
-/// The unit this one summoned (`UpdateFields_1_12_1.h:42`); on us, the `"pet"` unit. The pet bar
-/// reads its guid off `SMSG_PET_SPELLS`, so the two can disagree briefly around a summon.
-const FIELD_UNIT_SUMMON: u16 = 8;
-/// The charmer, 0 for none. The attack-start check `0x612df0` refuses a swing when it is set and
-/// is not us (`ERR_ATTACK_CHARMED`); `0x5ee5a0` and `0x5ff580` prefer it as the owner.
-const FIELD_UNIT_CHARMEDBY: u16 = 10;
-/// The summoner of a pet, guardian or totem; with CREATEDBY, the "owned by me" test of `0x5efea0`.
-const FIELD_UNIT_SUMMONEDBY: u16 = 12;
-const FIELD_UNIT_CREATEDBY: u16 = 14;
-/// The channel's target, possibly the caster (`UpdateFields_1_12_1.h:48`). Public, so another
-/// unit's channel renders from it; `MSG_CHANNEL_START`/`UPDATE` reach only the caster.
-const FIELD_UNIT_CHANNEL_OBJECT: u16 = 20;
-pub const FIELD_UNIT_HEALTH: u16 = 22;
-/// Five power slots: mana, rage, focus, energy, happiness; `MAXPOWER1..5` follow `MAXHEALTH`.
-const FIELD_UNIT_POWER1: u16 = 23;
-pub const FIELD_UNIT_MAXHEALTH: u16 = 28;
-const FIELD_UNIT_MAXPOWER1: u16 = 29;
-pub const FIELD_UNIT_LEVEL: u16 = 34;
-pub const FIELD_UNIT_FACTIONTEMPLATE: u16 = 35;
-const FIELD_UNIT_BYTES_0: u16 = 36;
-pub const FIELD_UNIT_BYTES_1: u16 = 138;
-pub const FIELD_UNIT_FLAGS: u16 = 46;
-// The aura block: four public parallel arrays (`UpdateFields_1_12_1.h:67-70`), which the client
-// reads at unit block bytes 0xa4 and 0x164 onward. Duration reaches only the aura's own target,
-// over `SMSG_UPDATE_AURA_DURATION`, and no packet carries the caster.
-pub const FIELD_UNIT_AURA: u16 = 47;
-/// Nibble-packed, 8 slots per `u32` (`SpellAuraHolder::SetAuraFlag`, `SpellAuras.cpp:7456-7462`).
-pub const FIELD_UNIT_AURAFLAGS: u16 = 95;
-/// Byte-packed, 4 slots per `u32`: the caster's level (`SetAuraLevel`, `SpellAuras.cpp:7484`).
-const FIELD_UNIT_AURALEVELS: u16 = 101;
-/// Byte-packed, 4 slots per `u32`, holding `stack - 1` (`SpellAuras.cpp:7500-7507`).
-pub const FIELD_UNIT_AURAAPPLICATIONS: u16 = 113;
-/// Aura-state bits, tested as `1 << (state - 1)` by the usable check (client `[unit+0x110]+0x1dc`).
-const FIELD_UNIT_AURASTATE: u16 = 125;
-/// Horizontal bounding radius, in yards.
-const FIELD_UNIT_BOUNDINGRADIUS: u16 = 129;
-const FIELD_UNIT_COMBATREACH: u16 = 130;
-const FIELD_UNIT_BASE_MANA: u16 = 162;
-const FIELD_UNIT_BASE_HEALTH: u16 = 163;
-const FIELD_UNIT_DISPLAYID: u16 = 131;
-/// The unshifted appearance, untouched by forms, morphs and polymorph (`UpdateFields_1_12_1.h:77`).
-/// The client sizes the mover collision box from it (`0x60b270`), so a shapeshift keeps the box.
-const FIELD_UNIT_NATIVEDISPLAYID: u16 = 132;
-/// The ridden mount's `CreatureDisplayInfo` id, 0 when unmounted; this field, not the aura, is the
-/// mounted state (`Unit::IsMounted`; client `[unit+0x110]+0x1fc`).
-pub const FIELD_UNIT_MOUNTDISPLAYID: u16 = 133;
-/// Nonzero on a pet or charm; the rank getter `0x605620` then forces rank 0, so an enslaved mob
-/// shows no elite dragon, tooltip rank word or boss skull.
-const FIELD_UNIT_PETNUMBER: u16 = 139;
-/// Unix time of the pet's last rename (`Pet.cpp:285`). The name itself comes from
-/// `CMSG_PET_NAME_QUERY`, cached by pet number, so a change here invalidates that cache.
-const FIELD_UNIT_PET_NAME_TIMESTAMP: u16 = 140;
-/// With the next field, the `(currXP, nextXP)` pair `GetPetExperience` (`0x4be840`) returns; the
-/// client reads both unsigned.
-const FIELD_UNIT_PETEXPERIENCE: u16 = 141;
-const FIELD_UNIT_PETNEXTLEVELEXP: u16 = 142;
-/// Two `u16`s: `GetPetTrainingPoints` (`0x4be790`) returns the high word first, which
-/// `PetPaperDollFrame.lua` names `totalPoints`, then the low word as `spent`.
-const FIELD_UNIT_TRAINING_POINTS: u16 = 149;
-pub const FIELD_UNIT_DYNAMIC_FLAGS: u16 = 143;
-/// The spell being channeled, 0 for none (`UpdateFields_1_12_1.h:89`).
-pub const FIELD_UNIT_CHANNEL_SPELL: u16 = 144;
-/// The summoning spell, 0 for none; the first gate of the client's feed-pet path `0x6ea1e0`.
-const FIELD_UNIT_CREATED_BY_SPELL: u16 = 146;
-pub const FIELD_UNIT_NPC_FLAGS: u16 = 147;
-/// The looping state emote, an `Emotes.dbc` id or 0; on a player, the server's echo of a
-/// state-class emote (`ChatHandler.cpp:738`).
-const FIELD_UNIT_NPC_EMOTESTATE: u16 = 148;
-/// A creature's weapon display ids (main hand, off hand, ranged), with no item behind them
-/// (`Creature.cpp:4158-4181`).
-const FIELD_UNIT_VIRTUAL_ITEM_SLOT_DISPLAY: u16 = 37;
-/// Two dwords per weapon slot: class, subclass, material and inventory type bytes, then the
-/// sheath byte (`CreatureDefines.h:621-628`).
-const FIELD_UNIT_VIRTUAL_ITEM_INFO: u16 = 40;
-/// Byte 0 is the sheath state (`UnitDefines.h:93`); a player's comes only from `CMSG_SETSHEATHED`.
-/// Not `FIELD_PLAYER_BYTES_2`.
-const FIELD_UNIT_BYTES_2: u16 = 164;
-// UNIT combat and stat block: offset from OBJECT_END, then the wire type.
-const FIELD_UNIT_BASEATTACKTIME: u16 = 126; // OBJECT_END+0x78; 2 slots [main, offhand], ms, INT
-const FIELD_UNIT_RANGEDATTACKTIME: u16 = 128; // +0x7A, INT
-const FIELD_UNIT_MINDAMAGE: u16 = 134; // +0x80, FLOAT
-const FIELD_UNIT_MAXDAMAGE: u16 = 135; // +0x81, FLOAT
-const FIELD_UNIT_MINOFFHANDDAMAGE: u16 = 136; // +0x82, FLOAT
-const FIELD_UNIT_MAXOFFHANDDAMAGE: u16 = 137; // +0x83, FLOAT
-const FIELD_UNIT_STAT0: u16 = 150; // +0x90 ×5, INT
-const FIELD_UNIT_RESISTANCES: u16 = 155; // +0x95 ×7, INT; [0] = armor
-const FIELD_UNIT_ATTACK_POWER: u16 = 165; // +0x9F, INT
-/// +0xA0, `TWO_SHORT`: signed halves, the low positive, the high already negative or zero
-/// (`StatSystem.cpp:335-336`).
-const FIELD_UNIT_ATTACK_POWER_MODS: u16 = 166;
-const FIELD_UNIT_ATTACK_POWER_MULTIPLIER: u16 = 167; // +0xA1, FLOAT: multiplier − 1.0
-const FIELD_UNIT_RANGED_ATTACK_POWER: u16 = 168; // +0xA2, INT
-const FIELD_UNIT_RANGED_ATTACK_POWER_MODS: u16 = 169; // +0xA3, TWO_SHORT as above
-const FIELD_UNIT_RANGED_ATTACK_POWER_MULTIPLIER: u16 = 170; // +0xA4, FLOAT
-const FIELD_UNIT_MINRANGEDDAMAGE: u16 = 171; // +0xA5, FLOAT
-const FIELD_UNIT_MAXRANGEDDAMAGE: u16 = 172; // +0xA6, FLOAT
+// The 1.12.1 view of the field table: the indices benilla-app still reads by name.
+pub const FIELD_GAMEOBJECT_STATE: u16 = FIELDS_5875.gameobject_state;
+pub const FIELD_CORPSE_DYNAMIC_FLAGS: u16 = FIELDS_5875.corpse_dynamic_flags;
+pub const FIELD_UNIT_HEALTH: u16 = FIELDS_5875.unit_health;
+#[cfg(test)]
+const FIELD_UNIT_POWER1: u16 = FIELDS_5875.unit_power1;
+pub const FIELD_UNIT_MAXHEALTH: u16 = FIELDS_5875.unit_maxhealth;
+#[cfg(test)]
+const FIELD_UNIT_MAXPOWER1: u16 = FIELDS_5875.unit_maxpower1;
+pub const FIELD_UNIT_LEVEL: u16 = FIELDS_5875.unit_level;
+pub const FIELD_UNIT_FACTIONTEMPLATE: u16 = FIELDS_5875.unit_factiontemplate;
+pub const FIELD_UNIT_BYTES_1: u16 = FIELDS_5875.unit_bytes_1;
+pub const FIELD_UNIT_FLAGS: u16 = FIELDS_5875.unit_flags;
+pub const FIELD_UNIT_AURA: u16 = FIELDS_5875.unit_aura;
+pub const FIELD_UNIT_AURAFLAGS: u16 = FIELDS_5875.unit_auraflags;
+#[cfg(test)]
+const FIELD_UNIT_AURALEVELS: u16 = FIELDS_5875.unit_auralevels;
+pub const FIELD_UNIT_AURAAPPLICATIONS: u16 = FIELDS_5875.unit_auraapplications;
+pub const FIELD_UNIT_MOUNTDISPLAYID: u16 = FIELDS_5875.unit_mountdisplayid;
+pub const FIELD_UNIT_DYNAMIC_FLAGS: u16 = FIELDS_5875.unit_dynamic_flags;
+pub const FIELD_UNIT_CHANNEL_SPELL: u16 = FIELDS_5875.unit_channel_spell;
+pub const FIELD_UNIT_NPC_FLAGS: u16 = FIELDS_5875.unit_npc_flags;
+#[cfg(test)]
+const FIELD_UNIT_BASEATTACKTIME: u16 = FIELDS_5875.unit_baseattacktime;
+#[cfg(test)]
+const FIELD_UNIT_RANGEDATTACKTIME: u16 = FIELDS_5875.unit_rangedattacktime;
+#[cfg(test)]
+const FIELD_UNIT_MINDAMAGE: u16 = FIELDS_5875.unit_mindamage;
+#[cfg(test)]
+const FIELD_UNIT_MAXDAMAGE: u16 = FIELDS_5875.unit_maxdamage;
+#[cfg(test)]
+const FIELD_UNIT_MINOFFHANDDAMAGE: u16 = FIELDS_5875.unit_minoffhanddamage;
+#[cfg(test)]
+const FIELD_UNIT_MAXOFFHANDDAMAGE: u16 = FIELDS_5875.unit_maxoffhanddamage;
+#[cfg(test)]
+const FIELD_UNIT_STAT0: u16 = FIELDS_5875.unit_stat0;
+#[cfg(test)]
+const FIELD_UNIT_RESISTANCES: u16 = FIELDS_5875.unit_resistances;
+#[cfg(test)]
+const FIELD_UNIT_ATTACK_POWER: u16 = FIELDS_5875.unit_attack_power;
+#[cfg(test)]
+const FIELD_UNIT_ATTACK_POWER_MODS: u16 = FIELDS_5875.unit_attack_power_mods;
+#[cfg(test)]
+const FIELD_UNIT_ATTACK_POWER_MULTIPLIER: u16 = FIELDS_5875.unit_attack_power_multiplier;
+#[cfg(test)]
+const FIELD_UNIT_RANGED_ATTACK_POWER: u16 = FIELDS_5875.unit_ranged_attack_power;
+#[cfg(test)]
+const FIELD_UNIT_RANGED_ATTACK_POWER_MODS: u16 = FIELDS_5875.unit_ranged_attack_power_mods;
+#[cfg(test)]
+const FIELD_UNIT_RANGED_ATTACK_POWER_MULTIPLIER: u16 =
+    FIELDS_5875.unit_ranged_attack_power_multiplier;
+#[cfg(test)]
+const FIELD_UNIT_MINRANGEDDAMAGE: u16 = FIELDS_5875.unit_minrangeddamage;
+#[cfg(test)]
+const FIELD_UNIT_MAXRANGEDDAMAGE: u16 = FIELDS_5875.unit_maxrangeddamage;
 
 /// Aura slots per unit (vmangos `MAX_AURAS`, `SpellAuraDefines.h:25`).
 pub const UNIT_AURA_SLOTS: u8 = 48;
@@ -171,16 +99,9 @@ impl UnitAuraSlot {
     }
 }
 
-// PLAYER fields start at UNIT_END (188); the client decodes appearance bytes at `0x5fb200`.
-const FIELD_PLAYER_BYTES: u16 = 193;
-const FIELD_PLAYER_BYTES_2: u16 = 194;
-// The low u16 is `gender | (drunk & 0xFFFE)`, so byte 1 is the drunk level the client reads at
-// `[[unit+0xe68]+0x1d]`; byte 2 is the city-protector race, byte 3 the current honor rank
-// (`Player.h:351-356`). Public: the one honor value that streams for every visible player.
-const FIELD_PLAYER_BYTES_3: u16 = 195;
-// 20 slots of 3 fields (`Player.h:439-444`): the quest id (group-only), then the counters and
-// state byte, and the timer (both private).
-pub const FIELD_PLAYER_QUEST_LOG_1_1: u16 = 198;
+#[cfg(test)]
+const FIELD_PLAYER_BYTES_3: u16 = FIELDS_5875.player_bytes_3;
+pub const FIELD_PLAYER_QUEST_LOG_1_1: u16 = FIELDS_5875.player_quest_log_1_1;
 
 /// The indices a field watch names: the same constants the accessors read, so the two agree.
 pub mod field {
@@ -218,93 +139,90 @@ pub mod quest_slot_state {
     pub const COMPLETE: u8 = 0x01;
     pub const FAIL: u8 = 0x02;
 }
-// Inventory fields. The PLAYER slot arrays are private, and each slot is a 2-field guid.
-const FIELD_ITEM_STACK_COUNT: u16 = 14; // OBJECT_END + 0x8
-const FIELD_ITEM_ENCHANTMENT: u16 = 22; // OBJECT_END + 0x10; 7 slots × 3 (id, duration, charges)
-const FIELD_CONTAINER_NUM_SLOTS: u16 = 48; // ITEM_END = 6 + 0x2A
-const FIELD_CONTAINER_SLOT_1: u16 = 50; // ITEM_END + 0x2; 36 slots × 2
 
-// From the CONTAINER block on, the hex comments in vmangos `UpdateFields_1_12_1.h` run 6 low. The
-// indices here follow its enum arithmetic, which the server compiles: INV_SLOT_HEAD = 188 + 0x12A.
-const FIELD_PLAYER_VISIBLE_ITEM_1_CREATOR: u16 = 258; // UNIT_END + 0x46; 12 fields per slot
-pub const FIELD_PLAYER_INV_SLOT_HEAD: u16 = 486; // 23 slots × 2 (equipment 0–18, bags 19–22)
-const FIELD_PLAYER_PACK_SLOT_1: u16 = 532; // 16 slots × 2 (the backpack)
-const FIELD_PLAYER_BANK_SLOT_1: u16 = 564; // 24 slots × 2
-const FIELD_PLAYER_BANK_BAG_SLOT_1: u16 = 612; // 564 + 24×2; 6 bag slots × 2 (item guids)
-const FIELD_PLAYER_VENDORBUYBACK_SLOT_1: u16 = 624; // 12 slots × 2 (item guids)
-const FIELD_PLAYER_KEYRING_SLOT_1: u16 = 648; // 32 slots × 2 (item guids), wire slots 81–112
-const FIELD_PLAYER_FARSIGHT: u16 = 712; // our view's anchor (Mind Vision, Sentry Totem), or 0
-const FIELD_PLAYER_BUYBACK_PRICE_1: u16 = 1226; // 12 × u32 copper, indexed slot−69
-const FIELD_PLAYER_BUYBACK_TIMESTAMP_1: u16 = 1238; // 12 × u32, the client's sort key only
-pub const FIELD_PLAYER_FIELD_COINAGE: u16 = 1176; // copper
-const FIELD_PLAYER_XP: u16 = 716;
-const FIELD_PLAYER_NEXT_LEVEL_XP: u16 = 717;
-// The watched reputation slot, signed: slot 0 is a real faction, so only -1 means none.
-const FIELD_PLAYER_WATCHED_FACTION_INDEX: u16 = 1261;
-// The rested pool in base kill-XP units: a kill drains it 1:1 while granting +100%
-// (`Player::GetXPRestBonus`), so the doubled span on the XP bar is twice this value.
-const FIELD_PLAYER_REST_STATE_EXPERIENCE: u16 = 1175;
-// EXPLORED_ZONES_1 is the discovery bitset, 2048 bits indexed by `AreaTable.dbc` exploreFlag. Just
-// below it sit block, dodge, parry and crit chance (FLOAT, UNIT_END + 0x396..0x399).
-const FIELD_PLAYER_BLOCK_PERCENTAGE: u16 = 1106;
-const FIELD_PLAYER_DODGE_PERCENTAGE: u16 = 1107;
-const FIELD_PLAYER_PARRY_PERCENTAGE: u16 = 1108;
-const FIELD_PLAYER_CRIT_PERCENTAGE: u16 = 1109;
-const FIELD_PLAYER_EXPLORED_ZONES_1: u16 = 1111;
+pub const FIELD_PLAYER_INV_SLOT_HEAD: u16 = FIELDS_5875.player_inv_slot_head;
+#[cfg(test)]
+const FIELD_PLAYER_KEYRING_SLOT_1: u16 = FIELDS_5875.player_keyring_slot_1;
+#[cfg(test)]
+const FIELD_PLAYER_FARSIGHT: u16 = FIELDS_5875.player_farsight;
+#[cfg(test)]
+const FIELD_PLAYER_BUYBACK_PRICE_1: u16 = FIELDS_5875.player_buyback_price_1;
+#[cfg(test)]
+const FIELD_PLAYER_BUYBACK_TIMESTAMP_1: u16 = FIELDS_5875.player_buyback_timestamp_1;
+pub const FIELD_PLAYER_FIELD_COINAGE: u16 = FIELDS_5875.player_field_coinage;
+#[cfg(test)]
+const FIELD_PLAYER_XP: u16 = FIELDS_5875.player_xp;
+#[cfg(test)]
+const FIELD_PLAYER_NEXT_LEVEL_XP: u16 = FIELDS_5875.player_next_level_xp;
+#[cfg(test)]
+const FIELD_PLAYER_WATCHED_FACTION_INDEX: u16 = FIELDS_5875.player_watched_faction_index;
+#[cfg(test)]
+const FIELD_PLAYER_REST_STATE_EXPERIENCE: u16 = FIELDS_5875.player_rest_state_experience;
+#[cfg(test)]
+const FIELD_PLAYER_EXPLORED_ZONES_1: u16 = FIELDS_5875.player_explored_zones_1;
 /// The bitset's slot count (`Size: 64` in the server enum).
 pub const PLAYER_EXPLORED_ZONES_SLOTS: u16 = 64;
-// PLAYER stat block. POSSTAT, NEGSTAT and the resistance buff mods are floats in vmangos but go out
-// as INT (`Object::BuildValuesUpdate` narrows them). Read them signed: the server's cast of a
-// negative float wraps on x86 and saturates to 0 on aarch64.
-const FIELD_PLAYER_POSSTAT0: u16 = 1177; // UNIT_END+0x3DD ×5, INT
-const FIELD_PLAYER_NEGSTAT0: u16 = 1182; // ×5, INT; negative-or-zero where the wire can carry it
-const FIELD_PLAYER_RESISTANCEBUFFMODSPOSITIVE: u16 = 1187; // ×7, INT
-const FIELD_PLAYER_RESISTANCEBUFFMODSNEGATIVE: u16 = 1194; // ×7, INT; negative-or-zero
-const FIELD_PLAYER_MOD_DAMAGE_DONE_POS: u16 = 1201; // ×7 schools ([0] physical), INT
-const FIELD_PLAYER_MOD_DAMAGE_DONE_NEG: u16 = 1208; // ×7, INT; negative-or-zero
-const FIELD_PLAYER_MOD_DAMAGE_DONE_PCT: u16 = 1215; // ×7, FLOAT (header says INT), default 1.0
-                                                    // (`Player.cpp:3336`, `Player.cpp:7274`)
-pub const FIELD_PLAYER_SKILL_INFO_1_1: u16 = 718; // ×384: 128 skills × 3 dwords
+#[cfg(test)]
+const FIELD_PLAYER_POSSTAT0: u16 = FIELDS_5875.player_posstat0;
+#[cfg(test)]
+const FIELD_PLAYER_NEGSTAT0: u16 = FIELDS_5875.player_negstat0;
+#[cfg(test)]
+const FIELD_PLAYER_RESISTANCEBUFFMODSPOSITIVE: u16 = FIELDS_5875.player_resistancebuffmodspositive;
+#[cfg(test)]
+const FIELD_PLAYER_RESISTANCEBUFFMODSNEGATIVE: u16 = FIELDS_5875.player_resistancebuffmodsnegative;
+#[cfg(test)]
+const FIELD_PLAYER_MOD_DAMAGE_DONE_POS: u16 = FIELDS_5875.player_mod_damage_done_pos;
+#[cfg(test)]
+const FIELD_PLAYER_MOD_DAMAGE_DONE_NEG: u16 = FIELDS_5875.player_mod_damage_done_neg;
+#[cfg(test)]
+const FIELD_PLAYER_MOD_DAMAGE_DONE_PCT: u16 = FIELDS_5875.player_mod_damage_done_pct;
+// (`Player.cpp:3336`, `Player.cpp:7274`)
+pub const FIELD_PLAYER_SKILL_INFO_1_1: u16 = FIELDS_5875.player_skill_info_1_1;
 
-// Unspent talent points and free primary professions, `UnitCharacterPoints("player")`.
-const FIELD_PLAYER_CHARACTER_POINTS1: u16 = 1102;
-const FIELD_PLAYER_CHARACTER_POINTS2: u16 = 1103;
-// Tracking masks the minimap tests: bit `1 << (n - 1)` for creature type or `LockType.dbc` id `n`,
-// one bit per active tracking aura.
-const FIELD_PLAYER_TRACK_CREATURES: u16 = 1104;
-const FIELD_PLAYER_TRACK_RESOURCES: u16 = 1105;
-const FIELD_PLAYER_AMMO_ID: u16 = 1223; // UNIT_END+0x40B, INT: the equipped ammo item id
-const FIELD_PLAYER_SELF_RES_SPELL: u16 = 1224;
-// Bit 0x10 is PLAYER_FLAGS_GHOST (`Player.h:319`), held by the ghost aura 8326 until resurrection.
-pub const FIELD_PLAYER_FLAGS: u16 = 190;
-// The client's player block base `[player+0xe68]` is field 188: the arbiter at +0x0, PLAYER_FLAGS
-// at +0x8 and the duel team at +0x20, the three reads of `UnitReaction`'s duel leg (`0x6061e0`).
-const FIELD_PLAYER_DUEL_ARBITER: u16 = 188;
-const FIELD_PLAYER_DUEL_TEAM: u16 = 196;
-// Public, so `GetGuildInfo(unit)` (`0x4c9330`, reading block +0xc and +0x10) answers for any
-// visible player; a guild id of 0 is guildless.
-const FIELD_PLAYER_GUILDID: u16 = 191;
-const FIELD_PLAYER_GUILDRANK: u16 = 192;
-// `GetComboPoints` (`0x51a190`) reads the target at block +0x838 and the count byte at +0x1029.
-const FIELD_PLAYER_FIELD_COMBO_TARGET: u16 = 714;
-const FIELD_PLAYER_FIELD_BYTES: u16 = 1222; // UNIT_END+0x40A: flags, combo points, action bars,
-                                            // highest honor rank; not the appearance PLAYER_BYTES
+#[cfg(test)]
+const FIELD_PLAYER_CHARACTER_POINTS1: u16 = FIELDS_5875.player_character_points1;
+#[cfg(test)]
+const FIELD_PLAYER_CHARACTER_POINTS2: u16 = FIELDS_5875.player_character_points2;
+#[cfg(test)]
+const FIELD_PLAYER_TRACK_CREATURES: u16 = FIELDS_5875.player_track_creatures;
+#[cfg(test)]
+const FIELD_PLAYER_TRACK_RESOURCES: u16 = FIELDS_5875.player_track_resources;
+#[cfg(test)]
+const FIELD_PLAYER_AMMO_ID: u16 = FIELDS_5875.player_ammo_id;
+pub const FIELD_PLAYER_FLAGS: u16 = FIELDS_5875.player_flags;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_COMBO_TARGET: u16 = FIELDS_5875.player_field_combo_target;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_BYTES: u16 = FIELDS_5875.player_field_bytes;
+// highest honor rank; not the appearance PLAYER_BYTES
 
-// The honor block (`UpdateFields_1_12_1.h:288-298`) is private: another player's honor needs
-// `MSG_INSPECT_HONOR_STATS`. The four kill counters are TWO_SHORT (honorable, dishonorable), but
-// vmangos writes all except SESSION_KILLS as a whole dword. LAST_WEEK_RANK is the weekly standing,
-// not a rank. BYTES2 byte 0 is the rank bar (`Player.h:366-372`).
-const FIELD_PLAYER_FIELD_SESSION_KILLS: u16 = 1250;
-const FIELD_PLAYER_FIELD_YESTERDAY_KILLS: u16 = 1251;
-const FIELD_PLAYER_FIELD_LAST_WEEK_KILLS: u16 = 1252;
-const FIELD_PLAYER_FIELD_THIS_WEEK_KILLS: u16 = 1253;
-const FIELD_PLAYER_FIELD_THIS_WEEK_CONTRIBUTION: u16 = 1254;
-const FIELD_PLAYER_FIELD_LIFETIME_HONORABLE_KILLS: u16 = 1255;
-const FIELD_PLAYER_FIELD_LIFETIME_DISHONORABLE_KILLS: u16 = 1256;
-const FIELD_PLAYER_FIELD_YESTERDAY_CONTRIBUTION: u16 = 1257;
-const FIELD_PLAYER_FIELD_LAST_WEEK_CONTRIBUTION: u16 = 1258;
-const FIELD_PLAYER_FIELD_LAST_WEEK_RANK: u16 = 1259;
-const FIELD_PLAYER_FIELD_BYTES2: u16 = 1260;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_SESSION_KILLS: u16 = FIELDS_5875.player_field_session_kills;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_YESTERDAY_KILLS: u16 = FIELDS_5875.player_field_yesterday_kills;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_LAST_WEEK_KILLS: u16 = FIELDS_5875.player_field_last_week_kills;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_THIS_WEEK_KILLS: u16 = FIELDS_5875.player_field_this_week_kills;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_THIS_WEEK_CONTRIBUTION: u16 =
+    FIELDS_5875.player_field_this_week_contribution;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_LIFETIME_HONORABLE_KILLS: u16 =
+    FIELDS_5875.player_field_lifetime_honorable_kills;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_LIFETIME_DISHONORABLE_KILLS: u16 =
+    FIELDS_5875.player_field_lifetime_dishonorable_kills;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_YESTERDAY_CONTRIBUTION: u16 =
+    FIELDS_5875.player_field_yesterday_contribution;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_LAST_WEEK_CONTRIBUTION: u16 =
+    FIELDS_5875.player_field_last_week_contribution;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_LAST_WEEK_RANK: u16 = FIELDS_5875.player_field_last_week_rank;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_BYTES2: u16 = FIELDS_5875.player_field_bytes2;
 
 /// `PLAYER_SKILL_INFO` slots on the wire, 3 fields each; vmangos fills only 127 (`Player.h:69`).
 pub const PLAYER_SKILL_SLOTS: u8 = 128;
@@ -342,38 +260,51 @@ pub struct CorpseLook {
 /// nonzero fields (`Object::_SetCreateBits`) into the client's zeroed buffer, so an absent field
 /// within the created type's descriptor reads `Some(0)`; in a `Values` delta, or past the
 /// descriptor's end, it reads `None`.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 pub struct ObjectFields {
     /// The wire's block mask, verbatim (`index = word * 32 + bit`).
     present: Vec<u32>,
     /// Always `present.len() * 32` long; an unset slot holds 0 but must be read through the mask.
     values: Vec<u32>,
-    /// The created type's [`descriptor_len`], below which absent reads 0; 0 for a delta or fixture.
+    /// The created type's [`FieldTable::descriptor_len`], below which absent reads 0; 0 for a
+    /// delta or fixture.
     descriptor_end: u16,
+    /// The build's field indices, which every accessor reads.
+    table: &'static FieldTable,
 }
 
-/// An object's descriptor length in dwords: the `*_END` of its innermost block, so a Player spans
-/// OBJECT, UNIT and PLAYER.
-fn descriptor_len(object_type: ObjectType) -> u16 {
-    match object_type {
-        ObjectType::Object => 6,         // OBJECT_END = 0x6
-        ObjectType::Item => 48,          // ITEM_END = OBJECT_END + 0x2A
-        ObjectType::Container => 122,    // CONTAINER_END = ITEM_END + 0x4A
-        ObjectType::Unit => 188,         // UNIT_END = OBJECT_END + 0xB6
-        ObjectType::Player => 1282,      // PLAYER_END = UNIT_END + 0x446
-        ObjectType::GameObject => 26,    // GAMEOBJECT_END = OBJECT_END + 0x14
-        ObjectType::DynamicObject => 16, // DYNAMICOBJECT_END = OBJECT_END + 0xA
-        ObjectType::Corpse => 38,        // CORPSE_END = OBJECT_END + 0x20
+impl Default for ObjectFields {
+    fn default() -> Self {
+        Self::empty(&FIELDS_5875)
     }
 }
 
-/// Mask words of the widest descriptor, `PLAYER_END`; no 1.12 object needs more.
-const MAX_MASK_WORDS: usize = 1282usize.div_ceil(32);
+impl std::fmt::Debug for ObjectFields {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObjectFields")
+            .field("present", &self.present)
+            .field("values", &self.values)
+            .field("descriptor_end", &self.descriptor_end)
+            .finish()
+    }
+}
 
 impl ObjectFields {
-    pub(super) fn read(r: &mut impl Read) -> io::Result<Self> {
+    /// No fields, indexed by `table`.
+    fn empty(table: &'static FieldTable) -> Self {
+        Self {
+            present: Vec::new(),
+            values: Vec::new(),
+            descriptor_end: 0,
+            table,
+        }
+    }
+
+    pub(super) fn read(r: &mut impl Read, table: &'static FieldTable) -> io::Result<Self> {
         let amount_of_blocks = read_u8(r)?;
-        let mut present = Vec::with_capacity(capacity_hint(amount_of_blocks, MAX_MASK_WORDS));
+        // Mask words of the widest descriptor; no object needs more.
+        let max_mask_words = usize::from(table.player_end).div_ceil(32);
+        let mut present = Vec::with_capacity(capacity_hint(amount_of_blocks, max_mask_words));
         for _ in 0..amount_of_blocks {
             present.push(read_u32_le(r)?);
         }
@@ -389,18 +320,24 @@ impl ObjectFields {
             present,
             values,
             descriptor_end: 0,
+            table,
         })
     }
 
     /// Marks a CREATE snapshot of `object_type`, so absent fields in its descriptor read 0.
     pub fn into_created(mut self, object_type: ObjectType) -> Self {
-        self.descriptor_end = descriptor_len(object_type);
+        self.descriptor_end = self.table.descriptor_len(object_type);
         self
     }
 
     /// A fixture from `(index, value)` pairs; [`Self::into_created`] makes it a create.
     pub fn from_pairs(pairs: &[(u16, u32)]) -> Self {
-        let mut this = Self::default();
+        Self::from_pairs_in(&FIELDS_5875, pairs)
+    }
+
+    /// [`Self::from_pairs`] indexed by `table`.
+    pub fn from_pairs_in(table: &'static FieldTable, pairs: &[(u16, u32)]) -> Self {
+        let mut this = Self::empty(table);
         for &(index, value) in pairs {
             this.insert(index, value);
         }
@@ -409,19 +346,20 @@ impl ObjectFields {
 
     /// `CORPSE_FIELD_OWNER` (`UpdateFields_1_12_1.h:339`): the dead player, only on a corpse.
     pub fn corpse_owner(&self) -> Option<u64> {
-        self.get_guid(6).filter(|&g| g != 0)
+        self.get_guid(self.table.corpse_owner).filter(|&g| g != 0)
     }
 
     /// The body's `CreatureDisplayInfo` id, the owner's native display (`Player.cpp:4809`). A bone
     /// pile keeps it, but `0x5d6700` ignores it there and builds the skeleton from race and sex.
     pub fn corpse_display_id(&self) -> Option<u32> {
-        self.get_u32(12).filter(|&d| d != 0)
+        self.get_u32(self.table.corpse_display_id)
+            .filter(|&d| d != 0)
     }
 
     /// The piece in equipment slot `slot` (0..18) as `(ItemDisplayInfo id, InventoryType)`, packed
     /// `display | type << 24` (`Player.cpp:4822`); unlike `PLAYER_VISIBLE_ITEM`, not an item entry.
     pub fn corpse_item(&self, slot: u8) -> Option<(u32, u8)> {
-        let raw = self.get_u32(13 + u16::from(slot))?;
+        let raw = self.get_u32(self.table.corpse_item + u16::from(slot))?;
         let display = raw & 0x00ff_ffff;
         (display != 0).then_some((display, (raw >> 24) as u8))
     }
@@ -429,16 +367,16 @@ impl ObjectFields {
     /// The owner's guild id at death, 0 for none; the client builds the corpse's tabard crest from
     /// it (`0x5d6ec0`).
     pub fn corpse_guild(&self) -> u32 {
-        self.get_u32(34).unwrap_or(0)
+        self.get_u32(self.table.corpse_guild).unwrap_or(0)
     }
 
     /// Race, gender and skin in bytes 1..3; byte 0 is unused (`Corpse.cpp:228`).
     fn corpse_bytes_1(&self) -> Option<u32> {
-        self.get_u32(32)
+        self.get_u32(self.table.corpse_bytes_1)
     }
     /// Face, hair style, hair colour and facial hair (`Corpse.cpp:229`).
     fn corpse_bytes_2(&self) -> Option<u32> {
-        self.get_u32(33)
+        self.get_u32(self.table.corpse_bytes_2)
     }
     /// The dead player's race, `CORPSE_FIELD_BYTES_1` byte 1, the one corpse field the reaction
     /// gate reads (`0x5d7120`); 0, which no `ChrRaces` row names, when absent.
@@ -461,12 +399,12 @@ impl ObjectFields {
 
     /// `CORPSE_FIELD_FLAGS`, 0 when absent (client `[[corpse+0x110]+0x74]`).
     pub fn corpse_flags(&self) -> u32 {
-        self.get_u32(35).unwrap_or(0)
+        self.get_u32(self.table.corpse_flags).unwrap_or(0)
     }
     /// [`Self::corpse_flags`] keeping absence: untouched flags in a delta are `None`, not all
     /// clear. A reader acting on a change must use this one.
     pub fn corpse_flags_present(&self) -> Option<u32> {
-        self.get_u32(35)
+        self.get_u32(self.table.corpse_flags)
     }
     /// `CORPSE_FLAG_BONES`: a bone pile, which `0x5d6260` tests first; it wears nothing and takes
     /// its model from race and sex.
@@ -485,7 +423,7 @@ impl ObjectFields {
     /// `CORPSE_DYNFLAG_LOOTABLE` (`Map.cpp:3655`): the bone pile has insignia; `0x5d6e20` gates the
     /// loot highlight and the `CMSG_LOOT` click on it.
     pub fn corpse_lootable(&self) -> bool {
-        self.get_u32(FIELD_CORPSE_DYNAMIC_FLAGS).unwrap_or(0) & 0x01 != 0
+        self.get_u32(self.table.corpse_dynamic_flags).unwrap_or(0) & 0x01 != 0
     }
 
     /// `CORPSE_FLAG_LOOTABLE`: the battleground insignia is takeable, by spell 22027 "Remove
@@ -497,25 +435,31 @@ impl ObjectFields {
 
     /// The ground caster (`UpdateFields_1_12_1.h:325`), at the same index as a corpse's owner.
     pub fn dynamicobject_caster(&self) -> Option<u64> {
-        self.get_guid(6).filter(|&g| g != 0)
+        self.get_guid(self.table.dynamicobject_caster)
+            .filter(|&g| g != 0)
     }
     /// The type byte; vmangos sends 1 (area spell) for every persistent-area cast.
     pub fn dynamicobject_bytes(&self) -> Option<u32> {
-        self.get_u32(8)
+        self.get_u32(self.table.dynamicobject_bytes)
     }
     /// The anchoring spell, the root of the ground-targeted visual chain.
     pub fn dynamicobject_spell_id(&self) -> Option<u32> {
-        self.get_u32(9).filter(|&s| s != 0)
+        self.get_u32(self.table.dynamicobject_spell_id)
+            .filter(|&s| s != 0)
     }
     /// The area's radius in yards, which the server resolves from `SpellRadius.dbc`.
     pub fn dynamicobject_radius(&self) -> Option<f32> {
-        self.get_f32(10)
+        self.get_f32(self.table.dynamicobject_radius)
     }
     /// The anchored point and facing in raw WoW coordinates, equal to the create's position.
     pub fn dynamicobject_position(&self) -> Option<([f32; 3], f32)> {
         Some((
-            [self.get_f32(11)?, self.get_f32(12)?, self.get_f32(13)?],
-            self.get_f32(14).unwrap_or(0.0),
+            [
+                self.get_f32(self.table.dynamicobject_pos_x)?,
+                self.get_f32(self.table.dynamicobject_pos_x + 1)?,
+                self.get_f32(self.table.dynamicobject_pos_x + 2)?,
+            ],
+            self.get_f32(self.table.dynamicobject_facing).unwrap_or(0.0),
         ))
     }
 
@@ -567,7 +511,7 @@ impl ObjectFields {
     /// One slot's `UNIT_FIELD_AURAFLAGS` nibble; an absent word reads 0, as in the client.
     fn get_aura_nibble(&self, slot: u8) -> u8 {
         let word = self
-            .get_u32(FIELD_UNIT_AURAFLAGS + u16::from(slot >> 3))
+            .get_u32(self.table.unit_auraflags + u16::from(slot >> 3))
             .unwrap_or(0);
         ((word >> ((slot & 7) * 4)) & 0x0F) as u8
     }
@@ -639,7 +583,7 @@ impl ObjectFields {
         (self.descriptor_end != 0)
             .then(|| {
                 ALL.into_iter()
-                    .find(|&t| descriptor_len(t) == self.descriptor_end)
+                    .find(|&t| self.table.descriptor_len(t) == self.descriptor_end)
             })
             .flatten()
     }
@@ -662,8 +606,10 @@ impl ObjectFields {
 }
 
 mod player;
+mod table;
 mod unit;
 
+pub use table::{field_table, FieldTable, FIELDS_5875};
 pub use unit::{power_display_scale, OwnerFallback};
 
 #[cfg(test)]

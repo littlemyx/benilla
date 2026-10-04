@@ -197,16 +197,34 @@ fn skip(r: &mut &[u8], n: usize) -> Option<()> {
 /// Decode one server packet body into its [`ServerPacket`], ignoring any unread tail that
 /// [`parse_server_with_tail`] would report.
 pub fn parse_server(opcode: u16, body: &[u8]) -> io::Result<ServerPacket> {
-    parse_server_with_tail(opcode, body).map(|(packet, _)| packet)
+    parse_server_as(&update_object::FIELDS_5875, opcode, body)
+}
+
+/// [`parse_server`] reading update fields through `fields`, the build's table.
+pub fn parse_server_as(
+    fields: &'static update_object::FieldTable,
+    opcode: u16,
+    body: &[u8],
+) -> io::Result<ServerPacket> {
+    parse_server_with_tail_as(fields, opcode, body).map(|(packet, _)| packet)
 }
 
 /// [`parse_server`], plus how many body bytes the decoder left unread: a count, never a failure,
 /// that exposes a decoder shorter than the server's layout. [`ServerPacket::Other`] reports `0`.
 pub fn parse_server_with_tail(opcode: u16, body: &[u8]) -> io::Result<(ServerPacket, usize)> {
+    parse_server_with_tail_as(&update_object::FIELDS_5875, opcode, body)
+}
+
+/// [`parse_server_with_tail`] reading update fields through `fields`, the build's table.
+pub fn parse_server_with_tail_as(
+    fields: &'static update_object::FieldTable,
+    opcode: u16,
+    body: &[u8],
+) -> io::Result<(ServerPacket, usize)> {
     let mut r = body;
     // The inflated leftover of the compressed update object, the one arm with a second stream.
     let mut inner_tail = 0;
-    let packet = parse_server_body(opcode, &mut r, &mut inner_tail)?;
+    let packet = parse_server_body(fields, opcode, &mut r, &mut inner_tail)?;
     let tail = match packet {
         ServerPacket::Other { .. } => 0,
         _ => r.len() + inner_tail,
@@ -216,6 +234,7 @@ pub fn parse_server_with_tail(opcode: u16, body: &[u8]) -> io::Result<(ServerPac
 
 /// The opcode dispatch; `cursor` advances past what the arm read only on success.
 fn parse_server_body(
+    fields: &'static update_object::FieldTable,
     opcode: u16,
     cursor: &mut &[u8],
     inner_tail: &mut usize,
@@ -266,7 +285,7 @@ fn parse_server_body(
             result: read_u8(&mut r)?,
         },
         opcode::SMSG_UPDATE_OBJECT => ServerPacket::UpdateObject {
-            objects: update_object::read_update_object(&mut r)?,
+            objects: update_object::read_update_object(&mut r, fields)?,
         },
         opcode::SMSG_DESTROY_OBJECT => ServerPacket::DestroyObject {
             guid: read_u64_le(&mut r)?,
@@ -283,7 +302,7 @@ fn parse_server_body(
             decoder.read_to_end(&mut decompressed)?;
             drop(decoder);
             let mut dr = decompressed.as_slice();
-            let objects = update_object::read_update_object(&mut dr)?;
+            let objects = update_object::read_update_object(&mut dr, fields)?;
             *inner_tail = dr.len();
             ServerPacket::UpdateObject { objects }
         }

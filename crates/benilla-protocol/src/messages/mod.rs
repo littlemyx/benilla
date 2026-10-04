@@ -172,7 +172,7 @@ pub use movement::{
 pub use opcode_names::opcode_name;
 pub use packet::{CreatureQueryInfo, MonsterMoveFacing, ServerPacket};
 pub use page_text::page_text_query;
-pub use parse::{parse_server, parse_server_with_tail};
+pub use parse::{parse_server, parse_server_as, parse_server_with_tail, parse_server_with_tail_as};
 pub use pet::{
     pet_abandon, pet_action, pet_cancel_aura, pet_rename, pet_set_action, pet_spell_autocast,
     pet_stop_attack, pet_tame_failure_key, pet_unlearn, PetActionEntry, PetMode, PetSpellCooldown,
@@ -248,11 +248,11 @@ pub use trainer::{train_fail, trainer_buy_spell, trainer_list, trainer_spell_sta
 pub use tutorial::{tutorial_flag, TutorialFlags};
 pub use update_object::field;
 pub use update_object::{
-    power_display_scale, quest_slot_state, CorpseLook, CreateSpline, MovementBlock, MoverState,
-    Object, ObjectFields, ObjectType, OwnerFallback, PlayerSkillSlot, QuestLogSlot, UnitAuraSlot,
-    AURA_FLAG_CANCELABLE, AURA_FLAG_EFF_INDEX_MASK, FIELD_PLAYER_SKILL_INFO_1_1,
-    PLAYER_EXPLORED_ZONES_SLOTS, PLAYER_QUEST_LOG_SLOTS, PLAYER_SKILL_SLOTS,
-    UNIT_AURA_POSITIVE_SLOTS, UNIT_AURA_SLOTS,
+    field_table, power_display_scale, quest_slot_state, CorpseLook, CreateSpline, FieldTable,
+    MovementBlock, MoverState, Object, ObjectFields, ObjectType, OwnerFallback, PlayerSkillSlot,
+    QuestLogSlot, UnitAuraSlot, AURA_FLAG_CANCELABLE, AURA_FLAG_EFF_INDEX_MASK, FIELDS_5875,
+    FIELD_PLAYER_SKILL_INFO_1_1, PLAYER_EXPLORED_ZONES_SLOTS, PLAYER_QUEST_LOG_SLOTS,
+    PLAYER_SKILL_SLOTS, UNIT_AURA_POSITIVE_SLOTS, UNIT_AURA_SLOTS,
 };
 pub use vendor::{
     buy_item, buy_item_in_slot, buy_result, buyback_item, list_inventory, repair_item, sell_item,
