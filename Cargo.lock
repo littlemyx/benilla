@@ -510,6 +510,7 @@ dependencies = [
  "assert_no_alloc",
  "avian3d",
  "benilla-assets",
+ "benilla-build",
  "benilla-formats",
  "benilla-protocol",
  "benilla-srp",
@@ -569,6 +570,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "benilla-build"
+version = "0.2.0"
+
+[[package]]
 name = "benilla-buildstamp"
 version = "0.2.0"
 
@@ -590,6 +595,7 @@ dependencies = [
  "anyhow",
  "benilla-adt",
  "benilla-blp",
+ "benilla-build",
  "benilla-bytes",
  "benilla-dbc",
  "benilla-m2",
@@ -621,6 +627,7 @@ name = "benilla-protocol"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "benilla-build",
  "benilla-srp",
  "clap",
  "flate2",

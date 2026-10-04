@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 
 use anyhow::{bail, Result};
+use benilla_build::ClientBuild;
 use sha1::{Digest, Sha1};
 
 use crate::wire::{read_array, read_cstring, read_f32_le, read_u16_le, read_u32_le, read_u8};
@@ -64,19 +65,17 @@ pub struct ChallengeReply {
 }
 
 /// Send `CMD_AUTH_LOGON_CHALLENGE_Client`. `account_name` must be uppercased, as the SRP6 hashes
-/// use it; `build` is 5875.
+/// use it; `build` names the version and build number the client reports.
 pub fn write_logon_challenge(
     w: &mut impl Write,
     account_name: &str,
-    build: u16,
+    build: &ClientBuild,
 ) -> std::io::Result<()> {
     // Everything after the 2-byte size field, assembled first so we can prefix its length.
     let mut body = Vec::with_capacity(34 + account_name.len());
     body.extend_from_slice(&GAME_NAME_WOW.to_le_bytes());
-    body.push(1); // version major
-    body.push(12); // version minor
-    body.push(1); // version patch
-    body.extend_from_slice(&build.to_le_bytes());
+    body.extend_from_slice(&build.version); // major, minor, patch
+    body.extend_from_slice(&build.build.to_le_bytes());
     body.extend_from_slice(&PLATFORM_X86.to_le_bytes());
     body.extend_from_slice(&client_os().to_le_bytes());
     body.extend_from_slice(&LOCALE_EN_US.to_le_bytes());
@@ -164,24 +163,32 @@ const INTEGRITY_HASH_5875_MACOS: [u8; 20] = [
     0x1b, 0xb5, 0x13, 0xe5,
 ];
 
-/// The integrity digest `H` for `crc_salt`, known only for [`MANGOS_VERSION_CHALLENGE`].
+/// The integrity digest `H` of `build` for `crc_salt`, known only for [`MANGOS_VERSION_CHALLENGE`]
+/// and a build with a stored row (today 5875).
 /// Deviation: a stored per-OS constant, not the reference's HMAC over its own executables
 /// (`0x5b1170`), because every mangos-family realmd issues this one salt.
-fn integrity_hash(crc_salt: &[u8; 16]) -> Option<[u8; 20]> {
+fn integrity_hash(build: &ClientBuild, crc_salt: &[u8; 16]) -> Option<[u8; 20]> {
     if *crc_salt != MANGOS_VERSION_CHALLENGE {
         return None;
     }
-    Some(if client_os() == OS_MACOS {
-        INTEGRITY_HASH_5875_MACOS
-    } else {
-        INTEGRITY_HASH_5875_WINDOWS
-    })
+    match build.build {
+        5875 => Some(if client_os() == OS_MACOS {
+            INTEGRITY_HASH_5875_MACOS
+        } else {
+            INTEGRITY_HASH_5875_WINDOWS
+        }),
+        _ => None,
+    }
 }
 
 /// The proof's `crc_hash`: `SHA1(A ‖ H)` over `A`'s wire bytes (realmd hashes `lp->A` as
 /// received), or twenty zeros for an unknown salt, which only a strict server refuses.
-pub fn version_proof(crc_salt: &[u8; 16], client_public_key: &[u8; 32]) -> [u8; 20] {
-    match integrity_hash(crc_salt) {
+pub fn version_proof(
+    build: &ClientBuild,
+    crc_salt: &[u8; 16],
+    client_public_key: &[u8; 32],
+) -> [u8; 20] {
+    match integrity_hash(build, crc_salt) {
         Some(h) => {
             let mut sha = Sha1::new();
             sha.update(client_public_key);
@@ -195,6 +202,7 @@ pub fn version_proof(crc_salt: &[u8; 16], client_public_key: &[u8; 32]) -> [u8; 
 /// Send `CMD_AUTH_LOGON_PROOF_Client`, computing `crc_hash` from the challenge's `crc_salt`.
 pub fn write_logon_proof(
     w: &mut impl Write,
+    build: &ClientBuild,
     client_public_key: &[u8; 32],
     client_proof: &[u8; 20],
     crc_salt: &[u8; 16],
@@ -203,7 +211,7 @@ pub fn write_logon_proof(
     packet.push(CMD_AUTH_LOGON_PROOF);
     packet.extend_from_slice(client_public_key);
     packet.extend_from_slice(client_proof);
-    packet.extend_from_slice(&version_proof(crc_salt, client_public_key));
+    packet.extend_from_slice(&version_proof(build, crc_salt, client_public_key));
     packet.push(0); // number_of_telemetry_keys
     packet.push(0); // security_flag = None
     w.write_all(&packet)
@@ -288,6 +296,26 @@ pub fn read_realm_list(r: &mut impl Read) -> Result<Vec<RealmInfo>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use benilla_build::VANILLA_1_12_1;
+
+    /// The 1.12.1 challenge as it went out before the version came from the build profile.
+    #[test]
+    fn the_1_12_1_logon_challenge_bytes_are_unchanged() {
+        let mut got = Vec::new();
+        write_logon_challenge(&mut got, "TEST", &VANILLA_1_12_1).unwrap();
+        let mut want = vec![CMD_AUTH_LOGON_CHALLENGE, PROTOCOL_VERSION_THREE, 34, 0];
+        want.extend_from_slice(&0x0057_6f57u32.to_le_bytes()); // "WoW\0"
+        want.extend_from_slice(&[1, 12, 1]); // version
+        want.extend_from_slice(&5875u16.to_le_bytes()); // build
+        want.extend_from_slice(&0x0078_3836u32.to_le_bytes()); // "x86\0"
+        want.extend_from_slice(&client_os().to_le_bytes());
+        want.extend_from_slice(&0x656e_5553u32.to_le_bytes()); // "enUS"
+        want.extend_from_slice(&0u32.to_le_bytes()); // timezone
+        want.extend_from_slice(&[127, 0, 0, 1]); // client ip
+        want.push(4);
+        want.extend_from_slice(b"TEST");
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn os_tags_reverse_to_the_names_servers_match_on() {
@@ -323,7 +351,11 @@ mod tests {
         } else {
             "9b95cd41edd719fddf237294b8aca17010e71703"
         };
-        let got = version_proof(&MANGOS_VERSION_CHALLENGE, &test_public_key());
+        let got = version_proof(
+            &VANILLA_1_12_1,
+            &MANGOS_VERSION_CHALLENGE,
+            &test_public_key(),
+        );
         assert_eq!(
             got.iter().map(|b| format!("{b:02x}")).collect::<String>(),
             expected
@@ -334,7 +366,10 @@ mod tests {
     fn an_unknown_version_challenge_is_answered_with_zeros() {
         let mut salt = MANGOS_VERSION_CHALLENGE;
         salt[0] ^= 0xff;
-        assert_eq!(version_proof(&salt, &test_public_key()), [0u8; 20]);
+        assert_eq!(
+            version_proof(&VANILLA_1_12_1, &salt, &test_public_key()),
+            [0u8; 20]
+        );
     }
 
     /// `opcode · A[32] · M1[20] · crc_hash[20] · num_keys · security_flag`, 75 bytes.
@@ -343,7 +378,14 @@ mod tests {
         let a = test_public_key();
         let m1: [u8; 20] = std::array::from_fn(|i| (i as u8).wrapping_mul(13).wrapping_add(4));
         let mut packet = Vec::new();
-        write_logon_proof(&mut packet, &a, &m1, &MANGOS_VERSION_CHALLENGE).unwrap();
+        write_logon_proof(
+            &mut packet,
+            &VANILLA_1_12_1,
+            &a,
+            &m1,
+            &MANGOS_VERSION_CHALLENGE,
+        )
+        .unwrap();
 
         assert_eq!(packet.len(), 1 + 32 + 20 + 20 + 1 + 1);
         assert_eq!(packet[0], CMD_AUTH_LOGON_PROOF);
@@ -351,7 +393,7 @@ mod tests {
         assert_eq!(&packet[33..53], &m1);
         assert_eq!(
             &packet[53..73],
-            &version_proof(&MANGOS_VERSION_CHALLENGE, &a)
+            &version_proof(&VANILLA_1_12_1, &MANGOS_VERSION_CHALLENGE, &a)
         );
         assert_eq!(&packet[73..], &[0, 0]);
     }

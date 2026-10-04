@@ -19,6 +19,7 @@ dev = []
 anyhow.workspace = true
 clap.workspace = true
 benilla-adt = { path = "../benilla-adt" }
+benilla-build = { path = "../benilla-build" }
 benilla-bytes = { path = "../benilla-bytes" }
 benilla-dbc = { path = "../benilla-dbc" }
 benilla-m2 = { path = "../benilla-m2" }

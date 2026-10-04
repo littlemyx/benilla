@@ -303,6 +303,20 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // absent and terrain loads fail gracefully.
     match benilla_formats::wow_data() {
         Some(data_dir) => {
+            // The install says which build it is; an unsupported one is reported, not guessed at.
+            // Printed, not logged: the log plugin is not built yet.
+            match benilla_formats::Chain::open(&data_dir)
+                .and_then(|chain| benilla_formats::detect_build(&chain))
+            {
+                Ok(build) => {
+                    let [major, minor, patch] = build.version;
+                    eprintln!(
+                        "benilla: install is {major}.{minor}.{patch} (build {})",
+                        build.build
+                    );
+                }
+                Err(e) => eprintln!("benilla: cannot tell the install's build ({e:#})"),
+            }
             if let Err(e) = benilla_assets::register_mpq_source(&mut app, &data_dir) {
                 eprintln!("benilla-assets: mpq:// source unavailable ({e:#})");
             }
