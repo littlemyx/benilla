@@ -35,6 +35,7 @@ mod camera_shakes;
 mod cinematics;
 mod creatures;
 mod dbc;
+pub use dbc::DbcLayout;
 mod unit_blood;
 pub use camera_shakes::{load_camera_shakes, CameraShake, CameraShakeCatalog, SpellShakeGroup};
 pub use cinematics::{

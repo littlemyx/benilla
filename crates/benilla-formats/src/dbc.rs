@@ -5,9 +5,40 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use anyhow::{anyhow, Context, Result};
-use benilla_dbc::{DbcParser, FieldType, Record, RecordSet, Schema, SchemaField, StringRef, Value};
+use benilla_build::{ClientBuild, Expansion};
+use benilla_dbc::{
+    DbcParser, FieldType, Record, RecordSet, Schema, SchemaField, StringRef, Value,
+    LOC_SLOTS_1_12_1, LOC_SLOTS_2_4_3,
+};
 
 use crate::Chain;
+
+/// How a build lays its tables out: today only the width of a localized string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DbcLayout {
+    /// Slots of one localized string: the locale offsets and the flags word.
+    pub loc_slots: usize,
+}
+
+impl DbcLayout {
+    /// 1.12.1: 8 locale slots and a flags word.
+    pub const VANILLA_1_12_1: DbcLayout = DbcLayout {
+        loc_slots: LOC_SLOTS_1_12_1,
+    };
+    /// 2.4.3: 16 locale slots and a flags word.
+    pub const TBC_2_4_3: DbcLayout = DbcLayout {
+        loc_slots: LOC_SLOTS_2_4_3,
+    };
+
+    /// The layout of a build's tables, or `None` for an expansion with none measured yet.
+    pub fn of(build: &ClientBuild) -> Option<Self> {
+        match build.expansion {
+            Expansion::Vanilla => Some(Self::VANILLA_1_12_1),
+            Expansion::Tbc => Some(Self::TBC_2_4_3),
+            _ => None,
+        }
+    }
+}
 
 /// Parse a DBC with `schema`; `what` names the file in errors.
 pub(crate) fn parse(bytes: &[u8], schema: Schema, what: &str) -> Result<RecordSet> {

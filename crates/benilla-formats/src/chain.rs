@@ -6,10 +6,14 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Context, Result};
+use benilla_build::{ClientBuild, UnknownBuild};
 use benilla_mpq::Archive;
 
+use crate::build::{self, Probe};
+use crate::dbc::DbcLayout;
 use crate::VANILLA_BASE_ORDER;
 
 /// One entry from a chain listing: an internal path and its uncompressed size.
@@ -24,6 +28,8 @@ pub struct Chain {
     archives: Vec<Archive>,
     /// The locale folder a 2.4.3 layout mounted; `None` for the vanilla layout and a single file.
     locale: Option<String>,
+    /// The build the stock `FrameXML.toc` states, read on first use and kept.
+    probe: OnceLock<Probe>,
 }
 
 /// `patch-?.MPQ` as the reference's `FindFirstFileW` glob matches it (template `0x82edbc`, wrapper
@@ -249,7 +255,43 @@ impl Chain {
                 Archive::open(path).with_context(|| format!("opening MPQ {}", path.display()))?,
             );
         }
-        Ok(Self { archives, locale })
+        Ok(Self {
+            archives,
+            locale,
+            probe: OnceLock::new(),
+        })
+    }
+
+    pub(crate) fn probe(&self) -> &Probe {
+        self.probe.get_or_init(|| build::probe(self))
+    }
+
+    /// The build this chain's stock `FrameXML.toc` states, read once and cached. `None` for a
+    /// chain with no stock interface (a single archive, a test fixture) and for a number no
+    /// known build states ([`Chain::build_error`] has that one).
+    pub fn build(&self) -> Option<ClientBuild> {
+        match self.probe() {
+            Probe::Build(build) => Some(*build),
+            _ => None,
+        }
+    }
+
+    /// The `## Interface:` number the TOC states when no known build does, so an unknown
+    /// install stays reportable and not silently read as 1.12.1.
+    pub fn build_error(&self) -> Option<UnknownBuild> {
+        match self.probe() {
+            Probe::Unknown(unknown) => Some(*unknown),
+            _ => None,
+        }
+    }
+
+    /// The DBC layout of this chain's build. A chain with no known build is read as 1.12.1: one
+    /// without the stock interface is not an install, and every such chain in the tree is a
+    /// 1.12.1 fixture.
+    pub fn dbc_layout(&self) -> DbcLayout {
+        self.build()
+            .and_then(|build| DbcLayout::of(&build))
+            .unwrap_or(DbcLayout::VANILLA_1_12_1)
     }
 
     /// The highest-priority archive with an entry for `name`, a delete marker included, as a
