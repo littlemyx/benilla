@@ -203,11 +203,11 @@ mod tests {
     const EXTRA: u64 = 0xF130_0000_4B00_0001;
 
     /// `OBJECT_FIELD_TYPE`, `UNIT_FIELD_TARGET`, `_HEALTH`, `_MAXHEALTH` and `_LEVEL`.
-    const OBJECT_TYPE: u16 = 2;
-    const TARGET: u16 = 16;
-    const HEALTH: u16 = 22;
-    const MAXHEALTH: u16 = 28;
-    const LEVEL: u16 = 34;
+    const OBJECT_TYPE: u16 = benilla_protocol::messages::FIELDS_5875.object_type;
+    const TARGET: u16 = benilla_protocol::messages::FIELDS_5875.unit_target;
+    const HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    const MAXHEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_maxhealth;
+    const LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
 
     fn unit(kind: u32, target: u64, health: u32) -> ObjectStore {
         ObjectStore(ObjectFields::from_pairs(&[

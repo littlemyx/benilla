@@ -823,10 +823,10 @@ pub(crate) mod purse_fixture {
     pub(crate) const SWORD: u64 = 0x4000_0000_0000_0707;
     pub(crate) const SWORD_ENTRY: u32 = 2488;
     /// Absolute descriptor indices.
-    const OBJECT_ENTRY: u16 = 3;
-    const ITEM_DURABILITY: u16 = 46;
-    const ITEM_MAXDURABILITY: u16 = 47;
-    const PLAYER_BYTES_3: u16 = 195;
+    const OBJECT_ENTRY: u16 = benilla_protocol::messages::FIELDS_5875.object_entry;
+    const ITEM_DURABILITY: u16 = benilla_protocol::messages::FIELDS_5875.item_durability;
+    const ITEM_MAXDURABILITY: u16 = benilla_protocol::messages::FIELDS_5875.item_max_durability;
+    const PLAYER_BYTES_3: u16 = benilla_protocol::messages::FIELDS_5875.player_bytes_3;
     /// The string `ERR_NOT_ENOUGH_MONEY` holds in 1.12's `GlobalStrings.lua`.
     pub(crate) const NOT_ENOUGH_MONEY: &str = "You don't have enough money.";
 
@@ -1002,11 +1002,11 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
 
         /// Absolute descriptor indices.
-        const OBJECT_ENTRY: u16 = 3;
-        const ITEM_DURABILITY: u16 = 46;
-        const ITEM_MAXDURABILITY: u16 = 47;
-        const BYTES_0: u16 = 36;
-        const PLAYER_BYTES_3: u16 = 195;
+        const OBJECT_ENTRY: u16 = benilla_protocol::messages::FIELDS_5875.object_entry;
+        const ITEM_DURABILITY: u16 = benilla_protocol::messages::FIELDS_5875.item_durability;
+        const ITEM_MAXDURABILITY: u16 = benilla_protocol::messages::FIELDS_5875.item_max_durability;
+        const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
+        const PLAYER_BYTES_3: u16 = benilla_protocol::messages::FIELDS_5875.player_bytes_3;
         const VENDOR: u64 = 0xF130_0000_0000_0042;
         const SWORD: u64 = 0x4000_0000_0000_0007;
         const SWORD_ENTRY: u32 = 2488;
@@ -1246,7 +1246,7 @@ mod tests {
         use purse_fixture::*;
 
         /// `ITEM_FIELD_DURABILITY`, absolute.
-        const ITEM_DURABILITY: u16 = 46;
+        const ITEM_DURABILITY: u16 = benilla_protocol::messages::FIELDS_5875.item_durability;
         let main_hand = FIELD_PLAYER_INV_SLOT_HEAD + 2 * 15;
         let backpack_1 = FIELD_PLAYER_INV_SLOT_HEAD + 2 * 23;
         // `PLAYER_FIELD_BANK_SLOT_1`, inventory slot 39.

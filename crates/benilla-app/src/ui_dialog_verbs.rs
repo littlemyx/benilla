@@ -1029,7 +1029,7 @@ mod tests {
     use super::*;
 
     /// `UNIT_FIELD_LEVEL`, absolute field 34.
-    const LEVEL_FIELD: u16 = 34;
+    const LEVEL_FIELD: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
 
     #[test]
     fn setting_the_same_healer_is_a_complete_no_op() {
@@ -1121,11 +1121,11 @@ mod tests {
     }
 
     /// `UNIT_FIELD_FLAGS`, absolute field 46; `UNIT_FLAG_PVP` (`0x1000`) passes `can_assist`.
-    const UNIT_FLAGS_FIELD: u16 = 46;
+    const UNIT_FLAGS_FIELD: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
     /// `UNIT_NPC_FLAGS`, absolute field 147.
-    const NPC_FLAGS_FIELD: u16 = 147;
+    const NPC_FLAGS_FIELD: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
     /// `PLAYER_FLAGS`, absolute field 190; bit `0x10` is GHOST.
-    const PLAYER_FLAGS_FIELD: u16 = 190;
+    const PLAYER_FLAGS_FIELD: u16 = benilla_protocol::messages::FIELDS_5875.player_flags;
 
     fn fields(pairs: &[(u16, u32)]) -> ObjectStore {
         ObjectStore(benilla_protocol::ObjectFields::from_pairs(pairs))
@@ -1175,7 +1175,8 @@ mod tests {
     }
 
     /// `UNIT_FIELD_FACTIONTEMPLATE`, absolute field 35.
-    const FACTION_TEMPLATE_FIELD: u16 = 35;
+    const FACTION_TEMPLATE_FIELD: u16 =
+        benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
 
     macro_rules! catalog_or_skip {
         () => {{

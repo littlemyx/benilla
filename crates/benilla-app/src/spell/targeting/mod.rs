@@ -828,10 +828,10 @@ mod tests {
         const SPELL: u32 = 3000;
         /// Absolute descriptor indices: `OBJECT_FIELD_ENTRY`, `UNIT_FIELD_HEALTH`,
         /// `UNIT_FIELD_FLAGS` and `UNIT_DYNAMIC_FLAGS`.
-        const ENTRY: u16 = 3;
-        const HEALTH: u16 = 22;
-        const FLAGS: u16 = 46;
-        const DYNAMIC_FLAGS: u16 = 143;
+        const ENTRY: u16 = benilla_protocol::messages::FIELDS_5875.object_entry;
+        const HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+        const FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+        const DYNAMIC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_dynamic_flags;
         const HUMANOID: u32 = 69;
         const BEAST: u32 = 70;
 

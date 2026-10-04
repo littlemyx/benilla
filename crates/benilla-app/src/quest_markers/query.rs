@@ -262,8 +262,8 @@ mod tests {
         use benilla_protocol::{EntityKind, ObjectFields};
 
         const NPC: u64 = 0xdead_beef;
-        const FIELD_LEVEL: u16 = 34; // UNIT_FIELD_LEVEL
-        const FIELD_NPC_FLAGS: u16 = 147; // UNIT_NPC_FLAGS
+        const FIELD_LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level; // UNIT_FIELD_LEVEL
+        const FIELD_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags; // UNIT_NPC_FLAGS
 
         let net_entity = || NetEntity {
             kind: EntityKind::Unit,
@@ -365,8 +365,9 @@ mod tests {
 
         const ESCORT: u64 = 0x5115; // Mist: gives the quest, then follows with npcflags off
         const PLAIN: u64 = 0x5116; // an ordinary giver standing next to her
-        const FIELD_NPC_FLAGS: u16 = 147;
-        const FIELD_QUEST_LOG_1_1: u16 = 198;
+        const FIELD_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
+        const FIELD_QUEST_LOG_1_1: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_quest_log_1_1;
 
         let net_entity = || NetEntity {
             kind: EntityKind::Unit,
@@ -460,10 +461,10 @@ mod tests {
         use benilla_protocol::{EntityKind, ObjectFields};
 
         const NPC: u64 = 0x7777;
-        const FIELD_LEVEL: u16 = 34;
-        const FIELD_HEALTH: u16 = 22;
-        const FIELD_FACTION: u16 = 35; // UNIT_FIELD_FACTIONTEMPLATE
-        const FIELD_NPC_FLAGS: u16 = 147;
+        const FIELD_LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
+        const FIELD_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+        const FIELD_FACTION: u16 = benilla_protocol::messages::FIELDS_5875.unit_factiontemplate; // UNIT_FIELD_FACTIONTEMPLATE
+        const FIELD_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
 
         let (tx, rx) = crossbeam_channel::unbounded();
         let mut app = App::new();
@@ -570,9 +571,9 @@ mod tests {
 
         const FRIENDLY: u64 = 0x1001;
         const HOSTILE: u64 = 0x1002;
-        const FIELD_LEVEL: u16 = 34;
-        const FIELD_FACTION: u16 = 35;
-        const FIELD_NPC_FLAGS: u16 = 147;
+        const FIELD_LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
+        const FIELD_FACTION: u16 = benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
+        const FIELD_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
         /// `FactionTemplate.dbc` 35 is friendly to players, 14 the monster template hostile to all.
         const TPL_FRIENDLY: u32 = 35;
         const TPL_MONSTER: u32 = 14;
@@ -676,9 +677,9 @@ mod tests {
         const FM: u64 = 0x9001; // flightmaster only
         const GIVER: u64 = 0x9002; // questgiver only, the control
         const VENDOR: u64 = 0x9003; // neither: never asked
-        const FIELD_LEVEL: u16 = 34;
-        const FIELD_HEALTH: u16 = 22;
-        const FIELD_NPC_FLAGS: u16 = 147;
+        const FIELD_LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
+        const FIELD_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+        const FIELD_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
 
         let (tx, rx) = crossbeam_channel::unbounded();
         let mut app = App::new();
@@ -828,9 +829,10 @@ mod tests {
         const DOOR_FLAGS: u32 = 0x20;
         /// The control: a creature questgiver.
         const NPC: u64 = 0x2222;
-        const FIELD_LEVEL: u16 = 34;
-        const FIELD_NPC_FLAGS: u16 = 147;
-        const FIELD_GAMEOBJECT_FLAGS: u16 = 9;
+        const FIELD_LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
+        const FIELD_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
+        const FIELD_GAMEOBJECT_FLAGS: u16 =
+            benilla_protocol::messages::FIELDS_5875.gameobject_flags;
 
         let (tx, rx) = crossbeam_channel::unbounded();
         let mut app = App::new();
@@ -946,13 +948,13 @@ mod tests {
         use benilla_protocol::{EntityKind, ObjectFields};
 
         const NPC: u64 = 0x1234;
-        const FIELD_HEALTH: u16 = 22; // UNIT_FIELD_HEALTH
-        const FIELD_NPC_FLAGS: u16 = 147;
-        const FIELD_FACTION: u16 = 35; // UNIT_FIELD_FACTIONTEMPLATE
-        const FIELD_PLAYER_FLAGS: u16 = 190;
-        const FIELD_COINAGE: u16 = 1176;
-        const FIELD_SKILL_1_1: u16 = 718;
-        const FIELD_INV_SLOT_0: u16 = 486; // PLAYER_FIELD_INV_SLOT_HEAD
+        const FIELD_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health; // UNIT_FIELD_HEALTH
+        const FIELD_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
+        const FIELD_FACTION: u16 = benilla_protocol::messages::FIELDS_5875.unit_factiontemplate; // UNIT_FIELD_FACTIONTEMPLATE
+        const FIELD_PLAYER_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.player_flags;
+        const FIELD_COINAGE: u16 = benilla_protocol::messages::FIELDS_5875.player_field_coinage;
+        const FIELD_SKILL_1_1: u16 = benilla_protocol::messages::FIELDS_5875.player_skill_info_1_1;
+        const FIELD_INV_SLOT_0: u16 = benilla_protocol::messages::FIELDS_5875.player_inv_slot_head; // PLAYER_FIELD_INV_SLOT_HEAD
 
         let net_entity = || NetEntity {
             kind: EntityKind::Unit,

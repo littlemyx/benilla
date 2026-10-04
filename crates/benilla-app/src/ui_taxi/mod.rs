@@ -362,8 +362,8 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
 
         /// `UNIT_FIELD_BYTES_0`, `PLAYER_BYTES_3`: absolute descriptor indices.
-        const BYTES_0: u16 = 36;
-        const PLAYER_BYTES_3: u16 = 195;
+        const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
+        const PLAYER_BYTES_3: u16 = benilla_protocol::messages::FIELDS_5875.player_bytes_3;
         const MASTER: u64 = 0xF130_0000_0000_0099;
 
         let data = benilla_formats::wow_data_or_skip!();

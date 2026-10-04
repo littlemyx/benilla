@@ -799,8 +799,8 @@ mod tests {
 
     /// Raw field indices, private to benilla-protocol: `PLAYER_FLAGS` is 190, and the visible-item
     /// blocks start at 258 (`PLAYER_VISIBLE_ITEM_1_CREATOR`), 12 per slot, the entry at +2.
-    const PLAYER_FLAGS: u16 = 190;
-    const BYTES_0: u16 = 36;
+    const PLAYER_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.player_flags;
+    const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
 
     fn wearing(flags: u32, entries: &[(u8, u32)]) -> ObjectStore {
         let mut pairs = vec![
@@ -958,9 +958,10 @@ mod tests {
         use crate::creature_anim::Wielded;
 
         /// Raw field indices; byte 0 of `UNIT_FIELD_BYTES_2` is the sheath state.
-        const UNIT_FLAGS: u16 = 46;
-        const UNIT_BYTES_2: u16 = 164;
-        const VISIBLE_ITEM_MAINHAND_ENTRY: u16 = 258 + 2 + 12 * 15;
+        const UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+        const UNIT_BYTES_2: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_2;
+        const VISIBLE_ITEM_MAINHAND_ENTRY: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_visible_item_1_creator + 2 + 12 * 15;
         /// `UNIT_FLAG_DISARMED`.
         const DISARMED: u32 = 0x0020_0000;
 
@@ -1080,8 +1081,9 @@ mod tests {
     fn the_hands_keep_the_worn_reading_through_a_disarm() {
         use crate::creature_anim::Wielded;
 
-        const UNIT_FLAGS: u16 = 46;
-        const VISIBLE_ITEM_MAINHAND_ENTRY: u16 = 258 + 2 + 12 * 15;
+        const UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+        const VISIBLE_ITEM_MAINHAND_ENTRY: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_visible_item_1_creator + 2 + 12 * 15;
         const DISARMED: u32 = 0x0020_0000;
 
         let mut app = App::new();

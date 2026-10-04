@@ -288,7 +288,7 @@ mod tests {
     }
 
     /// `UNIT_DYNAMIC_FLAGS`'s UpdateField index; bit `0x1` is LOOTABLE.
-    const FIELD_DYNAMIC_FLAGS: u16 = 143;
+    const FIELD_DYNAMIC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_dynamic_flags;
 
     /// Give `entity` a store carrying `flags` in `UNIT_DYNAMIC_FLAGS`.
     fn dynamic_flags(app: &mut App, entity: Entity, flags: u32) {

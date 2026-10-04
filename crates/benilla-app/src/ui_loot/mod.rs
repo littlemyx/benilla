@@ -1037,8 +1037,8 @@ mod tests {
     }
 
     /// Descriptor field indices the predicate-B table reads.
-    const F_GO_TYPE_ID: u16 = 21;
-    const F_UNIT_HEALTH: u16 = 22;
+    const F_GO_TYPE_ID: u16 = benilla_protocol::messages::FIELDS_5875.gameobject_type_id;
+    const F_UNIT_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
 
     /// Predicate B's answer for one latched object; `None` latches a guid that does not resolve.
     fn kneels_at(object: Option<(EntityKind, &[(u16, u32)])>) -> bool {

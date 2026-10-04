@@ -71,8 +71,14 @@ field_table! {
     unit_health,
     /// Five power slots: mana, rage, focus, energy, happiness; `MAXPOWER1..5` follow `MAXHEALTH`.
     unit_power1,
+    /// `UNIT_FIELD_POWER2` (rage), the second of the five power slots.
+    unit_power2,
+    /// `UNIT_FIELD_POWER5` (happiness), the fifth power slot.
+    unit_power5,
     unit_maxhealth,
     unit_maxpower1,
+    /// `UNIT_FIELD_MAXPOWER2`, the maximum of the second power slot.
+    unit_maxpower2,
     unit_level,
     unit_factiontemplate,
     unit_bytes_0,
@@ -369,8 +375,11 @@ pub const FIELDS_5875: FieldTable = FieldTable {
     unit_channel_object: 20,
     unit_health: 22,
     unit_power1: 23,
+    unit_power2: 24,
+    unit_power5: 27,
     unit_maxhealth: 28,
     unit_maxpower1: 29,
+    unit_maxpower2: 30,
     unit_level: 34,
     unit_factiontemplate: 35,
     unit_bytes_0: 36,

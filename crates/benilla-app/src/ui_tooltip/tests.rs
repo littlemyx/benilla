@@ -979,8 +979,8 @@ fn the_mouseover_token_names_the_hovered_units_creature_type() {
     use benilla_protocol::ObjectFields;
 
     /// `UNIT_FIELD_BYTES_0` and `UNIT_FIELD_BYTES_1`, absolute descriptor indices.
-    const BYTES_0: u16 = 36;
-    const BYTES_1: u16 = 138;
+    const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
+    const BYTES_1: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_1;
     const NIGHT_ELF: u32 = 4;
     const CAT_FORM: u32 = 1;
     const DRUID: u64 = 0x99;

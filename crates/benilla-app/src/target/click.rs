@@ -2027,10 +2027,10 @@ mod tests {
     use crate::net::{ClientCommand, NetCommands, ObjectStore};
     use bevy::ecs::system::RunSystemOnce;
 
-    const F_HEALTH: u16 = 22;
-    const F_MAXHEALTH: u16 = 28;
+    const F_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    const F_MAXHEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_maxhealth;
     /// `GAMEOBJECT_TYPE_ID`, absolute field 21, which the GameObject arms fork on.
-    const GO_TYPE_FIELD: u16 = 21;
+    const GO_TYPE_FIELD: u16 = benilla_protocol::messages::FIELDS_5875.gameobject_type_id;
     const BOAR: u64 = 0xB0A2;
     const ME: u64 = 0x5E1F;
 
@@ -2120,8 +2120,8 @@ mod tests {
     /// (`0x60c1a1`), with no swing and no service packet; a live player on the same fork swings.
     #[test]
     fn a_ghost_takes_the_attack_arm_and_is_refused_silently() {
-        const F_PLAYER_FLAGS: u16 = 190;
-        const F_NPC_FLAGS: u16 = 147;
+        const F_PLAYER_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.player_flags;
+        const F_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
         for (label, own, swings) in [
             (
                 "ghost",
@@ -2265,7 +2265,7 @@ mod tests {
         at: Vec3,
         walk: bool,
     ) -> (World, Entity, crossbeam_channel::Receiver<ClientCommand>) {
-        const F_NPC_FLAGS: u16 = 147;
+        const F_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
         let (tx, rx) = crossbeam_channel::unbounded::<ClientCommand>();
         let (mut world, _boar) = right_click_world();
         world.insert_resource(NetCommands(tx));
@@ -2581,8 +2581,8 @@ mod tests {
     /// for a unit.
     #[test]
     fn a_loot_walk_stops_at_the_square_root_of_the_melee_reach() {
-        const F_DYNAMIC_FLAGS: u16 = 143;
-        const F_COMBAT_REACH: u16 = 130;
+        const F_DYNAMIC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_dynamic_flags;
+        const F_COMBAT_REACH: u16 = benilla_protocol::messages::FIELDS_5875.unit_combatreach;
         // A unit of reach 4 against our default 1.5: 4 + 1.5 + 1.3333 = 6.8333.
         let (mut world, _vendor, _rx) = walking_world(Vec3::new(14.0, 0.0, 0.0), true);
         let body = world
@@ -2833,7 +2833,7 @@ mod tests {
     }
 
     fn attack_wolf_at(at: Vec3, reach: f32) -> (World, crossbeam_channel::Receiver<ClientCommand>) {
-        const F_COMBAT_REACH: u16 = 130;
+        const F_COMBAT_REACH: u16 = benilla_protocol::messages::FIELDS_5875.unit_combatreach;
         let (mut world, _vendor, rx) = walking_world(Vec3::new(14.0, 0.0, 0.0), true);
         let wolf = world
             .spawn((
@@ -2994,7 +2994,7 @@ mod tests {
         Entity,
         crossbeam_channel::Receiver<ClientCommand>,
     ) {
-        const F_DYNAMIC_FLAGS: u16 = 143;
+        const F_DYNAMIC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_dynamic_flags;
         let (mut world, _vendor, rx) = walking_world(Vec3::new(2.5, 0.0, 0.0), walk);
         world.insert_resource(crate::player::Player::with_move_flags(flags));
         let body = world

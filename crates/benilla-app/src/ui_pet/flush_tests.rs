@@ -21,7 +21,7 @@ const FLUSH: [&str; 3] = [
 ];
 
 /// `UNIT_FIELD_SUMMONEDBY`, low word, the owner test the GO's pet leg reads (`0x6e859a`).
-const SUMMONEDBY: u16 = 12;
+const SUMMONEDBY: u16 = benilla_protocol::messages::FIELDS_5875.unit_summonedby;
 
 /// Our own pet by the field the GO's pet leg reads: `SUMMONEDBY` us.
 fn summoned_pet() -> ObjectStore {

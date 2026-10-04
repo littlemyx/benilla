@@ -1972,9 +1972,9 @@ mod tests {
     }
 
     /// `UNIT_FIELD_CHARMEDBY` / `SUMMONEDBY` / `CREATEDBY`, two dwords each.
-    const CHARMEDBY: u16 = 10;
-    const SUMMONEDBY: u16 = 12;
-    const CREATEDBY: u16 = 14;
+    const CHARMEDBY: u16 = benilla_protocol::messages::FIELDS_5875.unit_charmedby;
+    const SUMMONEDBY: u16 = benilla_protocol::messages::FIELDS_5875.unit_summonedby;
+    const CREATEDBY: u16 = benilla_protocol::messages::FIELDS_5875.unit_createdby;
 
     /// A unit store whose `field` pair names `owner`.
     fn owned(field: u16, owner: u64) -> ObjectStore {

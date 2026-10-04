@@ -235,15 +235,15 @@ mod tests {
     use super::*;
     use benilla_protocol::ObjectFields;
 
-    const BYTES_0: u16 = 36;
-    const BYTES_1: u16 = 138;
-    const POWER5: u16 = 27;
-    const PETNUMBER: u16 = 139;
-    const PETXP: u16 = 141;
-    const PETNEXTXP: u16 = 142;
-    const TRAINING: u16 = 149;
+    const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
+    const BYTES_1: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_1;
+    const POWER5: u16 = benilla_protocol::messages::FIELDS_5875.unit_power5;
+    const PETNUMBER: u16 = benilla_protocol::messages::FIELDS_5875.unit_petnumber;
+    const PETXP: u16 = benilla_protocol::messages::FIELDS_5875.unit_petexperience;
+    const PETNEXTXP: u16 = benilla_protocol::messages::FIELDS_5875.unit_petnextlevelexp;
+    const TRAINING: u16 = benilla_protocol::messages::FIELDS_5875.unit_training_points;
     /// `OBJECT_FIELD_ENTRY`, the pet's creature-template id.
-    const ENTRY: u16 = 3;
+    const ENTRY: u16 = benilla_protocol::messages::FIELDS_5875.object_entry;
     /// vmangos `creature_template` entries: Imp (`pet_family` 23) and Stonetusk Boar (5).
     const IMP_ENTRY: u32 = 416;
     const BOAR_ENTRY: u32 = 113;

@@ -577,13 +577,13 @@ mod tests {
     // ── The out-of-range record ──────────────────────────────────────────────
 
     /// Unit descriptor field indices, build 5875.
-    const HEALTH: u16 = 22;
-    const MAXHEALTH: u16 = 28;
+    const HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    const MAXHEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_maxhealth;
     /// `UNIT_FIELD_POWER2`/`MAXPOWER2`, the rage slot (`POWER1 + POWER_RAGE`).
-    const POWER2: u16 = 24;
-    const MAXPOWER2: u16 = 30;
-    const LEVEL: u16 = 34;
-    const BYTES_0: u16 = 36;
+    const POWER2: u16 = benilla_protocol::messages::FIELDS_5875.unit_power2;
+    const MAXPOWER2: u16 = benilla_protocol::messages::FIELDS_5875.unit_maxpower2;
+    const LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
+    const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
 
     fn asked(rx: &crossbeam_channel::Receiver<ClientCommand>) -> Vec<u64> {
         rx.try_iter()
@@ -650,9 +650,9 @@ mod tests {
     /// effect bit; the pet block comes off the pet's own object (`0x5f0a1f`-`0x5f0b72`).
     #[test]
     fn a_members_despawn_snapshots_their_auras_and_their_pets() {
-        const AURA: u16 = 47;
-        const AURAFLAGS: u16 = 95;
-        const SUMMON: u16 = 8;
+        const AURA: u16 = benilla_protocol::messages::FIELDS_5875.unit_aura;
+        const AURAFLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_auraflags;
+        const SUMMON: u16 = benilla_protocol::messages::FIELDS_5875.unit_summon;
         let (tx, _rx) = crossbeam_channel::unbounded();
         let net = NetCommands(tx);
         let guid = 0x1234;
@@ -669,7 +669,7 @@ mod tests {
             (SUMMON + 1, (pet_guid >> 32) as u32),
         ]));
         // `UNIT_FIELD_PETNUMBER`, the key the pet-name cache files a pet's name under.
-        const PETNUMBER: u16 = 139;
+        const PETNUMBER: u16 = benilla_protocol::messages::FIELDS_5875.unit_petnumber;
         let pet = ObjectStore(benilla_protocol::messages::ObjectFields::from_pairs(&[
             (HEALTH, 900),
             (PETNUMBER, 4),

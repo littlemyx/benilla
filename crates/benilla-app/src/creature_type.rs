@@ -75,9 +75,9 @@ mod tests {
     use benilla_protocol::ObjectFields;
 
     /// `UNIT_FIELD_BYTES_1` and `UNIT_FIELD_BYTES_0`, absolute descriptor indices.
-    const BYTES_1: u16 = 138;
-    const BYTES_0: u16 = 36;
-    const OBJECT_FIELD_ENTRY: u16 = 3;
+    const BYTES_1: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_1;
+    const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
+    const OBJECT_FIELD_ENTRY: u16 = benilla_protocol::messages::FIELDS_5875.object_entry;
 
     fn store(entry: u32, race: u32, form: u32) -> ObjectStore {
         ObjectStore(ObjectFields::from_pairs(&[
