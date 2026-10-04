@@ -132,7 +132,7 @@ mod tests {
         assert!(votes(&rx).is_empty(), "no field, no vote");
 
         // Far sight set, the object not streamed: still the body, not the origin.
-        const FARSIGHT: u16 = 712;
+        const FARSIGHT: u16 = benilla_protocol::messages::FIELDS_5875.player_farsight;
         let set = |app: &mut App, lo: u32| {
             *app.world_mut().get_mut::<ObjectStore>(me).unwrap() =
                 ObjectStore(benilla_protocol::ObjectFields::from_pairs(&[

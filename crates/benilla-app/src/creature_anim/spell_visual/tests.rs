@@ -1006,7 +1006,7 @@ fn the_mount_poof_puffs_on_the_build_leg_only() {
     use benilla_protocol::ObjectFields;
 
     /// `UNIT_FIELD_MOUNTDISPLAYID` (index 133).
-    const FIELD_MOUNTDISPLAYID: u16 = 133;
+    const FIELD_MOUNTDISPLAYID: u16 = benilla_protocol::messages::FIELDS_5875.unit_mountdisplayid;
     /// The shipped path of `SpellVisualEffectName` row 1185, the druid-morph cloud.
     const POOF: &str = "Spells\\DruidMorph_Impact_Base.mdx";
     const POOF_FX: u32 = 1185;
@@ -1267,7 +1267,8 @@ const BLACKCROW: RealRanged = RealRanged {
 /// `PLAYER_VISIBLE_ITEM_18_0`, the item entry in equipment slot 17 (vmangos
 /// `EQUIPMENT_SLOT_RANGED`): `PLAYER_VISIBLE_ITEM_1_CREATOR` (258) + 2 + 12 × 17, spelled out as
 /// the base is private to `benilla-protocol`.
-const VISIBLE_RANGED_ENTRY_FIELD: u16 = 258 + 2 + 12 * 17;
+const VISIBLE_RANGED_ENTRY_FIELD: u16 =
+    benilla_protocol::messages::FIELDS_5875.player_visible_item_1_creator + 2 + 12 * 17;
 
 /// Keeps the item layer's ask-once channel alive, so an unexpected `ItemQuery` (a template not
 /// landed, which starves the weapon lookup) is observable.

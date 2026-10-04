@@ -985,9 +985,9 @@ mod tests {
     #[test]
     fn not_selectable_refuses_the_commit_and_keeps_the_old_target() {
         use benilla_protocol::ObjectFields;
-        const FLAGS: u16 = 46;
-        const CREATEDBY: u16 = 14;
-        const OBJECT_TYPE: u16 = 2;
+        const FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+        const CREATEDBY: u16 = benilla_protocol::messages::FIELDS_5875.unit_createdby;
+        const OBJECT_TYPE: u16 = benilla_protocol::messages::FIELDS_5875.object_type;
         const NOT_SELECTABLE: u32 = 1 << 25;
         // `OBJECT_FIELD_TYPE` bit 3, a unit: the only kind whose `+0x58` slot is not the base stub.
         let unit = |pairs: &[(u16, u32)]| {
@@ -1117,10 +1117,10 @@ mod tests {
     #[test]
     fn the_attack_orders_final_gate_reads_health_then_can_attack() {
         use benilla_protocol::ObjectFields;
-        const HEALTH: u16 = 22;
-        const DYNFLAGS: u16 = 143;
-        const FLAGS: u16 = 46;
-        const TPL: u16 = 35;
+        const HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+        const DYNFLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_dynamic_flags;
+        const FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+        const TPL: u16 = benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
         let reps = Reputations::default();
         let unit = |pairs: &[(u16, u32)]| ObjectStore(ObjectFields::from_pairs(pairs));
         // With no catalog both reactions are neutral, which `CanAttack`'s mixed arm (< 4) admits,
@@ -1189,15 +1189,15 @@ mod tests {
     }
 
     /// Field indices, for the store builders below (`benilla-protocol`'s own numbering).
-    const F_TYPE: u16 = 2;
-    const F_HEALTH: u16 = 22;
-    const F_MAXHEALTH: u16 = 28;
-    const F_FLAGS: u16 = 46;
-    const F_DYNFLAGS: u16 = 143;
-    const F_MOUNTDISPLAYID: u16 = 133;
-    const F_DUEL_ARBITER: u16 = 188;
-    const F_PLAYER_FLAGS: u16 = 190;
-    const F_DUEL_TEAM: u16 = 196;
+    const F_TYPE: u16 = benilla_protocol::messages::FIELDS_5875.object_type;
+    const F_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    const F_MAXHEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_maxhealth;
+    const F_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+    const F_DYNFLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_dynamic_flags;
+    const F_MOUNTDISPLAYID: u16 = benilla_protocol::messages::FIELDS_5875.unit_mountdisplayid;
+    const F_DUEL_ARBITER: u16 = benilla_protocol::messages::FIELDS_5875.player_duel_arbiter;
+    const F_PLAYER_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.player_flags;
+    const F_DUEL_TEAM: u16 = benilla_protocol::messages::FIELDS_5875.player_duel_team;
     /// `UNIT_FLAG_PVP_ATTACKABLE`, always on a player: it selects the player arms of `CanAttack`
     /// and `CanAssist`.
     const CONTROLLED: u32 = 0x8;

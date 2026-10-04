@@ -137,9 +137,9 @@ mod tests {
     /// A mob the TAB scan can pick: it alone carries a `NetEntity`.
     const MOB: u64 = 0x31;
     /// `UNIT_FIELD_FACTIONTEMPLATE`, `UNIT_FIELD_HEALTH`, `UNIT_FIELD_FLAGS`.
-    const TEMPLATE: u16 = 35;
-    const HEALTH: u16 = 22;
-    const FLAGS: u16 = 46;
+    const TEMPLATE: u16 = benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
+    const HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    const FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
     /// The fixture's templates: ours (group 1, friendly toward group 2, enemy of group 4), a
     /// friendly NPC's (group 2) and a hostile mob's (group 4).
     const OURS: u32 = 1;

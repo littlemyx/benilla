@@ -37,7 +37,7 @@ fn dyn_field_is_f32(index: u16) -> bool {
 }
 
 /// `UNIT_FIELD_POWER1` (mana): `OBJECT_END` (6) + 0x11 (`UpdateFields_1_12_1.h:50`).
-const FIELD_UNIT_POWER1: u16 = 6 + 0x11;
+const FIELD_UNIT_POWER1: u16 = benilla_protocol::messages::FIELDS_5875.unit_power1;
 
 pub(crate) struct GroundFx {
     spell: u32,

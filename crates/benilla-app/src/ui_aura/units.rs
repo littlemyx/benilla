@@ -315,11 +315,11 @@ mod tests {
     const ME: u64 = 0x10;
     const MEMBER: u64 = 0x1234;
     const PET: u64 = 0xF140_0000_0000_0077;
-    const AURA: u16 = 47;
-    const AURAFLAGS: u16 = 95;
-    const SUMMON: u16 = 8;
+    const AURA: u16 = benilla_protocol::messages::FIELDS_5875.unit_aura;
+    const AURAFLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_auraflags;
+    const SUMMON: u16 = benilla_protocol::messages::FIELDS_5875.unit_summon;
     /// `UNIT_FIELD_FLAGS`; bit 27 is `UNIT_FLAG_AURAS_VISIBLE`, which opens `UnitBuff`'s gate.
-    const FLAGS: u16 = 46;
+    const FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
 
     /// The feed on a bare app with a VM, us, and a party of one, `MEMBER`, with no record.
     fn party_app() -> App {
@@ -923,9 +923,9 @@ mod tests {
     // == Any token the resolver parses ==
 
     /// `OBJECT_FIELD_TYPE`; a unit's typemask is `0x9`, a player's `0x19`.
-    const TYPE: u16 = 2;
+    const TYPE: u16 = benilla_protocol::messages::FIELDS_5875.object_type;
     /// `UNIT_FIELD_TARGET`'s low dword; the high half is the next index.
-    const TARGET: u16 = 16;
+    const TARGET: u16 = benilla_protocol::messages::FIELDS_5875.unit_target;
     const MOB: u64 = 0xF130_0000_0000_0001;
     const ADD: u64 = 0xF130_0000_0000_0002;
 

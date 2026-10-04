@@ -260,10 +260,10 @@ pub(in crate::ui_party) mod tests {
 
     /// Unit descriptor field indices, build 5875: the pair a member's `SUMMON` holds, and a pet's
     /// health, maximum health and pet number.
-    const SUMMON: u16 = 8;
-    const HEALTH: u16 = 22;
-    const MAXHEALTH: u16 = 28;
-    const PETNUMBER: u16 = 139;
+    const SUMMON: u16 = benilla_protocol::messages::FIELDS_5875.unit_summon;
+    const HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    const MAXHEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_maxhealth;
+    const PETNUMBER: u16 = benilla_protocol::messages::FIELDS_5875.unit_petnumber;
 
     pub(in crate::ui_party) const ME: u64 = 0x10;
 
@@ -943,9 +943,9 @@ pub(in crate::ui_party) mod tests {
     }
 
     /// `UNIT_FIELD_BYTES_0` and `_1`, `OBJECT_FIELD_ENTRY`, a Night Elf and Cat Form.
-    const BYTES_0: u16 = 36;
-    const BYTES_1: u16 = 138;
-    const OBJECT_FIELD_ENTRY: u16 = 3;
+    const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
+    const BYTES_1: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_1;
+    const OBJECT_FIELD_ENTRY: u16 = benilla_protocol::messages::FIELDS_5875.object_entry;
     const NIGHT_ELF: u32 = 4;
     const CAT_FORM: u32 = 1;
 

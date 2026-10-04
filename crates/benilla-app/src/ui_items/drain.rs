@@ -770,9 +770,9 @@ mod tests {
     const CLAM_ENTRY: u32 = 7973;
     const CLAM: u64 = 0x4000_0000_0000_1939;
     /// `PLAYER_FIELD_PACK_SLOT_1`, backpack slot 1's guid pair.
-    const F_PACK_SLOT_1: u16 = 532;
+    const F_PACK_SLOT_1: u16 = benilla_protocol::messages::FIELDS_5875.player_pack_slot_1;
     /// `OBJECT_FIELD_ENTRY` on the item object.
-    const F_OBJECT_ENTRY: u16 = 3;
+    const F_OBJECT_ENTRY: u16 = benilla_protocol::messages::FIELDS_5875.object_entry;
 
     /// Right-clicks backpack slot 1, holding a lootable template, and runs the click dispatcher.
     fn open_the_clam() -> (App, crossbeam_channel::Receiver<ClientCommand>) {
@@ -1262,10 +1262,10 @@ mod bind_confirm_tests {
     const FLURRY_AXE: u32 = 871;
     const AXE_GUID: u64 = 0x4000_0000_0000_0871;
     /// `ITEM_FIELD_FLAGS` (field 21); bit 0 is soulbound (`0x5da2c0`).
-    const F_ITEM_FLAGS: u16 = 21;
+    const F_ITEM_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.item_flags;
     /// `PLAYER_FIELD_PACK_SLOT_1`, backpack slot 1's guid pair.
-    const F_PACK_SLOT_1: u16 = 532;
-    const F_OBJECT_ENTRY: u16 = 3;
+    const F_PACK_SLOT_1: u16 = benilla_protocol::messages::FIELDS_5875.player_pack_slot_1;
+    const F_OBJECT_ENTRY: u16 = benilla_protocol::messages::FIELDS_5875.object_entry;
 
     fn load_ui(s: &UiScript) {
         // Chain files, so through the chain-aware reader.

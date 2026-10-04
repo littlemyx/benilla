@@ -198,13 +198,13 @@ mod tests {
 
     /// Absolute descriptor indices: `OBJECT_FIELD_TYPE`, `UNIT_FIELD_HEALTH`,
     /// `UNIT_FIELD_FLAGS`, `UNIT_FIELD_CHARMEDBY` and `UNIT_FIELD_CREATEDBY`.
-    const TYPE: u16 = 2;
-    const HEALTH: u16 = 22;
-    const FLAGS: u16 = 46;
-    const CHARMED_BY: u16 = 10;
-    const CREATED_BY: u16 = 14;
+    const TYPE: u16 = benilla_protocol::messages::FIELDS_5875.object_type;
+    const HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    const FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+    const CHARMED_BY: u16 = benilla_protocol::messages::FIELDS_5875.unit_charmedby;
+    const CREATED_BY: u16 = benilla_protocol::messages::FIELDS_5875.unit_createdby;
     /// `UNIT_FIELD_FACTIONTEMPLATE`, on [`fx::factions`]' rows 1 (Human) and 2 (Orc).
-    const TEMPLATE: u16 = 35;
+    const TEMPLATE: u16 = benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
     const PLAYER_TYPE: u32 = 0x19;
 
     // The words: `TARGET_FLAG_*`.

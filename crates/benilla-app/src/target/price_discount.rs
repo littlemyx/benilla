@@ -147,8 +147,8 @@ mod tests {
     }
 
     /// `PLAYER_BYTES_3`, `PLAYER_FIELD_BYTES`: absolute descriptor indices.
-    const PLAYER_BYTES_3: u16 = 195;
-    const PLAYER_FIELD_BYTES: u16 = 1222;
+    const PLAYER_BYTES_3: u16 = benilla_protocol::messages::FIELDS_5875.player_bytes_3;
+    const PLAYER_FIELD_BYTES: u16 = benilla_protocol::messages::FIELDS_5875.player_field_bytes;
 
     /// The flag is read off the vendor and the rank off the player's current-rank byte, never the
     /// highest-rank-held byte of `PLAYER_FIELD_BYTES`. With no faction catalog the reaction is
@@ -178,7 +178,7 @@ mod tests {
     }
 
     /// `UNIT_FIELD_BYTES_0`, absolute descriptor index.
-    const BYTES_0: u16 = 36;
+    const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
 
     /// The reputation term reads the vendor's reaction to the player, the standing rank: Friendly
     /// (8999) earns nothing, Honored (9000) the 0.1. The player's reaction to the vendor would be

@@ -698,12 +698,12 @@ mod self_res_tests {
     /// Reincarnation's effect spell, what the server writes into the field.
     const REINCARNATION: u32 = 21169;
     /// `PLAYER_SELF_RES_SPELL`.
-    const F_SELF_RES: u16 = 1224;
+    const F_SELF_RES: u16 = benilla_protocol::messages::FIELDS_5875.player_self_res_spell;
     /// `UNIT_FIELD_HEALTH` and `UNIT_FIELD_MAXHEALTH`: `unit_is_dead()` also needs a non-zero max.
-    const F_HEALTH: u16 = 22;
-    const F_MAXHEALTH: u16 = 28;
+    const F_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    const F_MAXHEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_maxhealth;
     /// `PLAYER_FIELD_PACK_SLOT_1`: the backpack's 16 slots, two dwords per guid.
-    const F_PACK_1: u16 = 532;
+    const F_PACK_1: u16 = benilla_protocol::messages::FIELDS_5875.player_pack_slot_1;
 
     fn commands() -> (NetCommands, crossbeam_channel::Receiver<ClientCommand>) {
         let (tx, rx) = crossbeam_channel::unbounded();

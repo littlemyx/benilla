@@ -303,10 +303,10 @@ mod tests {
         use crate::net::ObjectStore;
         use benilla_protocol::ObjectFields;
 
-        const FIELD_HEALTH: u16 = 22; // UNIT_FIELD_HEALTH
-        const FIELD_SUMMONEDBY: u16 = 12; // UNIT_FIELD_SUMMONEDBY (2 dwords)
-        const FIELD_CHARMEDBY: u16 = 10; // UNIT_FIELD_CHARMEDBY (2 dwords)
-        const FIELD_BYTES_1: u16 = 138;
+        const FIELD_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health; // UNIT_FIELD_HEALTH
+        const FIELD_SUMMONEDBY: u16 = benilla_protocol::messages::FIELDS_5875.unit_summonedby; // UNIT_FIELD_SUMMONEDBY (2 dwords)
+        const FIELD_CHARMEDBY: u16 = benilla_protocol::messages::FIELDS_5875.unit_charmedby; // UNIT_FIELD_CHARMEDBY (2 dwords)
+        const FIELD_BYTES_1: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_1;
         /// `UNIT_FIELD_BYTES_1` byte 3 bit 2, the `& 4` the classifier tests.
         const UNTRACKABLE: u32 = 0x4 << 24;
         const ME: u64 = 0x0000_0000_0000_0007;

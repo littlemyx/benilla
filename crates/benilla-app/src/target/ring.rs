@@ -876,7 +876,7 @@ mod tests {
         use benilla_protocol::ObjectFields;
 
         /// `UNIT_FIELD_BYTES_0`, absolute descriptor index.
-        const BYTES_0: u16 = 36;
+        const BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
         let data = benilla_formats::wow_data_or_skip!();
         let mut chain = benilla_formats::open_chain(&data).expect("open chain");
         let me = ObjectStore(ObjectFields::from_pairs(&[(BYTES_0, HUMAN_WARRIOR)]));

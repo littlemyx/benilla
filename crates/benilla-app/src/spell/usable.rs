@@ -552,8 +552,10 @@ mod tests {
         use crate::items::TestDeps;
 
         // `PLAYER_FIELD_INV_SLOT_HEAD + 2 * slot` for equipment slots 15 and 16.
-        const INV_MAINHAND: u16 = 486 + 2 * 15;
-        const INV_OFFHAND: u16 = 486 + 2 * 16;
+        const INV_MAINHAND: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head + 2 * 15;
+        const INV_OFFHAND: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head + 2 * 16;
         const DISARMED: u32 = 0x0020_0000;
 
         // A class-2 weapon requirement.
@@ -599,11 +601,14 @@ mod tests {
     fn the_equipped_item_search_masks_by_hand_and_rejects_broken_gear() {
         use crate::items::TestDeps;
 
-        const INV_MAINHAND: u16 = 486 + 2 * 15;
-        const INV_OFFHAND: u16 = 486 + 2 * 16;
+        const INV_MAINHAND: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head + 2 * 15;
+        const INV_OFFHAND: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head + 2 * 16;
         // `ITEM_FIELD_DURABILITY` / `_MAXDURABILITY`, instance fields.
-        const ITEM_DURABILITY: u16 = 46;
-        const ITEM_MAX_DURABILITY: u16 = 47;
+        const ITEM_DURABILITY: u16 = benilla_protocol::messages::FIELDS_5875.item_durability;
+        const ITEM_MAX_DURABILITY: u16 =
+            benilla_protocol::messages::FIELDS_5875.item_max_durability;
 
         let spell = |ex3: u32| SpellDisplay {
             equipped_item_class: 2,
@@ -679,8 +684,10 @@ mod tests {
     fn a_main_hand_only_ability_is_dead_while_that_hand_is_disarmed() {
         use crate::items::TestDeps;
 
-        const INV_MAINHAND: u16 = 486 + 2 * 15;
-        const INV_OFFHAND: u16 = 486 + 2 * 16;
+        const INV_MAINHAND: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head + 2 * 15;
+        const INV_OFFHAND: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head + 2 * 16;
         const DISARMED: u32 = 0x0020_0000;
 
         let fits = |ex3: u32, disarmed: bool| {

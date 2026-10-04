@@ -160,12 +160,12 @@ pub(crate) mod fixture {
     /// Absolute descriptor indices: `OBJECT_FIELD_TYPE`, `UNIT_FIELD_CHARMEDBY`,
     /// `UNIT_FIELD_CREATEDBY`, `UNIT_FIELD_HEALTH`, `UNIT_FIELD_FACTIONTEMPLATE` and
     /// `UNIT_FIELD_FLAGS`.
-    pub(crate) const TYPE: u16 = 2;
-    pub(crate) const CHARMED_BY: u16 = 10;
-    pub(crate) const CREATED_BY: u16 = 14;
-    pub(crate) const HEALTH: u16 = 22;
-    pub(crate) const TEMPLATE: u16 = 35;
-    pub(crate) const FLAGS: u16 = 46;
+    pub(crate) const TYPE: u16 = benilla_protocol::messages::FIELDS_5875.object_type;
+    pub(crate) const CHARMED_BY: u16 = benilla_protocol::messages::FIELDS_5875.unit_charmedby;
+    pub(crate) const CREATED_BY: u16 = benilla_protocol::messages::FIELDS_5875.unit_createdby;
+    pub(crate) const HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+    pub(crate) const TEMPLATE: u16 = benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
+    pub(crate) const FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
     /// `TYPEMASK_OBJECT | UNIT | PLAYER`, and `TYPEMASK_OBJECT | UNIT`.
     pub(crate) const PLAYER_TYPE: u32 = 0x19;
     pub(crate) const CREATURE_TYPE: u32 = 0x09;
