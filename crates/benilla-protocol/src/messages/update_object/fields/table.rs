@@ -976,8 +976,11 @@ mod tests {
 
     #[test]
     fn the_mask_bound_covers_the_widest_descriptor_of_any_table() {
-        assert!(MAX_PLAYER_END >= FIELDS_5875.player_end);
-        assert!(MAX_PLAYER_END >= FIELDS_8606.player_end);
+        assert_eq!(
+            MAX_PLAYER_END,
+            FIELDS_5875.player_end.max(FIELDS_8606.player_end)
+        );
+        assert_eq!(MAX_PLAYER_END, 1592);
     }
 
     // The 2.4.3 positions the live probe leans on, by 2.4.3 name.
