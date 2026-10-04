@@ -136,14 +136,14 @@ fn death_vocals(
     config: Res<SoundConfig>,
     listener: Res<AudioListener>,
 ) {
-    use benilla_protocol::field::{FIELD_UNIT_DYNAMIC_FLAGS, FIELD_UNIT_HEALTH, UNIT_DYNFLAG_DEAD};
+    use benilla_protocol::field::UNIT_DYNFLAG_DEAD;
     let (Some(voices), Some(mut kits), Some(assets)) = (voices, kits, assets) else {
         return;
     };
     let listener = listener.pos;
     for e in edges.read() {
-        let died = (e.unit_field(FIELD_UNIT_HEALTH) && e.old > 0 && e.new == 0)
-            || (e.unit_field(FIELD_UNIT_DYNAMIC_FLAGS)
+        let died = (e.unit_field(e.fields.unit_health) && e.old > 0 && e.new == 0)
+            || (e.unit_field(e.fields.unit_dynamic_flags)
                 && e.old & UNIT_DYNFLAG_DEAD == 0
                 && e.new & UNIT_DYNFLAG_DEAD != 0);
         if !died {

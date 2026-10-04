@@ -1423,7 +1423,8 @@ mod tests {
     /// row in `0xbb71c0` again, so a fold while the popup is up cannot retarget the abandon.
     #[test]
     fn a_fold_between_mark_and_confirm_does_not_retarget_the_abandon() {
-        use benilla_protocol::messages::field::FIELD_PLAYER_QUEST_LOG_1_1;
+        const FIELD_PLAYER_QUEST_LOG_1_1: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_quest_log_1_1;
 
         // Z1 = zone 0 ("Missing header!", forced first) holding A; Z2 = zone 7 holding B and C.
         // Entries: [Z1, A, Z2, B, C]; B is row 4.
@@ -1520,7 +1521,8 @@ mod tests {
     #[test]
     fn a_quest_entering_the_log_queues_its_accept_line() {
         use crate::ui_quest::{QuestLine, QuestLines};
-        use benilla_protocol::messages::field::FIELD_PLAYER_QUEST_LOG_1_1;
+        const FIELD_PLAYER_QUEST_LOG_1_1: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_quest_log_1_1;
 
         let (tx, _rx) = crossbeam_channel::unbounded();
         let mut app = App::new();

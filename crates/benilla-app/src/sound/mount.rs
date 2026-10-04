@@ -32,7 +32,7 @@ fn dismount_sounds(
     };
     let listener = listener.pos;
     for e in edges.read() {
-        if !e.unit_field(benilla_protocol::field::FIELD_UNIT_MOUNTDISPLAYID) || e.new != 0 {
+        if !e.unit_field(e.fields.unit_mountdisplayid) || e.new != 0 {
             continue;
         }
         let Ok(transform) = poses.get(e.entity) else {

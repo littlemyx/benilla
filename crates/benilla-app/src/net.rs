@@ -252,6 +252,8 @@ pub(crate) struct FieldChanged {
     pub index: u16,
     pub old: u32,
     pub new: u32,
+    /// The field table of the build the store was streamed under, so `index` is read against it.
+    pub fields: &'static benilla_protocol::messages::FieldTable,
 }
 
 impl FieldChanged {
@@ -271,20 +273,38 @@ impl FieldChanged {
 }
 
 /// The field edges one feed saw this run, by guid and index: the reference fans a moved field out
-/// to every unit token naming the unit (`0x515e50`).
+/// to every unit token naming the unit (`0x515e50`). It carries the field table of the edges it
+/// holds, so a field is asked for by name; with no edge it holds none and nothing moved.
 #[derive(Default)]
-pub(crate) struct FieldEdges(HashSet<(u64, u16)>);
+pub(crate) struct FieldEdges {
+    edges: HashSet<(u64, u16)>,
+    fields: Option<&'static benilla_protocol::messages::FieldTable>,
+}
 
 impl FieldEdges {
     pub fn collect(reader: &mut MessageReader<FieldChanged>) -> Self {
-        Self(reader.read().map(|e| (e.guid, e.index)).collect())
+        let mut out = Self::default();
+        for e in reader.read() {
+            out.edges.insert((e.guid, e.index));
+            out.fields = Some(e.fields);
+        }
+        out
     }
-    pub fn moved(&self, guid: u64, index: u16) -> bool {
-        self.0.contains(&(guid, index))
+    /// Whether the field `pick` names on `guid` moved this run.
+    pub fn moved(
+        &self,
+        guid: u64,
+        pick: impl FnOnce(&benilla_protocol::messages::FieldTable) -> u16,
+    ) -> bool {
+        self.fields
+            .is_some_and(|table| self.edges.contains(&(guid, pick(table))))
     }
     #[cfg(test)]
     pub fn of(edges: &[(u64, u16)]) -> Self {
-        Self(edges.iter().copied().collect())
+        Self {
+            edges: edges.iter().copied().collect(),
+            fields: Some(&benilla_protocol::messages::FIELDS_5875),
+        }
     }
 }
 
@@ -297,6 +317,7 @@ pub(crate) fn merge_store_fields(
     guid: u64,
     mut emit: impl FnMut(FieldChanged),
 ) {
+    let fields = store.table();
     let Some(kind) = store.created_as() else {
         // A bare delta with no create: nothing for the reference to notify on; the fields land.
         store.merge(delta);
@@ -310,6 +331,7 @@ pub(crate) fn merge_store_fields(
             index,
             old,
             new,
+            fields,
         });
     });
 }
@@ -2237,7 +2259,8 @@ mod tests {
     /// A re-create of a live object notifies like a delta.
     #[test]
     fn the_merge_emits_one_edge_per_moved_dword_and_none_for_a_first_create() {
-        use benilla_protocol::field::{FIELD_UNIT_HEALTH, FIELD_UNIT_LEVEL};
+        const FIELD_UNIT_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+        const FIELD_UNIT_LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
         use benilla_protocol::messages::ObjectType;
 
         let mut world = World::new();
@@ -2273,6 +2296,7 @@ mod tests {
                 index: FIELD_UNIT_HEALTH,
                 old: 100,
                 new: 0,
+                fields: &benilla_protocol::messages::FIELDS_5875,
             }],
             "one edge for the dword that moved, carrying the old value; the resend is silent"
         );
@@ -2479,7 +2503,7 @@ mod tests {
         world.init_resource::<GuidIndex>();
         let fields = |health| {
             ObjectStore(ObjectFields::from_pairs(&[(
-                benilla_protocol::field::FIELD_UNIT_HEALTH,
+                benilla_protocol::messages::FIELDS_5875.unit_health,
                 health,
             )]))
         };

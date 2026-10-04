@@ -2,7 +2,9 @@
 //! drain over one frame two ways and compares, the rest pin the speed-change ordering laws over
 //! consecutive packets.
 
-use benilla_protocol::field::{FIELD_UNIT_HEALTH, FIELD_UNIT_LEVEL, FIELD_UNIT_MAXHEALTH};
+const FIELD_UNIT_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
+const FIELD_UNIT_LEVEL: u16 = benilla_protocol::messages::FIELDS_5875.unit_level;
+const FIELD_UNIT_MAXHEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_maxhealth;
 use benilla_protocol::messages::{ObjectType, SpeedKind, SplineMode};
 use benilla_protocol::{EntityKind, MoveSpeeds, ObjectFields, SessionEvent};
 use bevy::prelude::*;

@@ -814,9 +814,10 @@ pub(crate) fn end_repair_mode_on_right_press(
 #[cfg(test)]
 pub(crate) mod purse_fixture {
     use super::*;
-    use benilla_protocol::field::{
-        FIELD_PLAYER_FIELD_COINAGE, FIELD_UNIT_FLAGS, FIELD_UNIT_NPC_FLAGS,
-    };
+    const FIELD_PLAYER_FIELD_COINAGE: u16 =
+        benilla_protocol::messages::FIELDS_5875.player_field_coinage;
+    const FIELD_UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+    const FIELD_UNIT_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
     use benilla_protocol::ObjectFields;
 
     pub(crate) const VENDOR: u64 = 0xF130_0000_0000_0043;
@@ -994,10 +995,12 @@ mod tests {
     /// its rounding, and the undiscounted total is not what the VM reads.
     #[test]
     fn the_repair_all_total_takes_the_merchants_discount() {
-        use benilla_protocol::field::{
-            FIELD_PLAYER_INV_SLOT_HEAD, FIELD_UNIT_FACTIONTEMPLATE, FIELD_UNIT_FLAGS,
-            FIELD_UNIT_NPC_FLAGS,
-        };
+        const FIELD_PLAYER_INV_SLOT_HEAD: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head;
+        const FIELD_UNIT_FACTIONTEMPLATE: u16 =
+            benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
+        const FIELD_UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+        const FIELD_UNIT_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
         use benilla_protocol::ObjectFields;
         use bevy::ecs::system::RunSystemOnce;
 
@@ -1090,7 +1093,7 @@ mod tests {
         slot_field: u16,
         money: u32,
     ) -> (Vec<ClientCommand>, Vec<String>, Vec<&'static str>) {
-        use benilla_protocol::field::FIELD_UNIT_NPC_FLAGS;
+        const FIELD_UNIT_NPC_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_npc_flags;
         use benilla_protocol::ObjectFields;
         use bevy::ecs::system::RunSystemOnce;
         use purse_fixture::*;
@@ -1137,7 +1140,8 @@ mod tests {
     #[test]
     fn repair_all_does_nothing_at_a_vendor_that_does_not_repair() {
         use crate::target::cursor_mode::npc_flags::VENDOR as NPC_FLAG_VENDOR;
-        use benilla_protocol::field::FIELD_PLAYER_INV_SLOT_HEAD;
+        const FIELD_PLAYER_INV_SLOT_HEAD: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head;
         use purse_fixture::*;
 
         let (_, discounted) = sword_prices();
@@ -1166,7 +1170,8 @@ mod tests {
     /// total of 0 and the repair-all goes out.
     #[test]
     fn repair_all_tests_the_purse_against_the_worn_gear_alone() {
-        use benilla_protocol::field::FIELD_PLAYER_INV_SLOT_HEAD;
+        const FIELD_PLAYER_INV_SLOT_HEAD: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head;
         use purse_fixture::*;
 
         let (_, discounted) = sword_prices();
@@ -1201,7 +1206,8 @@ mod tests {
     /// An item's cost is discounted at the vendor and full once it closes (`0x4faf30`).
     #[test]
     fn each_items_cost_takes_the_open_vendors_discount() {
-        use benilla_protocol::field::FIELD_PLAYER_INV_SLOT_HEAD;
+        const FIELD_PLAYER_INV_SLOT_HEAD: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head;
         use bevy::ecs::system::RunSystemOnce;
         use purse_fixture::*;
 
@@ -1241,7 +1247,9 @@ mod tests {
     /// item is priced but left out of the total (`0x4fbd60`).
     #[test]
     fn each_input_alone_reopens_the_repair_cost_gate() {
-        use benilla_protocol::field::{FIELD_PLAYER_INV_SLOT_HEAD, FIELD_UNIT_FLAGS};
+        const FIELD_PLAYER_INV_SLOT_HEAD: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head;
+        const FIELD_UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
         use benilla_protocol::ObjectFields;
         use purse_fixture::*;
 

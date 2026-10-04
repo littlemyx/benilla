@@ -17,9 +17,6 @@ use benilla_ui::script::{
 use crate::entities::ItemDisplays;
 use crate::items::Items;
 use crate::names::NameCache;
-use benilla_protocol::field::{
-    FIELD_PLAYER_FIELD_COINAGE, FIELD_PLAYER_SKILL_INFO_1_1, FIELD_UNIT_LEVEL,
-};
 use benilla_protocol::messages::PLAYER_SKILL_SLOTS;
 use bevy::ecs::system::SystemParam;
 
@@ -347,7 +344,7 @@ pub(crate) fn feed_trainer(
         // `0x5de450`): the second dword always, the third only when its high half moved.
         let skill_edge = edge
             .index
-            .checked_sub(FIELD_PLAYER_SKILL_INFO_1_1)
+            .checked_sub(edge.fields.player_skill_info_1_1)
             .filter(|&r| r < 3 * u16::from(PLAYER_SKILL_SLOTS))
             .is_some_and(|r| match r % 3 {
                 1 => true,
@@ -355,8 +352,8 @@ pub(crate) fn feed_trainer(
                 _ => false,
             });
         let player_field = edge.kind == benilla_protocol::messages::ObjectType::Player
-            && (edge.index == FIELD_PLAYER_FIELD_COINAGE || skill_edge);
-        if player_field || edge.unit_field(FIELD_UNIT_LEVEL) {
+            && (edge.index == edge.fields.player_field_coinage || skill_edge);
+        if player_field || edge.unit_field(edge.fields.unit_level) {
             open.trigger_re_derive();
         }
     }
