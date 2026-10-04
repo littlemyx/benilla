@@ -4,6 +4,8 @@ use std::net::TcpStream;
 use anyhow::{anyhow, Result};
 use benilla_srp::vanilla_header::DecrypterHalf;
 
+use benilla_build::ClientBuild;
+
 use crate::messages::{self, FieldTable, ServerPacket};
 
 use super::recv_packet;
@@ -12,14 +14,21 @@ use super::recv_packet;
 pub struct WorldReader {
     pub(super) stream: TcpStream,
     pub(super) decrypter: DecrypterHalf,
-    /// The build's update-field indices, which every update object is read through.
-    pub(super) fields: &'static FieldTable,
+    pub(super) build: ClientBuild,
+    /// The build's update-field indices, which every update object is read through; `None` for a
+    /// build without a table, whose parser never takes one.
+    pub(super) fields: Option<&'static FieldTable>,
 }
 
 impl WorldReader {
     /// Read + decrypt one server packet (blocking).
     pub fn recv(&mut self) -> Result<ServerPacket> {
-        recv_packet(&mut self.stream, Some(&mut self.decrypter), self.fields)
+        recv_packet(
+            &mut self.stream,
+            Some(&mut self.decrypter),
+            &self.build,
+            self.fields,
+        )
     }
 
     /// Read one packet and decode it into a [`crate::Poll`]; errors only when the socket fails. The
@@ -37,7 +46,7 @@ impl WorldReader {
         if let Err(e) = self.stream.read_exact(&mut body) {
             return Err(anyhow!("world stream closed: {e}"));
         }
-        match messages::parse_server_with_tail_as(self.fields, opcode, &body) {
+        match messages::parse_server_with_tail_for(&self.build, self.fields, opcode, &body) {
             Ok((packet, tail)) => Ok(crate::Poll::Events {
                 opcode,
                 events: crate::decode(packet),

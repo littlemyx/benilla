@@ -1,12 +1,12 @@
-//! The realmd (login) wire protocol, version 3 in 1.12.1: logon challenge, logon proof and realm
-//! list, the three exchanges [`crate::logon`] performs. Login packets are not header-encrypted and
+//! The realmd (login) wire protocol, version 3 in 1.12.1 and 8 in 2.4.3: logon challenge, logon
+//! proof and realm list, the three exchanges [`crate::logon`] performs. Login packets are not header-encrypted and
 //! each is self-delimiting, so they are read in request/response order.
 
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 
 use anyhow::{bail, Result};
-use benilla_build::ClientBuild;
+use benilla_build::{ClientBuild, Expansion};
 use sha1::{Digest, Sha1};
 
 use crate::wire::{read_array, read_cstring, read_f32_le, read_u16_le, read_u32_le, read_u8};
@@ -17,6 +17,22 @@ const CMD_AUTH_LOGON_PROOF: u8 = 0x01;
 const CMD_REALM_LIST: u8 = 0x10;
 
 const PROTOCOL_VERSION_THREE: u8 = 3;
+/// The login protocol byte of 2.4.x (one source: wow_messages `ProtocolVersion`).
+const PROTOCOL_VERSION_EIGHT: u8 = 8;
+
+/// The protocol byte `build`'s logon challenge carries.
+fn protocol_version(build: &ClientBuild) -> u8 {
+    match build.expansion {
+        Expansion::Tbc => PROTOCOL_VERSION_EIGHT,
+        _ => PROTOCOL_VERSION_THREE,
+    }
+}
+
+/// Whether `build`'s realmd replies use the 2.4.3 layouts (security-flag bitmask, 32-byte proof
+/// reply, 2.4.3 realm list) rather than 1.12.1's.
+fn is_tbc(build: &ClientBuild) -> bool {
+    matches!(build.expansion, Expansion::Tbc)
+}
 const GAME_NAME_WOW: u32 = 0x0057_6f57; // "WoW\0" little-endian
 const PLATFORM_X86: u32 = 0x0078_3836; // "x86\0"
                                        // Tags are little-endian u32s, so they reach the
@@ -86,14 +102,21 @@ pub fn write_logon_challenge(
 
     let mut packet = Vec::with_capacity(4 + body.len());
     packet.push(CMD_AUTH_LOGON_CHALLENGE);
-    packet.push(PROTOCOL_VERSION_THREE);
+    packet.push(protocol_version(build));
     packet.extend_from_slice(&(body.len() as u16).to_le_bytes());
     packet.extend_from_slice(&body);
     w.write_all(&packet)
 }
 
-/// Read the challenge reply; a non-success result is an [`AuthReject`].
+/// Read the 1.12.1 challenge reply; a non-success result is an [`AuthReject`].
 pub fn read_challenge_reply(r: &mut impl Read) -> Result<ChallengeReply> {
+    read_challenge_reply_as(r, &benilla_build::VANILLA_1_12_1)
+}
+
+/// [`read_challenge_reply`] for `build`'s layout: 2.4.3 reads `security_flag` as a bitmask (PIN
+/// `0x01`, matrix card `0x02`, authenticator `0x04`), each with its block, and an answer the
+/// client cannot give is an error naming the flag.
+pub fn read_challenge_reply_as(r: &mut impl Read, build: &ClientBuild) -> Result<ChallengeReply> {
     let opcode = read_u8(r)?;
     if opcode != CMD_AUTH_LOGON_CHALLENGE {
         bail!("expected CMD_AUTH_LOGON_CHALLENGE (0x00), got {opcode:#x}");
@@ -123,7 +146,9 @@ pub fn read_challenge_reply(r: &mut impl Read) -> Result<ChallengeReply> {
     // read. `security_flag` and the PIN block are unused but must be consumed.
     let crc_salt = read_array::<16>(r)?;
     let security_flag = read_u8(r)?;
-    if security_flag & 0x01 != 0 {
+    if is_tbc(build) {
+        refuse_security_flags(r, security_flag)?;
+    } else if security_flag & 0x01 != 0 {
         // PIN: pin_grid_seed (u32) + pin_salt[16]; vmangos always sends security_flag 0.
         let _pin_grid_seed = read_u32_le(r)?;
         let _pin_salt = read_array::<16>(r)?;
@@ -135,6 +160,44 @@ pub fn read_challenge_reply(r: &mut impl Read) -> Result<ChallengeReply> {
         salt,
         crc_salt,
     })
+}
+
+/// The 2.4.3 `security_flag` bits and what follows each in the challenge reply (two sources:
+/// wow_messages, cmangos-tbc): PIN `u32` grid seed + 16-byte salt; matrix card `u8` width, height,
+/// digit count, challenge count + `u64` seed; authenticator `u8` required.
+const SECURITY_PIN: u8 = 0x01;
+const SECURITY_MATRIX: u8 = 0x02;
+const SECURITY_AUTHENTICATOR: u8 = 0x04;
+
+/// A set 2.4.3 flag asks for an answer the proof does not carry (it sends `security_flag` 0), so
+/// each block is consumed, keeping the stream aligned, and the logon fails naming the flag.
+fn refuse_security_flags(r: &mut impl Read, flags: u8) -> Result<()> {
+    if flags == 0 {
+        return Ok(());
+    }
+    let mut named = Vec::new();
+    if flags & SECURITY_PIN != 0 {
+        let _grid_seed = read_u32_le(r)?;
+        let _salt = read_array::<16>(r)?;
+        named.push("PIN (0x01)");
+    }
+    if flags & SECURITY_MATRIX != 0 {
+        let _width_height_digits_challenges = read_array::<4>(r)?;
+        let _seed = read_array::<8>(r)?;
+        named.push("matrix card (0x02)");
+    }
+    if flags & SECURITY_AUTHENTICATOR != 0 {
+        let _required = read_u8(r)?;
+        named.push("authenticator (0x04)");
+    }
+    let unknown = flags & !(SECURITY_PIN | SECURITY_MATRIX | SECURITY_AUTHENTICATOR);
+    if unknown != 0 {
+        bail!("the server asks for an unknown security check (flag bits {unknown:#04x})");
+    }
+    bail!(
+        "the server asks for a security check benilla cannot answer: {}",
+        named.join(", ")
+    )
 }
 
 // --- the version (client-integrity) proof --------------------------------------------------------
@@ -164,7 +227,8 @@ const INTEGRITY_HASH_5875_MACOS: [u8; 20] = [
 ];
 
 /// The integrity digest `H` of `build` for `crc_salt`, known only for [`MANGOS_VERSION_CHALLENGE`]
-/// and a build with a stored row (today 5875).
+/// and a build with a stored row (today 5875). The 8606 digest is not known; cmangos-tbc checks it
+/// only under `StrictVersionCheck`, which its shipped `realmd.conf` leaves off.
 /// Deviation: a stored per-OS constant, not the reference's HMAC over its own executables
 /// (`0x5b1170`), because every mangos-family realmd issues this one salt.
 fn integrity_hash(build: &ClientBuild, crc_salt: &[u8; 16]) -> Option<[u8; 20]> {
@@ -217,8 +281,15 @@ pub fn write_logon_proof(
     w.write_all(&packet)
 }
 
-/// Read the proof reply: the server's `M2`, or an [`AuthReject`].
+/// Read the 1.12.1 proof reply: the server's `M2`, or an [`AuthReject`].
 pub fn read_proof_reply(r: &mut impl Read) -> Result<[u8; 20]> {
+    read_proof_reply_as(r, &benilla_build::VANILLA_1_12_1)
+}
+
+/// [`read_proof_reply`] for `build`'s layout: after `M2` 1.12.1 has `u32` survey id; 2.4.3 has `u32`
+/// account flags, `u32` survey id, `u16` unknown (32 bytes in all; two sources). A 2.4.3 failure
+/// carries a trailing `u16` that is not read, as the socket is dropped on the error.
+pub fn read_proof_reply_as(r: &mut impl Read, build: &ClientBuild) -> Result<[u8; 20]> {
     let opcode = read_u8(r)?;
     if opcode != CMD_AUTH_LOGON_PROOF {
         bail!("expected CMD_AUTH_LOGON_PROOF (0x01), got {opcode:#x}");
@@ -229,7 +300,13 @@ pub fn read_proof_reply(r: &mut impl Read) -> Result<[u8; 20]> {
         return Err(AuthReject { code: result }.into());
     }
     let server_proof = read_array::<20>(r)?;
-    let _hardware_survey_id = read_u32_le(r)?;
+    if is_tbc(build) {
+        let _account_flags = read_u32_le(r)?;
+        let _survey_id = read_u32_le(r)?;
+        let _unknown = read_u16_le(r)?;
+    } else {
+        let _hardware_survey_id = read_u32_le(r)?;
+    }
     Ok(server_proof)
 }
 
@@ -249,10 +326,67 @@ pub(crate) const MAGIC_POPULATIONS: [(u32, u32, u8); 3] = [
     (0x43c8_0000, 0x4100_0000, 0x80), // 400.0 → 8.0,   Full
 ];
 
-/// Read `CMD_REALM_LIST_Server` into the advertised realms, rewriting [`MAGIC_POPULATIONS`] here
-/// as the reference parser does: the realm-list screen averages every realm's population, and an
-/// unswapped Recommended `600.0` would skew that mean for every row.
+/// Read the 1.12.1 `CMD_REALM_LIST_Server` into the advertised realms, rewriting
+/// [`MAGIC_POPULATIONS`] here as the reference parser does: the realm-list screen averages every
+/// realm's population, and an unswapped Recommended `600.0` would skew that mean for every row.
 pub fn read_realm_list(r: &mut impl Read) -> Result<Vec<RealmInfo>> {
+    read_realm_list_as(r, &benilla_build::VANILLA_1_12_1)
+}
+
+/// [`read_realm_list`] for `build`'s layout.
+pub fn read_realm_list_as(r: &mut impl Read, build: &ClientBuild) -> Result<Vec<RealmInfo>> {
+    if is_tbc(build) {
+        read_realm_list_tbc(r)
+    } else {
+        read_realm_list_vanilla(r)
+    }
+}
+
+/// The 2.4.3 realm list (two sources): `u16` count; per realm `u8` type, `u8` locked, `u8` flags,
+/// name, address, `f32` population, `u8` characters, `u8` category, `u8` id, and a `u8 u8 u8 u16`
+/// version when flag `0x04` is set; then a `u16` trailer. The lock byte and the version are read
+/// and dropped (`RealmInfo` has no field for them). The 1.12 magic populations are not rewritten:
+/// whether the 2.4.3 client does so is not established.
+fn read_realm_list_tbc(r: &mut impl Read) -> Result<Vec<RealmInfo>> {
+    const FLAG_SPECIFY_BUILD: u8 = 0x04;
+    let opcode = read_u8(r)?;
+    if opcode != CMD_REALM_LIST {
+        bail!("expected CMD_REALM_LIST (0x10), got {opcode:#x}");
+    }
+    let _size = read_u16_le(r)?;
+    let _header_padding = read_u32_le(r)?;
+    let number_of_realms = read_u16_le(r)?;
+    let mut realms = Vec::with_capacity(usize::from(number_of_realms).min(64));
+    for _ in 0..number_of_realms {
+        let realm_type = read_u8(r)?;
+        let _locked = read_u8(r)?;
+        let flags = read_u8(r)?;
+        let name = read_cstring(r)?;
+        let address = read_cstring(r)?;
+        let population = read_f32_le(r)?;
+        let characters = read_u8(r)?;
+        let category = read_u8(r)?;
+        let id = read_u8(r)?;
+        if flags & FLAG_SPECIFY_BUILD != 0 {
+            let _version = read_array::<3>(r)?;
+            let _build = read_u16_le(r)?;
+        }
+        realms.push(RealmInfo {
+            name,
+            address,
+            population,
+            characters,
+            realm_type: u32::from(realm_type),
+            flags,
+            category,
+            id,
+        });
+    }
+    let _footer_padding = read_u16_le(r)?;
+    Ok(realms)
+}
+
+fn read_realm_list_vanilla(r: &mut impl Read) -> Result<Vec<RealmInfo>> {
     let opcode = read_u8(r)?;
     if opcode != CMD_REALM_LIST {
         bail!("expected CMD_REALM_LIST (0x10), got {opcode:#x}");
@@ -296,7 +430,7 @@ pub fn read_realm_list(r: &mut impl Read) -> Result<Vec<RealmInfo>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use benilla_build::VANILLA_1_12_1;
+    use benilla_build::{TBC_2_4_3, VANILLA_1_12_1};
 
     /// The 1.12.1 challenge as it went out before the version came from the build profile.
     #[test]
@@ -315,6 +449,194 @@ mod tests {
         want.push(4);
         want.extend_from_slice(b"TEST");
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn the_2_4_3_logon_challenge_differs_from_1_12_1_in_the_protocol_byte_and_build() {
+        let mut got = Vec::new();
+        write_logon_challenge(&mut got, "TEST", &TBC_2_4_3).unwrap();
+        let mut vanilla = Vec::new();
+        write_logon_challenge(&mut vanilla, "TEST", &VANILLA_1_12_1).unwrap();
+        assert_eq!(got.len(), vanilla.len());
+        assert_eq!(got[..2], [CMD_AUTH_LOGON_CHALLENGE, 8]);
+        assert_eq!(vanilla[..2], [CMD_AUTH_LOGON_CHALLENGE, 3]);
+        assert_eq!(got[8..11], [2, 4, 3], "version");
+        assert_eq!(got[11..13], 8606u16.to_le_bytes(), "build");
+        // Everything else is identical.
+        let (mut a, mut b) = (got.clone(), vanilla.clone());
+        for v in [&mut a, &mut b] {
+            v[1] = 0;
+            v[8..13].fill(0);
+        }
+        assert_eq!(a, b);
+    }
+
+    /// A challenge reply up to and including `security_flag`, then `tail`.
+    fn challenge_reply(flag: u8, tail: &[u8]) -> Vec<u8> {
+        let mut p = vec![CMD_AUTH_LOGON_CHALLENGE, 0, 0];
+        p.extend_from_slice(&[0xB0; 32]); // B
+        p.extend_from_slice(&[1, 7]); // g
+        p.push(32);
+        p.extend_from_slice(&[0x4E; 32]); // N
+        p.extend_from_slice(&[0x5A; 32]); // salt
+        p.extend_from_slice(&MANGOS_VERSION_CHALLENGE);
+        p.push(flag);
+        p.extend_from_slice(tail);
+        p
+    }
+
+    #[test]
+    fn a_2_4_3_challenge_reply_with_no_security_flags_reads_through() {
+        let packet = challenge_reply(0, &[]);
+        let mut r = packet.as_slice();
+        let reply = read_challenge_reply_as(&mut r, &TBC_2_4_3).unwrap();
+        assert!(r.is_empty());
+        assert_eq!(reply.generator, 7);
+        assert_eq!(reply.crc_salt, MANGOS_VERSION_CHALLENGE);
+    }
+
+    #[test]
+    fn each_2_4_3_security_flag_is_consumed_and_refused_by_name() {
+        // flag, its block, the name expected in the error
+        let cases: [(u8, Vec<u8>, &str); 3] = [
+            (0x01, vec![0; 20], "PIN"),
+            (0x02, vec![0; 12], "matrix"),
+            (0x04, vec![1], "authenticator"),
+        ];
+        for (flag, block, name) in cases {
+            let mut packet = challenge_reply(flag, &block);
+            packet.push(0xEE); // the next packet's first byte must stay unread
+            let mut r = packet.as_slice();
+            let err = read_challenge_reply_as(&mut r, &TBC_2_4_3)
+                .err()
+                .expect("an error");
+            assert!(err.to_string().contains(name), "{err}");
+            assert_eq!(r, [0xEE], "the {name} block is consumed");
+        }
+        let mut both = vec![0; 12];
+        both.push(1);
+        let packet = challenge_reply(0x06, &both);
+        let err = read_challenge_reply_as(&mut packet.as_slice(), &TBC_2_4_3)
+            .err()
+            .expect("an error");
+        let text = err.to_string();
+        assert!(
+            text.contains("matrix") && text.contains("authenticator"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_1_12_1_challenge_reply_still_reads_a_pin_block() {
+        let packet = challenge_reply(0x01, &[0; 20]);
+        let mut r = packet.as_slice();
+        read_challenge_reply(&mut r).unwrap();
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn the_2_4_3_proof_reply_is_32_bytes_and_the_1_12_1_one_26() {
+        let m2: [u8; 20] = std::array::from_fn(|i| i as u8);
+        let mut tbc = vec![CMD_AUTH_LOGON_PROOF, 0];
+        tbc.extend_from_slice(&m2);
+        tbc.extend_from_slice(&0x0080_0000u32.to_le_bytes()); // account flags
+        tbc.extend_from_slice(&0u32.to_le_bytes()); // survey id
+        tbc.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(tbc.len(), 32);
+        let mut r = tbc.as_slice();
+        assert_eq!(read_proof_reply_as(&mut r, &TBC_2_4_3).unwrap(), m2);
+        assert!(r.is_empty());
+
+        let mut vanilla = vec![CMD_AUTH_LOGON_PROOF, 0];
+        vanilla.extend_from_slice(&m2);
+        vanilla.extend_from_slice(&0u32.to_le_bytes());
+        assert_eq!(vanilla.len(), 26);
+        let mut r = vanilla.as_slice();
+        assert_eq!(read_proof_reply(&mut r).unwrap(), m2);
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn a_2_4_3_proof_failure_is_a_typed_reject() {
+        let packet = [CMD_AUTH_LOGON_PROOF, 0x04, 0, 0];
+        let err = read_proof_reply_as(&mut packet.as_slice(), &TBC_2_4_3).unwrap_err();
+        assert_eq!(
+            err.downcast_ref::<AuthReject>(),
+            Some(&AuthReject { code: 4 })
+        );
+    }
+
+    #[test]
+    fn the_unknown_8606_integrity_hash_is_answered_with_zeros() {
+        assert_eq!(
+            version_proof(&TBC_2_4_3, &MANGOS_VERSION_CHALLENGE, &test_public_key()),
+            [0u8; 20]
+        );
+    }
+
+    /// One 2.4.3 realm record: `u8 type, u8 locked, u8 flags, name, address, f32 population,
+    /// u8 characters, u8 category, u8 id`, and the version when `flags & 4`.
+    fn tbc_realm(flags: u8, population: f32) -> Vec<u8> {
+        let mut b = vec![1, 0, flags];
+        b.extend_from_slice(b"CMaNGOS TBC\0");
+        b.extend_from_slice(b"192.168.2.87:8086\0");
+        b.extend_from_slice(&population.to_le_bytes());
+        b.extend_from_slice(&[2, 1, 0x2C]);
+        if flags & 0x04 != 0 {
+            b.extend_from_slice(&[2, 4, 3]);
+            b.extend_from_slice(&8606u16.to_le_bytes());
+        }
+        b
+    }
+
+    fn tbc_realm_list(realms: &[Vec<u8>]) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u32.to_le_bytes()); // header padding
+        body.extend_from_slice(&(realms.len() as u16).to_le_bytes());
+        for r in realms {
+            body.extend_from_slice(r);
+        }
+        body.extend_from_slice(&0x0010u16.to_le_bytes()); // trailer
+        let mut packet = vec![CMD_REALM_LIST];
+        packet.extend_from_slice(&(body.len() as u16).to_le_bytes());
+        packet.extend_from_slice(&body);
+        packet
+    }
+
+    #[test]
+    fn the_2_4_3_realm_list_reads_with_and_without_the_version_tuple() {
+        let packet = tbc_realm_list(&[
+            tbc_realm(0x00, 0.5),
+            tbc_realm(0x04, 400.0),
+            tbc_realm(0, 1.0),
+        ]);
+        let mut r = packet.as_slice();
+        let realms = read_realm_list_as(&mut r, &TBC_2_4_3).unwrap();
+        assert!(
+            r.is_empty(),
+            "the stream stays aligned across the version tuple"
+        );
+        assert_eq!(realms.len(), 3);
+        let a = &realms[0];
+        assert_eq!(a.name, "CMaNGOS TBC");
+        assert_eq!(a.address, "192.168.2.87:8086");
+        assert_eq!(
+            (a.realm_type, a.flags, a.characters, a.category, a.id),
+            (1, 0, 2, 1, 0x2C)
+        );
+        assert_eq!(a.population, 0.5);
+        assert_eq!(realms[1].flags, 0x04);
+        // The 1.12 magic populations are not applied to 2.4.3.
+        assert_eq!(realms[1].population, 400.0);
+        assert_eq!(realms[2].name, "CMaNGOS TBC");
+    }
+
+    #[test]
+    fn an_empty_2_4_3_realm_list_is_a_zero_count() {
+        let packet = tbc_realm_list(&[]);
+        let mut r = packet.as_slice();
+        assert!(read_realm_list_as(&mut r, &TBC_2_4_3).unwrap().is_empty());
+        assert!(r.is_empty());
     }
 
     #[test]

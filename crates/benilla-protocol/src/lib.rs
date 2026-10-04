@@ -1,4 +1,5 @@
-//! The WoW 1.12.1 (build 5875) wire protocol: [`auth`] for realmd (login protocol version 3),
+//! The WoW wire protocol of 1.12.1 (build 5875), with the 2.4.3 (8606) login and character list:
+//! [`auth`] for realmd (login protocol version 3, or 8 for 2.4.3),
 //! [`world`] and [`events`] for the world server. SRP6 and the header crypto are `benilla-srp`'s.
 
 pub mod auth;
@@ -130,19 +131,22 @@ pub struct Logon {
     pub realms: Vec<RealmInfo>,
     /// `None` once a refresh has failed; the held list is then final.
     stream: Option<TcpStream>,
+    /// The build the realm list is read as.
+    build: benilla_build::ClientBuild,
 }
 
 impl Logon {
     /// The reference's `RequestRealmList`: re-reads the list, keeping the old one and dropping
     /// the socket on failure (realmd closes idle sockets); `timeout` bounds a silent server.
     pub fn refresh_realms(&mut self, timeout: std::time::Duration) -> bool {
+        let build = self.build;
         let Some(stream) = self.stream.as_mut() else {
             return false;
         };
         let refreshed = (|| -> Result<Vec<RealmInfo>> {
             stream.set_read_timeout(Some(timeout))?;
             auth::write_realm_list_request(stream).context("requesting realm list")?;
-            auth::read_realm_list(stream).context("reading realm list")
+            auth::read_realm_list_as(stream, &build).context("reading realm list")
         })();
         match refreshed {
             Ok(realms) => {
@@ -190,8 +194,8 @@ pub fn logon_as(
             let mut stream = dial(host, port)?;
             auth::write_logon_challenge(&mut stream, &username.to_uppercase(), build)
                 .context("sending logon challenge")?;
-            let reply =
-                auth::read_challenge_reply(&mut stream).context("reading logon challenge reply")?;
+            let reply = auth::read_challenge_reply_as(&mut stream, build)
+                .context("reading logon challenge reply")?;
             let server_public_key = PublicKey::from_le_bytes(reply.server_public_key)
                 .map_err(|e| anyhow!("invalid server public key: {e}"))?;
             let stable = server_public_key.is_width_stable();
@@ -222,19 +226,21 @@ pub fn logon_as(
     )
     .context("sending logon proof")?;
 
-    let server_proof = auth::read_proof_reply(&mut stream).context("reading logon proof reply")?;
+    let server_proof =
+        auth::read_proof_reply_as(&mut stream, build).context("reading logon proof reply")?;
     let client = challenge
         .verify_server_proof(server_proof)
         .map_err(|e| anyhow!("server proof mismatch (wrong password?): {e}"))?;
     let session_key = *client.session_key();
 
     auth::write_realm_list_request(&mut stream).context("requesting realm list")?;
-    let realms = auth::read_realm_list(&mut stream).context("reading realm list")?;
+    let realms = auth::read_realm_list_as(&mut stream, build).context("reading realm list")?;
 
     Ok(Logon {
         session_key,
         realms,
         stream: Some(stream),
+        build: *build,
     })
 }
 

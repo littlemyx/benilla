@@ -519,8 +519,18 @@ pub const FIELDS_5875: FieldTable = FieldTable {
 
 /// The table of `build`; a build without one is a programming error, not a runtime condition.
 pub fn field_table(build: &ClientBuild) -> &'static FieldTable {
+    match build_field_table(build) {
+        Some(table) => table,
+        None => panic!("no update-field table for build {}", build.build),
+    }
+}
+
+/// The table of `build`, `None` for a known build that has none yet (2.4.3); a build number that
+/// names no known build is a programming error and panics.
+pub fn build_field_table(build: &ClientBuild) -> Option<&'static FieldTable> {
     match build.build {
-        5875 => &FIELDS_5875,
+        5875 => Some(&FIELDS_5875),
+        other if ClientBuild::from_build(other).is_some() => None,
         other => panic!("no update-field table for build {other}"),
     }
 }
