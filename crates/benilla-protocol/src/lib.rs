@@ -30,8 +30,8 @@ use benilla_srp::{NormalizedString, PublicKey, SrpClientChallenge, SESSION_KEY_L
 
 /// The port a stock vmangos `realmd` listens on.
 pub const AUTH_PORT: u16 = 3724;
-/// The 1.12.1 client build we present to the server.
-pub const CLIENT_BUILD: u16 = 5875;
+/// The client build number we present to the server.
+pub const CLIENT_BUILD: u16 = benilla_build::VANILLA_1_12_1.build;
 /// Challenges [`logon`] draws for an unambiguous `B`; one in ~137 is not, so all 8 fail ~10⁻¹⁷.
 const MAX_CHALLENGE_DIALS: u32 = 8;
 
@@ -164,6 +164,16 @@ impl Logon {
 
 /// The full SRP6 logon against a vanilla `realmd`, then the realm list.
 pub fn logon(host: &str, username: &str, password: &str) -> Result<Logon> {
+    logon_as(&benilla_build::VANILLA_1_12_1, host, username, password)
+}
+
+/// [`logon`] presenting `build` to the server.
+pub fn logon_as(
+    build: &benilla_build::ClientBuild,
+    host: &str,
+    username: &str,
+    password: &str,
+) -> Result<Logon> {
     let (host, port) = host_port(host, AUTH_PORT);
 
     let username_n =
@@ -178,7 +188,7 @@ pub fn logon(host: &str, username: &str, password: &str) -> Result<Logon> {
         let mut dialed = None;
         for _ in 0..MAX_CHALLENGE_DIALS {
             let mut stream = dial(host, port)?;
-            auth::write_logon_challenge(&mut stream, &username.to_uppercase(), CLIENT_BUILD)
+            auth::write_logon_challenge(&mut stream, &username.to_uppercase(), build)
                 .context("sending logon challenge")?;
             let reply =
                 auth::read_challenge_reply(&mut stream).context("reading logon challenge reply")?;
@@ -205,6 +215,7 @@ pub fn logon(host: &str, username: &str, password: &str) -> Result<Logon> {
 
     auth::write_logon_proof(
         &mut stream,
+        build,
         challenge.client_public_key(),
         challenge.client_proof(),
         &reply.crc_salt,

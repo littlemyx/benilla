@@ -319,7 +319,7 @@ const CACHE_MAGIC: &str = "benilla-namecache";
 /// only.
 const CACHE_FORMAT: u32 = 2;
 /// The client build, the reference's `0x16f3`.
-const CACHE_BUILD: u32 = 5875;
+const CACHE_BUILD: u32 = benilla_build::VANILLA_1_12_1.build as u32;
 /// In the header as in the reference's; benilla reads DBC locale slot 0 only.
 const CACHE_LOCALE: &str = "enUS";
 

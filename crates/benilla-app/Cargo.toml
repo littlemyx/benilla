@@ -40,6 +40,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # Thread-to-ECS channels: crossbeam's `Receiver` is `Sync`, so it is a resource without a mutex.
 crossbeam-channel = "0.5"
 benilla-assets = { path = "../benilla-assets", default-features = false }
+benilla-build = { path = "../benilla-build" }
 benilla-formats = { path = "../benilla-formats", default-features = false }
 benilla-protocol = { path = "../benilla-protocol" }
 benilla-world = { path = "../benilla-world", default-features = false }

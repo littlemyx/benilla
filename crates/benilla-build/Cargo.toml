@@ -1,0 +1,9 @@
+[package]
+name = "benilla-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The client build profile: which frozen WoW build the client is, and the facts that name it"
+
+[lints]
+workspace = true

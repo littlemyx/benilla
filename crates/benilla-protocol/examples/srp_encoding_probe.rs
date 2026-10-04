@@ -16,12 +16,12 @@ use std::net::TcpStream;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use benilla_build::VANILLA_1_12_1;
 use benilla_protocol::auth::{self, AuthReject};
 use num_bigint::BigUint;
 use rand::{thread_rng, RngCore};
 use sha1::{Digest, Sha1};
 
-const BUILD: u16 = 5875;
 const AUTH_PORT: u16 = 3724;
 /// Failures allowed inside realmd's throttle window before it answers `WOW_FAIL_DB_BUSY`.
 const THROTTLE_MAX: u32 = 10;
@@ -263,7 +263,8 @@ fn handshake(
     let mut s = TcpStream::connect((host, AUTH_PORT))
         .with_context(|| format!("connecting to {host}:{AUTH_PORT}"))?;
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
-    auth::write_logon_challenge(&mut s, user, BUILD).context("sending logon challenge")?;
+    auth::write_logon_challenge(&mut s, user, &VANILLA_1_12_1)
+        .context("sending logon challenge")?;
     let reply = auth::read_challenge_reply(&mut s).context("reading logon challenge reply")?;
 
     // A wrong-shape `B` drops the connection before any proof, so realmd records no failure.
@@ -274,8 +275,14 @@ fn handshake(
     let attempt = compute(&reply, user, pass, enc, want, tries)
         .ok_or_else(|| anyhow!("ephemeral search did not reach the wanted shape"))?;
 
-    auth::write_logon_proof(&mut s, &attempt.a_pub, &attempt.m1, &reply.crc_salt)
-        .context("sending logon proof")?;
+    auth::write_logon_proof(
+        &mut s,
+        &VANILLA_1_12_1,
+        &attempt.a_pub,
+        &attempt.m1,
+        &reply.crc_salt,
+    )
+    .context("sending logon proof")?;
     let outcome = match auth::read_proof_reply(&mut s) {
         Ok(m2) => Outcome::Accepted {
             m2_fixed: m2 == attempt.expected_m2(Enc::Fixed),

@@ -1,6 +1,25 @@
 //! What the crate's structural tests share: source readers over its own code, and a check of
 //! the order its `Update` schedule builds.
 
+/// The client locale, from the `LOCALE_xx = true` marker the install's own `Localization.lua`
+/// defines (`enUS` on a stock client, `enGB` on a British one); any other locale is a failure.
+pub(crate) fn client_locale(chain: &mut benilla_formats::Chain) -> &'static str {
+    let lua = chain
+        .read_file("Interface\\FrameXML\\Localization.lua")
+        .expect("Localization.lua");
+    let lua = String::from_utf8_lossy(&lua);
+    let found: Vec<&str> = lua
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("LOCALE_"))
+        .filter_map(|l| l.strip_suffix("= true;").map(str::trim))
+        .collect();
+    match found.as_slice() {
+        ["enUS"] => "enUS",
+        ["enGB"] => "enGB",
+        other => panic!("unsupported client locale marker {other:?}: add its branch to the tests"),
+    }
+}
+
 /// Every `.rs` file under `root`, recursively.
 pub(crate) fn rust_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();

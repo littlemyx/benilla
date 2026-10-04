@@ -5,6 +5,22 @@ data from the player's own install, speaks the original protocol to any 1.12.1 s
 not build a server or simulate the game. The reference client is the spec: benilla does what
 1.12.1 does, as a modern, idiomatic client.
 
+## The builds (this fork)
+
+This fork climbs a ladder of frozen builds, one per expansion, starting from 1.12.1 (5875) and
+adding the last build of each expansion in order: 2.4.3, 3.3.5a, and on. The install picks the
+build; the client reads which one it was given and behaves as that reference client does.
+
+- Everything below that says 1.12.1 means "the build in play". Each build's own reference
+  client is the spec for that build, and each build gets its own catalogues under `reference/`.
+- A fact that differs between builds (an opcode, a field index, a table layout, a header
+  cipher, an engine verb) lives behind the build profile, `benilla-build`, never as a bare
+  constant at the use site.
+- Adding a build never changes what an earlier build does: the earlier builds' gates stay green
+  on the same commit.
+- A local server of its own is a later piece and lives in crates of its own; the client never
+  simulates the game.
+
 ## The rule for every change
 
 A change is right when it makes benilla more like 1.12.1 or fixes a bug, with evidence from the

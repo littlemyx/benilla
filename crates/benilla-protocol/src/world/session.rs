@@ -92,6 +92,23 @@ impl WorldSession {
         session_key: [u8; SESSION_KEY_LENGTH],
         on_queue: &mut dyn FnMut(Option<u32>) -> bool,
     ) -> Result<Self> {
+        Self::connect_queued_as(
+            &benilla_build::VANILLA_1_12_1,
+            addr,
+            username,
+            session_key,
+            on_queue,
+        )
+    }
+
+    /// [`Self::connect_queued`] presenting `build` in `CMSG_AUTH_SESSION`.
+    pub fn connect_queued_as(
+        build: &benilla_build::ClientBuild,
+        addr: impl ToSocketAddrs,
+        username: &str,
+        session_key: [u8; SESSION_KEY_LENGTH],
+        on_queue: &mut dyn FnMut(Option<u32>) -> bool,
+    ) -> Result<Self> {
         let mut queued = false;
         let mut stream = TcpStream::connect(addr).context("connecting to world server")?;
         // Nagle off: the reference sets `TCP_NODELAY` on its game socket (`0x5bca60`).
@@ -118,7 +135,7 @@ impl WorldSession {
         // Sent plain; header encryption starts right after. The addon block is required (cmangos
         // kicks a zero-size one); `STOCK_SECURE_ADDONS` is what a stock 1.12.1 install reports.
         let body = messages::auth_session(
-            u32::from(crate::CLIENT_BUILD),
+            u32::from(build.build),
             &username.to_uppercase(),
             client_seed,
             &client_proof,
