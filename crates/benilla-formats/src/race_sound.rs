@@ -5,9 +5,8 @@ use std::collections::HashMap;
 
 use crate::Chain;
 use anyhow::{Context, Result};
-use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, u32_at};
+use crate::dbc::{parse, slots, u32_at};
 
 const CHR_RACES: &str = "DBFilesClient\\ChrRaces.dbc";
 
@@ -35,18 +34,12 @@ pub fn load_exploration_sound_catalog(chain: &mut Chain) -> Result<ExplorationSo
     let bytes = chain
         .read_file(CHR_RACES)
         .with_context(|| format!("reading {CHR_RACES}"))?;
-    let mut schema = Schema::new("ChrRaces");
-    for i in 0..29 {
-        let ty = match i {
-            15 | 26 | 27 | 28 => FieldType::String,
-            _ => FieldType::UInt32,
-        };
-        schema.add_field(SchemaField::new(format!("f{i}"), ty));
-    }
+    let schema = crate::factions::chr_races_schema(chain.dbc_layout());
+    let [kit_slot] = slots(&schema, ["ExploreSound"])?;
     let rs = parse(&bytes, schema, "ChrRaces")?;
     let mut by_race = HashMap::new();
     for r in rs.records() {
-        let (Some(id), Some(kit)) = (u32_at(r, 0), u32_at(r, 3)) else {
+        let (Some(id), Some(kit)) = (u32_at(r, 0), u32_at(r, kit_slot)) else {
             continue;
         };
         if kit != 0 {
@@ -73,5 +66,18 @@ mod tests {
         // The shipped kits run 4140-4147; Human and Orc guard the column position.
         assert_eq!(cat.kit(1), Some(4140));
         assert_eq!(cat.kit(2), Some(4141));
+    }
+
+    /// 2.4.3: ten races carry a kit, the Blood Elf with the Undead's and the Draenei the Human's.
+    #[test]
+    fn real_2_4_3_exploration_kits_cover_the_new_races() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_exploration_sound_catalog(&mut chain).expect("load ChrRaces");
+        assert_eq!(cat.len(), 10);
+        assert_eq!(cat.kit(1), Some(4140));
+        assert_eq!(cat.kit(10), Some(4142));
+        assert_eq!(cat.kit(11), Some(4140));
+        assert_eq!(cat.kit(9), None, "Goblin has none");
     }
 }

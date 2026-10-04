@@ -7,9 +7,8 @@ use std::collections::HashMap;
 
 use crate::Chain;
 use anyhow::{Context, Result};
-use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, u32_at};
+use crate::dbc::{parse, slots, u32_at};
 
 const CHR_RACES: &str = "DBFilesClient\\ChrRaces.dbc";
 
@@ -18,19 +17,13 @@ pub fn load_race_creature_types(chain: &mut Chain) -> Result<HashMap<u8, u32>> {
     let bytes = chain
         .read_file(CHR_RACES)
         .with_context(|| format!("reading {CHR_RACES}"))?;
-    let mut schema = Schema::new("ChrRaces");
-    for i in 0..29 {
-        let ty = match i {
-            15 | 26 | 27 | 28 => FieldType::String,
-            _ => FieldType::UInt32,
-        };
-        schema.add_field(SchemaField::new(format!("f{i}"), ty));
-    }
+    let schema = crate::factions::chr_races_schema(chain.dbc_layout());
+    let [type_slot] = slots(&schema, ["CreatureType"])?;
     let rs = parse(&bytes, schema, "ChrRaces")?;
     Ok(rs
         .records()
         .iter()
-        .filter_map(|r| Some((u8::try_from(u32_at(r, 0)?).ok()?, u32_at(r, 9)?)))
+        .filter_map(|r| Some((u8::try_from(u32_at(r, 0)?).ok()?, u32_at(r, type_slot)?)))
         .collect())
 }
 
@@ -51,5 +44,18 @@ mod tests {
         for race in [0u8, 10, 255] {
             assert!(!rows.contains_key(&race), "race {race} has no row");
         }
+    }
+
+    /// 2.4.3: sixteen rows, every one Humanoid, the new Blood Elf and Draenei included.
+    #[test]
+    fn every_2_4_3_race_reads_humanoid() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let rows = load_race_creature_types(&mut chain).expect("load ChrRaces");
+        assert_eq!(rows.len(), 16);
+        for race in [1u8, 8, 10, 11, 18] {
+            assert_eq!(rows.get(&race), Some(&7), "race {race}");
+        }
+        assert!(!rows.contains_key(&16));
     }
 }

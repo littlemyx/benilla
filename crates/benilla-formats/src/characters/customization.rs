@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{bail, Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at};
 use crate::Chain;
 
 const CHR_RACES: &str = "DBFilesClient\\ChrRaces.dbc";
@@ -272,14 +272,17 @@ fn load_races(
     let bytes = chain
         .read_file(CHR_RACES)
         .with_context(|| format!("reading {CHR_RACES}"))?;
-    let mut schema = Schema::new("ChrRaces");
-    for i in 0..29 {
-        let ty = match i {
-            15 | 26 | 27 | 28 => FieldType::String,
-            _ => FieldType::UInt32,
-        };
-        schema.add_field(SchemaField::new(format!("f{i}"), ty));
-    }
+    let schema = crate::factions::chr_races_schema(chain.dbc_layout());
+    let [male_slot, female_slot, file_slot, facial_slot, hair_slot] = slots(
+        &schema,
+        [
+            "MaleDisplay",
+            "FemaleDisplay",
+            "FileString",
+            "FacialHair",
+            "Hair",
+        ],
+    )?;
     let rs = parse(&bytes, schema, "ChrRaces")?;
     let mut displays = HashMap::new();
     let mut files = HashMap::new();
@@ -290,15 +293,17 @@ fn load_races(
         if !PLAYABLE_RACES.contains(&race) {
             continue;
         }
-        if let (Some(male), Some(female)) = (u32_at(r, 4), u32_at(r, 5)) {
+        if let (Some(male), Some(female)) = (u32_at(r, male_slot), u32_at(r, female_slot)) {
             displays.insert(race, (male, female));
         }
-        if let Some(file) = str_at(&rs, r, 15) {
+        if let Some(file) = str_at(&rs, r, file_slot) {
             files.insert(race, file);
         }
-        if let (Some(fm), Some(ff), Some(hair)) =
-            (str_at(&rs, r, 26), str_at(&rs, r, 27), str_at(&rs, r, 28))
-        {
+        if let (Some(fm), Some(ff), Some(hair)) = (
+            str_at(&rs, r, facial_slot),
+            str_at(&rs, r, facial_slot + 1),
+            str_at(&rs, r, hair_slot),
+        ) {
             tokens.insert(race, ([fm, ff], hair));
         }
     }
@@ -665,5 +670,26 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// ChrRaces on 2.4.3 through `load_races`: the eight playable rows' body displays, file strings
+    /// and customization tokens, read through the 17-slot names and the shifted string columns.
+    #[test]
+    fn the_2_4_3_races_read_displays_files_and_tokens() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let (displays, files, tokens) = load_races(&mut chain).expect("ChrRaces");
+        assert_eq!(displays.len(), 8);
+        assert_eq!(displays[&1], (49, 50), "Human");
+        assert_eq!(displays[&8], (1478, 1479), "Troll");
+        for (race, file) in KNOWN_FILES {
+            assert_eq!(files[&race], file, "race {race}");
+        }
+        let human = &tokens[&1];
+        assert_eq!(human.0, ["NORMAL".to_string(), "PIERCINGS".to_string()]);
+        assert_eq!(human.1, "NORMAL");
+        let tauren = &tokens[&6];
+        assert_eq!((tauren.0[1].as_str(), tauren.1.as_str()), ("HAIR", "HORNS"));
+        assert_eq!(tokens[&8].0, ["TUSKS".to_string(), "TUSKS".to_string()]);
     }
 }

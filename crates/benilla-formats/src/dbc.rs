@@ -13,22 +13,32 @@ use benilla_dbc::{
 
 use crate::Chain;
 
-/// How a build lays its tables out: today only the width of a localized string.
+/// How a build lays its tables out: the width of a localized string, and the expansion whose
+/// column lists a table follows where 2.4.3 inserted or appended columns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DbcLayout {
     /// Slots of one localized string: the locale offsets and the flags word.
     pub loc_slots: usize,
+    /// The expansion whose column lists the tables follow.
+    pub expansion: Expansion,
 }
 
 impl DbcLayout {
     /// 1.12.1: 8 locale slots and a flags word.
     pub const VANILLA_1_12_1: DbcLayout = DbcLayout {
         loc_slots: LOC_SLOTS_1_12_1,
+        expansion: Expansion::Vanilla,
     };
     /// 2.4.3: 16 locale slots and a flags word.
     pub const TBC_2_4_3: DbcLayout = DbcLayout {
         loc_slots: LOC_SLOTS_2_4_3,
+        expansion: Expansion::Tbc,
     };
+
+    /// Whether this is the 2.4.3 layout, whose tables carry columns 1.12.1's lack.
+    pub(crate) fn is_tbc(self) -> bool {
+        self.expansion == Expansion::Tbc
+    }
 
     /// An empty schema named `name` whose localized strings are this layout's width.
     pub(crate) fn schema(self, name: &str) -> Schema {
@@ -55,6 +65,14 @@ pub(crate) fn parse(bytes: &[u8], schema: Schema, what: &str) -> Result<RecordSe
     parser
         .parse_records()
         .map_err(|e| anyhow!("parsing {what} records: {e}"))
+}
+
+/// `n` columns this loader does not read, one field named `name` (an array when `n > 1`): a gap
+/// that keeps the slots after it where the file has them.
+pub(crate) fn unread(s: &mut Schema, name: &str, n: usize) {
+    if n > 0 {
+        s.add_field(SchemaField::new_array(name, FieldType::UInt32, n));
+    }
 }
 
 /// The expanded slot of each named column, resolved once per load and not per row. A name the

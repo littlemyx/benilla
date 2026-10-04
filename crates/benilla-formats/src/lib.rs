@@ -884,16 +884,13 @@ mod tests {
         }
     }
 
-    /// The tables whose schema does not fit their 2.4.3 file yet: 25 that grew by more than
-    /// localized-string widening (new columns). An entry
-    /// leaves this list when its table is converted, and a table that fits while listed fails.
+    /// The tables whose schema does not fit their 2.4.3 file yet: those that grew by more than
+    /// localized-string widening (new columns). An entry leaves this list when its table is
+    /// converted, and a table that fits while listed fails.
     const NOT_YET_2_4_3: &[&str] = &[
-        "AreaTable",
         "Cfg_Categories",
         "CharacterFacialHairStyles",
         "ChatProfanity",
-        "ChrClasses",
-        "ChrRaces",
         "CreatureDisplayInfo",
         "CreatureDisplayInfoExtra",
         "CreatureModelData",
@@ -902,7 +899,6 @@ mod tests {
         "HelmetGeosetVisData",
         "ItemDisplayInfo",
         "LightSkybox",
-        "Map",
         "Material",
         "Spell",
         "SpellChainEffects",
