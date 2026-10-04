@@ -287,7 +287,7 @@ fn fan_point(
     ]
 }
 
-fn texture_schema() -> Schema {
+pub(crate) fn texture_schema() -> Schema {
     let mut s = Schema::new("GroundEffectTexture");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     for i in 0..4 {
@@ -298,7 +298,7 @@ fn texture_schema() -> Schema {
     s
 }
 
-fn doodad_schema() -> Schema {
+pub(crate) fn doodad_schema() -> Schema {
     let mut s = Schema::new("GroundEffectDoodad");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("InternalId", FieldType::UInt32));

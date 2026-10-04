@@ -5,9 +5,45 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use anyhow::{anyhow, Context, Result};
-use benilla_dbc::{DbcParser, FieldType, Record, RecordSet, Schema, SchemaField, StringRef, Value};
+use benilla_build::{ClientBuild, Expansion};
+use benilla_dbc::{
+    DbcParser, FieldType, Record, RecordSet, Schema, SchemaField, StringRef, Value,
+    LOC_SLOTS_1_12_1, LOC_SLOTS_2_4_3,
+};
 
 use crate::Chain;
+
+/// How a build lays its tables out: today only the width of a localized string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DbcLayout {
+    /// Slots of one localized string: the locale offsets and the flags word.
+    pub loc_slots: usize,
+}
+
+impl DbcLayout {
+    /// 1.12.1: 8 locale slots and a flags word.
+    pub const VANILLA_1_12_1: DbcLayout = DbcLayout {
+        loc_slots: LOC_SLOTS_1_12_1,
+    };
+    /// 2.4.3: 16 locale slots and a flags word.
+    pub const TBC_2_4_3: DbcLayout = DbcLayout {
+        loc_slots: LOC_SLOTS_2_4_3,
+    };
+
+    /// An empty schema named `name` whose localized strings are this layout's width.
+    pub(crate) fn schema(self, name: &str) -> Schema {
+        Schema::new(name).with_loc_slots(self.loc_slots)
+    }
+
+    /// The layout of a build's tables, or `None` for an expansion with none measured yet.
+    pub fn of(build: &ClientBuild) -> Option<Self> {
+        match build.expansion {
+            Expansion::Vanilla => Some(Self::VANILLA_1_12_1),
+            Expansion::Tbc => Some(Self::TBC_2_4_3),
+            _ => None,
+        }
+    }
+}
 
 /// Parse a DBC with `schema`; `what` names the file in errors.
 pub(crate) fn parse(bytes: &[u8], schema: Schema, what: &str) -> Result<RecordSet> {
@@ -19,6 +55,18 @@ pub(crate) fn parse(bytes: &[u8], schema: Schema, what: &str) -> Result<RecordSe
     parser
         .parse_records()
         .map_err(|e| anyhow!("parsing {what} records: {e}"))
+}
+
+/// The expanded slot of each named column, resolved once per load and not per row. A name the
+/// schema lacks is the loader's own mistake, so it errors by name.
+pub(crate) fn slots<const N: usize>(schema: &Schema, names: [&str; N]) -> Result<[usize; N]> {
+    let mut out = [0; N];
+    for (slot, name) in out.iter_mut().zip(names) {
+        *slot = schema
+            .slot_of(name)
+            .ok_or_else(|| anyhow!("{} schema has no column {name}", schema.name))?;
+    }
+    Ok(out)
 }
 
 /// An unsigned field, from either int variant: the schema tag only picks the decoding.
@@ -57,15 +105,19 @@ pub(crate) fn str_at(rs: &RecordSet, r: &Record, i: usize) -> Option<String> {
     }
 }
 
+pub(crate) fn spell_icon_schema() -> Schema {
+    let mut schema = Schema::new("SpellIcon");
+    schema.add_field(SchemaField::new("ID", FieldType::UInt32));
+    schema.add_field(SchemaField::new("TextureFilename", FieldType::String));
+    schema
+}
+
 /// `SpellIcon.dbc`: id → extensionless texture path (`Interface\Icons\…`).
 pub(crate) fn load_spell_icon_map(chain: &mut Chain) -> Result<HashMap<u32, String>> {
     let bytes = chain
         .read_file("DBFilesClient\\SpellIcon.dbc")
         .context("reading SpellIcon.dbc")?;
-    let mut schema = Schema::new("SpellIcon");
-    schema.add_field(SchemaField::new("ID", FieldType::UInt32));
-    schema.add_field(SchemaField::new("TextureFilename", FieldType::String));
-    let set = parse(&bytes, schema, "SpellIcon.dbc")?;
+    let set = parse(&bytes, spell_icon_schema(), "SpellIcon.dbc")?;
     let mut icons = HashMap::new();
     for r in set.records() {
         if let (Some(id), Some(path)) = (u32_at(r, 0), str_at(&set, r, 1)) {
@@ -75,16 +127,22 @@ pub(crate) fn load_spell_icon_map(chain: &mut Chain) -> Result<HashMap<u32, Stri
     Ok(icons)
 }
 
-/// An id → name schema of `cols` four-byte columns (a string column is one offset); the other
-/// locale slots and the locale flag mask stay anonymous `cN` columns.
-pub(crate) fn id_name_schema(what: &str, name_col: usize, cols: usize) -> Schema {
-    let mut s = Schema::new(what);
-    for i in 0..cols {
-        if i == name_col {
-            s.add_field(SchemaField::new("Name", FieldType::String));
-        } else {
-            s.add_field(SchemaField::new(format!("c{i}"), FieldType::UInt32));
-        }
+/// An id → name schema: `name_col` plain columns, the localized `Name`, then plain columns up to
+/// `cols`, the table's width in 1.12.1 slots (a localized string counted as 9); the other locale
+/// slots and the flags word are the `LocString`'s own, whatever the build's width.
+pub(crate) fn id_name_schema(
+    what: &str,
+    layout: DbcLayout,
+    name_col: usize,
+    cols: usize,
+) -> Schema {
+    let mut s = layout.schema(what);
+    for i in 0..name_col {
+        s.add_field(SchemaField::new(format!("c{i}"), FieldType::UInt32));
+    }
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
+    for i in name_col + LOC_SLOTS_1_12_1..cols {
+        s.add_field(SchemaField::new(format!("c{i}"), FieldType::UInt32));
     }
     s
 }
@@ -100,12 +158,48 @@ pub(crate) fn load_id_name_table(
     let bytes = chain
         .read_file(file)
         .with_context(|| format!("reading {file}"))?;
-    let rs = parse(&bytes, id_name_schema(what, name_col, cols), what)?;
+    let schema = id_name_schema(what, chain.dbc_layout(), name_col, cols);
+    let [name_slot] = slots(&schema, ["Name"])?;
+    let rs = parse(&bytes, schema, what)?;
     let mut out = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
-        if let (Some(id), Some(name)) = (u32_at(r, 0), str_at(&rs, r, name_col)) {
+        if let (Some(id), Some(name)) = (u32_at(r, 0), str_at(&rs, r, name_slot)) {
             out.insert(id, name);
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shared id/name helper on QuestSort, the table that reaches it without AreaTable: 34
+    /// rows in 5875, 35 in 8606, the name read through a 9- and a 17-slot `LocString`.
+    #[test]
+    fn the_id_name_table_reads_quest_sorts_at_both_widths() {
+        let file = "DBFilesClient\\QuestSort.dbc";
+        if let Some(data) = crate::wow_data() {
+            let mut chain = crate::open_chain(&data).expect("open chain");
+            let sorts = load_id_name_table(&mut chain, file, 1, 10, "QuestSort").expect("5875");
+            assert_eq!(sorts.len(), 34);
+            assert_eq!(sorts.get(&61).map(String::as_str), Some("Warlock"));
+        }
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let sorts = load_id_name_table(&mut chain, file, 1, 10, "QuestSort").expect("8606");
+        assert_eq!(sorts.len(), 35);
+        assert_eq!(sorts.get(&61).map(String::as_str), Some("Warlock"));
+        assert_eq!(sorts.get(&25).map(String::as_str), Some("Battlegrounds"));
+    }
+
+    #[test]
+    fn the_id_name_schema_keeps_its_name_slot_and_widens_after_it() {
+        let narrow = id_name_schema("AreaTable", DbcLayout::VANILLA_1_12_1, 11, 25);
+        let wide = id_name_schema("AreaTable", DbcLayout::TBC_2_4_3, 11, 25);
+        assert_eq!(narrow.expanded_len(), 25);
+        assert_eq!(wide.expanded_len(), 33);
+        assert_eq!(narrow.slot_of("Name"), Some(11));
+        assert_eq!(wide.slot_of("Name"), Some(11));
+    }
 }

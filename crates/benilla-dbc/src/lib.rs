@@ -1,5 +1,6 @@
-//! A WDBC reader for WoW 1.12.1: a 20-byte header, `record_count × record_size` bytes of 4-byte
-//! fields, then a string block. The file has no column types; the caller supplies a [`Schema`].
+//! A WDBC reader for WoW 1.12.1 and 2.4.3: a 20-byte header, `record_count × record_size` bytes of
+//! 4-byte fields, then a string block. The file has no column types; the caller supplies a
+//! [`Schema`].
 
 use std::io::{Cursor, Write};
 
@@ -13,7 +14,17 @@ pub enum FieldType {
     Float32,
     /// A `u32` offset into the string block.
     String,
+    /// A localized string: [`Schema::loc_slots`] slots, one string offset per locale and a flags
+    /// word last. Slot 0 is the client's own language; a read yields it, never the flags.
+    LocString,
 }
+
+/// The localized-string width of the 1.12.1 client's tables: 8 locale slots and a flags word.
+pub const LOC_SLOTS_1_12_1: usize = 9;
+
+/// The localized-string width of the 2.4.3 client's tables: 16 locale slots and a flags word
+/// (proven by the header arithmetic of 35 tables, each growing by exactly 8 per localized string).
+pub const LOC_SLOTS_2_4_3: usize = 17;
 
 /// One schema field; a `count` above 1 is an inline array of that many 4-byte slots.
 #[derive(Debug, Clone)]
@@ -42,20 +53,41 @@ impl SchemaField {
 }
 
 /// A hand-supplied description of a DBC's columns (the file has none).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Schema {
     pub name: String,
     pub fields: Vec<SchemaField>,
     pub key_field: Option<String>,
+    /// The slots one [`FieldType::LocString`] covers in this build's tables.
+    loc_slots: usize,
+}
+
+impl Default for Schema {
+    fn default() -> Self {
+        Self::new("")
+    }
 }
 
 impl Schema {
+    /// An empty schema whose localized strings are 1.12.1's width ([`LOC_SLOTS_1_12_1`]).
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             fields: Vec::new(),
             key_field: None,
+            loc_slots: LOC_SLOTS_1_12_1,
         }
+    }
+
+    /// This schema with localized strings `loc_slots` wide (at least 2: a locale and the flags).
+    pub fn with_loc_slots(mut self, loc_slots: usize) -> Self {
+        self.loc_slots = loc_slots.max(2);
+        self
+    }
+
+    /// The slots one [`FieldType::LocString`] covers.
+    pub fn loc_slots(&self) -> usize {
+        self.loc_slots
     }
 
     pub fn add_field(&mut self, field: SchemaField) {
@@ -66,9 +98,32 @@ impl Schema {
         self.key_field = Some(name.into());
     }
 
-    /// The 4-byte slots covered, arrays expanded; the header's `field_count` must match.
-    fn expanded_len(&self) -> usize {
-        self.fields.iter().map(|f| f.count).sum()
+    /// The 4-byte slots a field covers: its array count, or a localized string's width.
+    fn width(&self, field: &SchemaField) -> usize {
+        match field.ty {
+            FieldType::LocString => self.loc_slots,
+            _ => field.count,
+        }
+    }
+
+    /// The 4-byte slots covered, arrays and localized strings expanded; the header's
+    /// `field_count` must match.
+    pub fn expanded_len(&self) -> usize {
+        self.fields.iter().map(|f| self.width(f)).sum()
+    }
+
+    /// The expanded slot index of the first slot of the field named `name` (the first one of
+    /// that name), so a loader asks for a column by name and not by an index that shifts with
+    /// the localized-string width. One scan: resolve once per load, not per row.
+    pub fn slot_of(&self, name: &str) -> Option<usize> {
+        let mut slot = 0;
+        for f in &self.fields {
+            if f.name == name {
+                return Some(slot);
+            }
+            slot += self.width(f);
+        }
+        None
     }
 }
 
@@ -245,6 +300,23 @@ impl<'a> DbcParser<'a> {
         let mut types = Vec::with_capacity(fc);
         let mut names = Vec::with_capacity(fc);
         for field in &schema.fields {
+            if field.ty == FieldType::LocString {
+                // Every locale slot is a string offset; the last slot is the flags word.
+                let n = schema.loc_slots;
+                for k in 0..n {
+                    types.push(if k + 1 == n {
+                        FieldType::UInt32
+                    } else {
+                        FieldType::String
+                    });
+                    names.push(match k {
+                        0 => field.name.clone(),
+                        k if k + 1 == n => format!("{}_flags", field.name),
+                        k => format!("{}_loc{k}", field.name),
+                    });
+                }
+                continue;
+            }
             for k in 0..field.count {
                 types.push(field.ty);
                 names.push(if field.count == 1 {
@@ -271,7 +343,7 @@ impl<'a> DbcParser<'a> {
                     FieldType::UInt32 => Value::UInt32(raw),
                     FieldType::Int32 => Value::Int32(raw as i32),
                     FieldType::Float32 => Value::Float32(f32::from_bits(raw)),
-                    FieldType::String => Value::StringRef(StringRef(raw)),
+                    FieldType::String | FieldType::LocString => Value::StringRef(StringRef(raw)),
                 });
             }
             records.push(Record { values });
@@ -403,6 +475,87 @@ mod tests {
             panic!("expected a string ref");
         };
         assert_eq!(rs.get_string(name1).unwrap(), "Bob");
+    }
+
+    /// A one-record WDBC: `id`, a localized string of `loc_slots` slots, a plain column after it.
+    fn loc_string_file(loc_slots: usize) -> Vec<u8> {
+        let mut records = Vec::new();
+        records.extend_from_slice(&9u32.to_le_bytes()); // id
+        for _ in 0..loc_slots - 1 {
+            records.extend_from_slice(&0u32.to_le_bytes()); // every locale -> "Elwynn" @0
+        }
+        records.extend_from_slice(&0xFF00u32.to_le_bytes()); // flags
+        records.extend_from_slice(&77u32.to_le_bytes()); // a plain column after
+        let fc = (loc_slots + 2) as u32;
+        build_wdbc(1, fc, fc * 4, &records, b"Elwynn\0")
+    }
+
+    fn loc_schema(loc_slots: usize) -> Schema {
+        let mut s = Schema::new("Loc").with_loc_slots(loc_slots);
+        s.add_field(SchemaField::new("id", FieldType::UInt32));
+        s.add_field(SchemaField::new("name", FieldType::LocString));
+        s.add_field(SchemaField::new("after", FieldType::UInt32));
+        s
+    }
+
+    #[test]
+    fn a_loc_string_is_as_wide_as_the_schemas_layout_and_reads_its_first_slot() {
+        for slots in [LOC_SLOTS_1_12_1, LOC_SLOTS_2_4_3] {
+            let schema = loc_schema(slots);
+            assert_eq!(schema.expanded_len(), slots + 2);
+            assert_eq!(schema.slot_of("id"), Some(0));
+            assert_eq!(schema.slot_of("name"), Some(1));
+            assert_eq!(
+                schema.slot_of("after"),
+                Some(slots + 1),
+                "shifts with the width"
+            );
+            assert_eq!(schema.slot_of("missing"), None);
+
+            let bytes = loc_string_file(slots);
+            let rs = DbcParser::parse(&mut Cursor::new(bytes.as_slice()))
+                .unwrap()
+                .with_schema(schema)
+                .expect("the header's field count is the schema's width")
+                .parse_records()
+                .unwrap();
+            let r = &rs.records()[0];
+            let Some(Value::StringRef(first)) = r.get_value(1).copied() else {
+                panic!("slot 0 is a string offset");
+            };
+            assert_eq!(rs.get_string(first).unwrap(), "Elwynn");
+            assert_eq!(r.get_value(slots + 1), Some(&Value::UInt32(77)));
+        }
+    }
+
+    #[test]
+    fn a_loc_string_schema_refuses_the_other_builds_header() {
+        let bytes = loc_string_file(LOC_SLOTS_2_4_3);
+        let parser = DbcParser::parse(&mut Cursor::new(bytes.as_slice())).unwrap();
+        assert!(matches!(
+            parser.with_schema(loc_schema(LOC_SLOTS_1_12_1)),
+            Err(Error::SchemaFieldMismatch {
+                schema: 11,
+                file: 19
+            })
+        ));
+    }
+
+    #[test]
+    fn a_loc_string_exports_its_locale_slots_and_flags_by_name() {
+        let bytes = loc_string_file(4);
+        let rs = DbcParser::parse(&mut Cursor::new(bytes.as_slice()))
+            .unwrap()
+            .with_schema(loc_schema(4))
+            .unwrap()
+            .parse_records()
+            .unwrap();
+        let mut out = Vec::new();
+        export_to_csv(&rs, &mut out).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "id,name,name_loc1,name_loc2,name_flags,after\n9,Elwynn,Elwynn,Elwynn,65280,77\n"
+        );
     }
 
     #[test]

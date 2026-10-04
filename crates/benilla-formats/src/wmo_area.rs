@@ -106,7 +106,7 @@ impl WmoAreaCatalog {
     }
 }
 
-fn schema() -> Schema {
+pub(crate) fn schema() -> Schema {
     let mut s = Schema::new("WMOAreaTable");
     for name in [
         "ID",

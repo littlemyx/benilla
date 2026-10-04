@@ -128,7 +128,7 @@ const GROUP_QUEUE_FIELD: usize = 40;
 const MINIMAP_ICON_SCALE_FIELD: usize = 41;
 
 /// The unread fields are `u32` placeholders: only the 42 × 4 = 168-byte record has to add up.
-fn map_schema() -> Schema {
+pub(crate) fn map_schema() -> Schema {
     let mut s = Schema::new("Map");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("Directory", FieldType::String));

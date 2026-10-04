@@ -97,7 +97,7 @@ impl ChrClasses {
     }
 }
 
-fn schema() -> Schema {
+pub(crate) fn schema() -> Schema {
     let mut s = Schema::new("ChrClasses");
     for i in 0..CHR_CLASSES_FIELDS {
         // Only the token is a string; the rest, the class name block from field 5 included, stay

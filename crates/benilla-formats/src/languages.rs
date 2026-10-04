@@ -40,7 +40,7 @@ impl DefaultLanguages {
     }
 }
 
-fn languages_schema() -> Schema {
+pub(crate) fn languages_schema() -> Schema {
     let mut s = Schema::new("Languages");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     for i in 0..LOCALES {
@@ -52,7 +52,7 @@ fn languages_schema() -> Schema {
 
 /// `ChrRaces.dbc`, 29 fields in 5875, all read as dwords: only the count must match the header,
 /// and only field 8 is used.
-fn chr_races_schema() -> Schema {
+pub(crate) fn chr_races_schema() -> Schema {
     let mut s = Schema::new("ChrRaces");
     for i in 0..29 {
         s.add_field(SchemaField::new(format!("f{i}"), FieldType::UInt32));
@@ -220,7 +220,7 @@ impl LanguageWords {
     }
 }
 
-fn language_words_schema() -> Schema {
+pub(crate) fn language_words_schema() -> Schema {
     let mut s = Schema::new("LanguageWords");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("LanguageID", FieldType::UInt32));

@@ -214,11 +214,7 @@ impl SpellRangeCatalog {
 const SPELL_RANGE: &str = "DBFilesClient\\SpellRange.dbc";
 const SPELL_RANGE_FIELDS: usize = 22;
 
-/// Load `SpellRange.dbc` off the patch chain.
-pub fn load_spell_ranges(chain: &mut Chain) -> Result<SpellRangeCatalog> {
-    let bytes = chain
-        .read_file(SPELL_RANGE)
-        .context("reading SpellRange.dbc")?;
+pub(crate) fn spell_range_schema() -> Schema {
     let mut schema = Schema::new("SpellRange");
     for i in 0..SPELL_RANGE_FIELDS {
         match i {
@@ -227,7 +223,15 @@ pub fn load_spell_ranges(chain: &mut Chain) -> Result<SpellRangeCatalog> {
             _ => schema.add_field(SchemaField::new(format!("F{i}"), FieldType::UInt32)),
         }
     }
-    let set = parse(&bytes, schema, "SpellRange.dbc")?;
+    schema
+}
+
+/// Load `SpellRange.dbc` off the patch chain.
+pub fn load_spell_ranges(chain: &mut Chain) -> Result<SpellRangeCatalog> {
+    let bytes = chain
+        .read_file(SPELL_RANGE)
+        .context("reading SpellRange.dbc")?;
+    let set = parse(&bytes, spell_range_schema(), "SpellRange.dbc")?;
     let mut ranges = HashMap::new();
     for r in set.records() {
         let Some(id) = u32_at(r, 0) else { continue };

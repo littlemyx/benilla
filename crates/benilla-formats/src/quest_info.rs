@@ -26,7 +26,7 @@ impl QuestTagNames {
         self.0.get(&quest_type).map(String::as_str)
     }
 
-    /// How many tags the table names (7 in 5875).
+    /// How many tags the table names (7 in 5875, 9 in 8606).
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -45,4 +45,21 @@ pub fn load_quest_tag_names(chain: &mut Chain) -> Result<QuestTagNames> {
         10,
         "QuestInfo",
     )?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 2.4.3's table: id 1 is "Group", and Escort (84) and Heroic (85) join; 9 tags in all.
+    #[test]
+    fn the_2_4_3_tags_read_through_the_wide_name() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let tags = load_quest_tag_names(&mut chain).expect("QuestInfo.dbc");
+        assert_eq!(tags.len(), 9);
+        assert_eq!(tags.resolve(1), Some("Group"));
+        assert_eq!(tags.resolve(85), Some("Heroic"));
+        assert_eq!(tags.resolve(0), None);
+    }
 }

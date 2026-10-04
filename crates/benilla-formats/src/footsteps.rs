@@ -80,7 +80,7 @@ impl FootstepCatalog {
     }
 }
 
-fn n_u32_schema(name: &str, n: usize, string_fields: &[usize]) -> Schema {
+pub(crate) fn n_u32_schema(name: &str, n: usize, string_fields: &[usize]) -> Schema {
     let mut s = Schema::new(name);
     for i in 0..n {
         let ty = if string_fields.contains(&i) {

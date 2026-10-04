@@ -27,9 +27,7 @@ pub struct PackageRow {
     pub name: String,
 }
 
-/// Load `Package.dbc`'s rows, in file order.
-pub fn load_packages(chain: &mut Chain) -> Result<Vec<PackageRow>> {
-    let bytes = chain.read_file(PACKAGE).context("reading Package.dbc")?;
+pub(crate) fn package_schema() -> Schema {
     let mut schema = Schema::new("Package");
     for i in 0..PACKAGE_FIELDS {
         let ty = if i == 1 || i == 3 {
@@ -39,7 +37,13 @@ pub fn load_packages(chain: &mut Chain) -> Result<Vec<PackageRow>> {
         };
         schema.add_field(SchemaField::new(format!("F{i}"), ty));
     }
-    let set = parse(&bytes, schema, "Package.dbc")?;
+    schema
+}
+
+/// Load `Package.dbc`'s rows, in file order.
+pub fn load_packages(chain: &mut Chain) -> Result<Vec<PackageRow>> {
+    let bytes = chain.read_file(PACKAGE).context("reading Package.dbc")?;
+    let set = parse(&bytes, package_schema(), "Package.dbc")?;
     Ok(set
         .records()
         .iter()
