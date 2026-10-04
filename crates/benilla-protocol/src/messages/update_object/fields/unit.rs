@@ -176,7 +176,7 @@ impl ObjectFields {
             return None;
         }
         let spell_id = self
-            .get_u32(self.table.unit_aura + u16::from(slot))
+            .get_u32(at(self.table.unit_aura, u16::from(slot)))
             .filter(|&id| id != 0)?;
         Some(UnitAuraSlot {
             slot,
@@ -199,7 +199,7 @@ impl ObjectFields {
     /// validator's crowd-control scan (`0x6e9ca0`) reads them, without `AURAFLAGS`.
     pub fn unit_aura_ids(&self) -> impl Iterator<Item = u32> + '_ {
         (0..UNIT_AURA_SLOTS).map(|slot| {
-            self.get_u32(self.table.unit_aura + u16::from(slot))
+            self.get_u32(at(self.table.unit_aura, u16::from(slot)))
                 .unwrap_or(0)
         })
     }
@@ -262,11 +262,11 @@ impl ObjectFields {
     }
     /// `UNIT_FIELD_POWER1..5`: current power of type `ty`, on the wire's raw scale.
     pub fn unit_power(&self, ty: u8) -> Option<u32> {
-        (ty < 5).then(|| self.get_u32(self.table.unit_power1 + u16::from(ty)))?
+        (ty < 5).then(|| self.get_u32(at(self.table.unit_power1, u16::from(ty))))?
     }
     /// `UNIT_FIELD_MAXPOWER1..5`: maximum power of type `ty`, raw.
     pub fn unit_max_power(&self, ty: u8) -> Option<u32> {
-        (ty < 5).then(|| self.get_u32(self.table.unit_maxpower1 + u16::from(ty)))?
+        (ty < 5).then(|| self.get_u32(at(self.table.unit_maxpower1, u16::from(ty))))?
     }
     /// `UNIT_FIELD_BASE_MANA` (field 162, owner only): what `ManaCostPercentage` costs scale from.
     pub fn unit_base_mana(&self) -> Option<u32> {
@@ -333,13 +333,17 @@ impl ObjectFields {
     /// `UNIT_VIRTUAL_ITEM_SLOT_DISPLAY + slot`: a creature's weapon `DisplayInfoID` for slot 0
     /// main hand, 1 off hand or 2 ranged, with no item behind it.
     pub fn unit_virtual_item_display(&self, slot: u8) -> Option<u32> {
-        (slot < 3)
-            .then(|| self.get_u32(self.table.unit_virtual_item_slot_display + u16::from(slot)))?
+        (slot < 3).then(|| {
+            self.get_u32(at(
+                self.table.unit_virtual_item_slot_display,
+                u16::from(slot),
+            ))
+        })?
     }
     /// `UNIT_VIRTUAL_ITEM_INFO + 2*slot`: bytes `(class, subclass, material, inventory_type)`.
     pub fn unit_virtual_item_info(&self, slot: u8) -> Option<(u8, u8, u8, u8)> {
         let v = (slot < 3)
-            .then(|| self.get_u32(self.table.unit_virtual_item_info + 2 * u16::from(slot)))?;
+            .then(|| self.get_u32(at(self.table.unit_virtual_item_info, 2 * u16::from(slot))))?;
         v.map(|v| {
             (
                 (v & 0xff) as u8,
@@ -351,8 +355,12 @@ impl ObjectFields {
     }
     /// `UNIT_VIRTUAL_ITEM_INFO + 2*slot + 1` byte 0: the virtual item's sheath type.
     pub fn unit_virtual_item_sheath(&self, slot: u8) -> Option<u8> {
-        let v = (slot < 3)
-            .then(|| self.get_u32(self.table.unit_virtual_item_info + 2 * u16::from(slot) + 1))?;
+        let v = (slot < 3).then(|| {
+            self.get_u32(at(
+                self.table.unit_virtual_item_info,
+                2 * u16::from(slot) + 1,
+            ))
+        })?;
         v.map(|v| (v & 0xff) as u8)
     }
     /// `UNIT_FIELD_BYTES_2` byte 0: sheath state, 0 stowed, 1 melee drawn, 2 ranged drawn; for a
@@ -363,11 +371,11 @@ impl ObjectFields {
     }
     /// `UNIT_FIELD_STAT0 + i`: primary stat `i` after buffs, 0 Str, 1 Agi, 2 Sta, 3 Int, 4 Spi.
     pub fn unit_stat(&self, i: u8) -> Option<u32> {
-        (i < 5).then(|| self.get_u32(self.table.unit_stat0 + u16::from(i)))?
+        (i < 5).then(|| self.get_u32(at(self.table.unit_stat0, u16::from(i))))?
     }
     /// `UNIT_FIELD_RESISTANCES + i`: resistance `i`, signed, 0 armor, 1-6 the magic schools.
     pub fn unit_resistance(&self, i: u8) -> Option<i32> {
-        (i < 7).then(|| self.get_i32(self.table.unit_resistances + u16::from(i)))?
+        (i < 7).then(|| self.get_i32(at(self.table.unit_resistances, u16::from(i))))?
     }
     /// `UNIT_FIELD_ATTACK_POWER`: melee attack power before the split pos/neg mods.
     pub fn unit_attack_power(&self) -> Option<i32> {
@@ -425,7 +433,7 @@ impl ObjectFields {
     }
     /// `UNIT_FIELD_BASEATTACKTIME + i`: attack speed in ms, 0 mainhand, 1 offhand.
     pub fn unit_base_attack_time(&self, i: u8) -> Option<u32> {
-        (i < 2).then(|| self.get_u32(self.table.unit_baseattacktime + u16::from(i)))?
+        (i < 2).then(|| self.get_u32(at(self.table.unit_baseattacktime, u16::from(i))))?
     }
     /// `UNIT_FIELD_RANGEDATTACKTIME`: ranged weapon attack speed in ms.
     pub fn unit_ranged_attack_time(&self) -> Option<u32> {

@@ -16,7 +16,7 @@ impl ObjectFields {
     /// charges left on spell `i`, signed; negative is consumed when empty, 0 is spent.
     pub fn item_spell_charges(&self, i: u8) -> Option<i32> {
         (i < 5)
-            .then(|| self.get_u32(self.table.item_spell_charges + u16::from(i)))?
+            .then(|| self.get_u32(at(self.table.item_spell_charges, u16::from(i))))?
             .map(|v| v as i32)
     }
     /// `ITEM_FIELD_FLAGS` (field 21): `0x08` wrapped, never alerts; `0x10` forces red status 4.
@@ -37,7 +37,7 @@ impl ObjectFields {
     /// (`Item.h:117-119`). Signed: the tooltip looks up `abs(id)` and paints a negative one red.
     pub fn item_enchant(&self, slot: u8) -> Option<i32> {
         (slot < 7)
-            .then(|| self.get_u32(self.table.item_enchantment + 3 * u16::from(slot)))?
+            .then(|| self.get_u32(at(self.table.item_enchantment, 3 * u16::from(slot))))?
             .map(|id| id as i32)
             .filter(|&id| id != 0)
     }
@@ -45,7 +45,7 @@ impl ObjectFields {
     /// The tooltip skips the duration; a countdown comes from `SMSG_ITEM_ENCHANT_TIME_UPDATE`.
     pub fn item_enchant_charges(&self, slot: u8) -> u32 {
         (slot < 7)
-            .then(|| self.get_u32(self.table.item_enchantment + 3 * u16::from(slot) + 2))
+            .then(|| self.get_u32(at(self.table.item_enchantment, 3 * u16::from(slot) + 2)))
             .flatten()
             .unwrap_or(0)
     }
@@ -69,15 +69,18 @@ impl ObjectFields {
     }
     /// `CONTAINER_FIELD_SLOT_1 + 2i`: the item guid in bag slot `i`, `Some(0)` when empty.
     pub fn container_slot(&self, i: u8) -> Option<u64> {
-        (i < 36).then(|| self.get_guid(self.table.container_slot_1 + 2 * u16::from(i)))?
+        (i < 36).then(|| self.get_guid(at(self.table.container_slot_1, 2 * u16::from(i))))?
     }
     /// `PLAYER_VISIBLE_ITEM_<slot>_0`: the public entry worn in equipment slot `i`, which other
     /// clients render from; each slot is 12 dwords, the entry after a 2-dword creator.
     pub fn player_visible_item_entry(&self, i: u8) -> Option<u32> {
         (i < 19)
             .then(|| {
-                self.get_u32(self.table.player_visible_item_1_creator + 2 + 12 * u16::from(i))
-                    .filter(|&e| e != 0)
+                self.get_u32(at(
+                    self.table.player_visible_item_1_creator,
+                    2 + 12 * u16::from(i),
+                ))
+                .filter(|&e| e != 0)
             })
             .flatten()
     }
@@ -87,9 +90,10 @@ impl ObjectFields {
     pub fn player_visible_item_enchant(&self, i: u8, j: u8) -> Option<u32> {
         (i < 19 && j < 7)
             .then(|| {
-                self.get_u32(
-                    self.table.player_visible_item_1_creator + 3 + 12 * u16::from(i) + u16::from(j),
-                )
+                self.get_u32(at(
+                    self.table.player_visible_item_1_creator,
+                    3 + 12 * u16::from(i) + u16::from(j),
+                ))
                 .filter(|&e| e != 0)
             })
             .flatten()
@@ -99,7 +103,10 @@ impl ObjectFields {
     pub fn player_visible_item_properties(&self, i: u8) -> u32 {
         (i < 19)
             .then(|| {
-                self.get_u32(self.table.player_visible_item_1_creator + 10 + 12 * u16::from(i))
+                self.get_u32(at(
+                    self.table.player_visible_item_1_creator,
+                    10 + 12 * u16::from(i),
+                ))
             })
             .flatten()
             .unwrap_or(0)
@@ -107,38 +114,38 @@ impl ObjectFields {
     }
     /// `PLAYER_FIELD_INV_SLOT_HEAD + 2i`: our equipment (0-18) and equipped-bag (19-22) guids.
     pub fn player_inv_slot(&self, i: u8) -> Option<u64> {
-        (i < 23).then(|| self.get_guid(self.table.player_inv_slot_head + 2 * u16::from(i)))?
+        (i < 23).then(|| self.get_guid(at(self.table.player_inv_slot_head, 2 * u16::from(i))))?
     }
     /// `PLAYER_FIELD_PACK_SLOT_1 + 2i`: our backpack's 16 item guids.
     pub fn player_pack_slot(&self, i: u8) -> Option<u64> {
-        (i < 16).then(|| self.get_guid(self.table.player_pack_slot_1 + 2 * u16::from(i)))?
+        (i < 16).then(|| self.get_guid(at(self.table.player_pack_slot_1, 2 * u16::from(i))))?
     }
     /// `PLAYER_FIELD_BANK_SLOT_1 + 2i`: our bank's 24 item guids.
     pub fn player_bank_slot(&self, i: u8) -> Option<u64> {
-        (i < 24).then(|| self.get_guid(self.table.player_bank_slot_1 + 2 * u16::from(i)))?
+        (i < 24).then(|| self.get_guid(at(self.table.player_bank_slot_1, 2 * u16::from(i))))?
     }
     /// `PLAYER_FIELD_BANK_BAG_SLOT_1 + 2i`: bank bag `i`'s guid; its contents stream on the bag
     /// item's own `CONTAINER_FIELD_SLOT_*`, addressed as bag 63-68.
     pub fn player_bank_bag_slot(&self, i: u8) -> Option<u64> {
-        (i < 6).then(|| self.get_guid(self.table.player_bank_bag_slot_1 + 2 * u16::from(i)))?
+        (i < 6).then(|| self.get_guid(at(self.table.player_bank_bag_slot_1, 2 * u16::from(i))))?
     }
     /// `PLAYER_FIELD_KEYRING_SLOT_1 + 2i`: 32 guids the client walks as slots 81-112, but only
     /// 16 are addressable (vmangos `KEYRING_SLOT_END 97`) and level unlocks 4, 8, 12 or 16.
     pub fn player_keyring_slot(&self, i: u8) -> Option<u64> {
-        (i < 32).then(|| self.get_guid(self.table.player_keyring_slot_1 + 2 * u16::from(i)))?
+        (i < 32).then(|| self.get_guid(at(self.table.player_keyring_slot_1, 2 * u16::from(i))))?
     }
     /// `PLAYER_FIELD_VENDORBUYBACK_SLOT_1 + 2i`: buyback slot `i`, inventory slot `69 + i`.
     pub fn player_buyback_slot(&self, i: u8) -> Option<u64> {
         (i < 12)
-            .then(|| self.get_guid(self.table.player_vendorbuyback_slot_1 + 2 * u16::from(i)))?
+            .then(|| self.get_guid(at(self.table.player_vendorbuyback_slot_1, 2 * u16::from(i))))?
     }
     /// `PLAYER_FIELD_BUYBACK_PRICE_1 + i`: what buying slot `i` back costs, in copper.
     pub fn player_buyback_price(&self, i: u8) -> Option<u32> {
-        (i < 12).then(|| self.get_u32(self.table.player_buyback_price_1 + u16::from(i)))?
+        (i < 12).then(|| self.get_u32(at(self.table.player_buyback_price_1, u16::from(i))))?
     }
     /// `PLAYER_FIELD_BUYBACK_TIMESTAMP_1 + i`: expiry, used only to sort oldest first (`0x4fafd0`).
     pub fn player_buyback_timestamp(&self, i: u8) -> Option<u32> {
-        (i < 12).then(|| self.get_u32(self.table.player_buyback_timestamp_1 + u16::from(i)))?
+        (i < 12).then(|| self.get_u32(at(self.table.player_buyback_timestamp_1, u16::from(i))))?
     }
     /// `PLAYER_FIELD_COINAGE`: our money, in copper.
     pub fn player_money(&self) -> Option<u32> {
@@ -192,10 +199,10 @@ impl ObjectFields {
         if slot >= PLAYER_QUEST_LOG_SLOTS {
             return None;
         }
-        let base = self.table.player_quest_log_1_1 + 3 * u16::from(slot);
+        let base = at(self.table.player_quest_log_1_1, 3 * u16::from(slot));
         let quest_id = self.get_u32(base)?;
-        let count_state = self.get_u32(base + 1).unwrap_or(0);
-        let timer = self.get_u32(base + 2).unwrap_or(0);
+        let count_state = self.get_u32(at(base, 1)).unwrap_or(0);
+        let timer = self.get_u32(at(base, 2)).unwrap_or(0);
         let mut counters = [0u8; 4];
         for (i, c) in counters.iter_mut().enumerate() {
             *c = ((count_state >> (6 * i)) & 0x3F) as u8;
@@ -212,7 +219,7 @@ impl ObjectFields {
         if i >= PLAYER_EXPLORED_ZONES_SLOTS {
             return 0;
         }
-        self.get_u32(self.table.player_explored_zones_1 + i)
+        self.get_u32(at(self.table.player_explored_zones_1, i))
             .unwrap_or(0)
     }
     /// `PLAYER_BLOCK_PERCENTAGE`: block chance, already a percent (2.62 means 2.62%).
@@ -234,40 +241,46 @@ impl ObjectFields {
     /// `PLAYER_FIELD_POSSTAT0 + i`: stat `i`'s positive buff total from gear, enchants and
     /// auras; an int on the wire, narrowed from the server's float (`BuildValuesUpdate`).
     pub fn player_posstat(&self, i: u8) -> Option<i32> {
-        (i < 5).then(|| self.get_i32(self.table.player_posstat0 + u16::from(i)))?
+        (i < 5).then(|| self.get_i32(at(self.table.player_posstat0, u16::from(i))))?
     }
     /// `PLAYER_FIELD_NEGSTAT0 + i`: stat `i`'s negative buff total, an int at or below 0. An x86
     /// server sends it in two's complement, an arm64 one saturates it to 0.
     pub fn player_negstat(&self, i: u8) -> Option<i32> {
-        (i < 5).then(|| self.get_i32(self.table.player_negstat0 + u16::from(i)))?
+        (i < 5).then(|| self.get_i32(at(self.table.player_negstat0, u16::from(i))))?
     }
     /// `PLAYER_FIELD_RESISTANCEBUFFMODSPOSITIVE + school`: the positive resistance buff, an int.
     pub fn player_resistance_buff_pos(&self, school: u8) -> Option<i32> {
         (school < 7).then(|| {
-            self.get_i32(self.table.player_resistancebuffmodspositive + u16::from(school))
+            self.get_i32(at(
+                self.table.player_resistancebuffmodspositive,
+                u16::from(school),
+            ))
         })?
     }
     /// `PLAYER_FIELD_RESISTANCEBUFFMODSNEGATIVE + school`: the negative resistance buff, at most 0.
     pub fn player_resistance_buff_neg(&self, school: u8) -> Option<i32> {
         (school < 7).then(|| {
-            self.get_i32(self.table.player_resistancebuffmodsnegative + u16::from(school))
+            self.get_i32(at(
+                self.table.player_resistancebuffmodsnegative,
+                u16::from(school),
+            ))
         })?
     }
     /// `PLAYER_FIELD_MOD_DAMAGE_DONE_POS + school`: the positive damage bonus, school 0 physical.
     pub fn player_mod_damage_done_pos(&self, school: u8) -> Option<i32> {
         (school < 7)
-            .then(|| self.get_i32(self.table.player_mod_damage_done_pos + u16::from(school)))?
+            .then(|| self.get_i32(at(self.table.player_mod_damage_done_pos, u16::from(school))))?
     }
     /// `PLAYER_FIELD_MOD_DAMAGE_DONE_NEG + school`: the negative damage bonus, at most 0.
     pub fn player_mod_damage_done_neg(&self, school: u8) -> Option<i32> {
         (school < 7)
-            .then(|| self.get_i32(self.table.player_mod_damage_done_neg + u16::from(school)))?
+            .then(|| self.get_i32(at(self.table.player_mod_damage_done_neg, u16::from(school))))?
     }
     /// `PLAYER_FIELD_MOD_DAMAGE_DONE_PCT + school`: the damage multiplier, a true float that the
     /// server starts at 1.0 (`Player.cpp:3336`); a caller reads `None` as 1.0.
     pub fn player_mod_damage_done_pct(&self, school: u8) -> Option<f32> {
         (school < 7)
-            .then(|| self.get_f32(self.table.player_mod_damage_done_pct + u16::from(school)))?
+            .then(|| self.get_f32(at(self.table.player_mod_damage_done_pct, u16::from(school))))?
     }
     /// `PLAYER_SKILL_INFO_<slot+1>_*`: one skill slot; vmangos writes the id and value together
     /// (`SetSkill`), so an absent value or bonus reads 0.
@@ -275,10 +288,10 @@ impl ObjectFields {
         if slot >= PLAYER_SKILL_SLOTS {
             return None;
         }
-        let base = self.table.player_skill_info_1_1 + 3 * u16::from(slot);
+        let base = at(self.table.player_skill_info_1_1, 3 * u16::from(slot));
         let (skill_id, step) = self.get_u16_pair(base)?;
-        let (value, max) = self.get_u16_pair(base + 1).unwrap_or((0, 0));
-        let (temp_bonus, perm_bonus) = self.get_u16_pair(base + 2).unwrap_or((0, 0));
+        let (value, max) = self.get_u16_pair(at(base, 1)).unwrap_or((0, 0));
+        let (temp_bonus, perm_bonus) = self.get_u16_pair(at(base, 2)).unwrap_or((0, 0));
         Some(PlayerSkillSlot {
             skill_id,
             step,
@@ -530,15 +543,15 @@ impl ObjectFields {
     /// `GAMEOBJECT_ROTATION`: the spawn quaternion `(x, y, z, w)`, unsent components 0; the
     /// reference places a GameObject by it, never by `GAMEOBJECT_FACING`.
     pub fn gameobject_rotation(&self) -> Option<[f32; 4]> {
-        let any_sent = (0..4u16).any(|i| self.contains(self.table.gameobject_rotation + i));
+        let any_sent = (0..4u16).any(|i| self.contains(at(self.table.gameobject_rotation, i)));
         any_sent.then(|| {
             [
                 self.get_f32(self.table.gameobject_rotation).unwrap_or(0.0),
-                self.get_f32(self.table.gameobject_rotation + 1)
+                self.get_f32(at(self.table.gameobject_rotation, 1))
                     .unwrap_or(0.0),
-                self.get_f32(self.table.gameobject_rotation + 2)
+                self.get_f32(at(self.table.gameobject_rotation, 2))
                     .unwrap_or(0.0),
-                self.get_f32(self.table.gameobject_rotation + 3)
+                self.get_f32(at(self.table.gameobject_rotation, 3))
                     .unwrap_or(0.0),
             ]
         })

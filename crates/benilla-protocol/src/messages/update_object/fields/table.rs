@@ -535,7 +535,14 @@ pub fn build_field_table(build: &ClientBuild) -> Option<&'static FieldTable> {
     }
 }
 
+/// The widest descriptor of any build's table, in dwords, which bounds a values block's mask.
+pub(super) const MAX_PLAYER_END: u16 = FIELDS_5875.player_end;
+
 impl FieldTable {
+    /// A member the build has no counterpart of, or whose layout there is not checked yet; every
+    /// reader answers `None` for it.
+    pub const ABSENT: u16 = u16::MAX;
+
     /// An object's descriptor length in dwords: the `*_END` of its innermost block, so a Player
     /// spans OBJECT, UNIT and PLAYER.
     pub(super) fn descriptor_len(&self, object_type: ObjectType) -> u16 {
