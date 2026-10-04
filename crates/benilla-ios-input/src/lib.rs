@@ -245,7 +245,12 @@ impl Plugin for IosInputPlugin {
                 .add_systems(PreStartup, native::attach)
                 .add_systems(
                     PreUpdate,
-                    (native::attach_hover, native::sync_pointer_lock, drain)
+                    (
+                        native::attach_hover,
+                        native::attach_pointer_hider,
+                        native::sync_pointer_lock,
+                        drain,
+                    )
                         .chain()
                         .before(InputSystems),
                 );

@@ -25,7 +25,8 @@ use objc2_game_controller::{
     GCMouse, GCMouseDidConnectNotification, GCMouseDidDisconnectNotification, GCMouseInput,
 };
 use objc2_ui_kit::{
-    UIGestureRecognizerState, UIHoverGestureRecognizer, UIPasteboard, UIView, UIViewController,
+    UIGestureRecognizerState, UIHoverGestureRecognizer, UIPasteboard, UIPointerInteraction,
+    UIPointerInteractionDelegate, UIPointerRegion, UIPointerStyle, UIView, UIViewController,
 };
 use raw_window_handle::RawWindowHandle;
 
@@ -40,6 +41,9 @@ pub struct Native {
     root_vc: Option<Retained<UIViewController>>,
     /// The hover recognizer on winit's view and its target (UIKit holds the target unretained).
     hover: Option<(Retained<UIHoverGestureRecognizer>, Retained<HoverTarget>)>,
+    /// The pointer interaction on winit's view that hides the system pointer, and its delegate
+    /// (UIKit holds the delegate unretained).
+    pointer: Option<(Retained<UIPointerInteraction>, Retained<PointerHider>)>,
 }
 
 impl Native {
@@ -50,6 +54,7 @@ impl Native {
             keyboard: None,
             root_vc: None,
             hover: None,
+            pointer: None,
         }
     }
 }
@@ -283,6 +288,73 @@ pub fn attach_hover(
     view.addGestureRecognizer(&recognizer);
     native.hover = Some((recognizer, target));
     info!("ios input: hover recognizer attached to the view");
+}
+
+define_class!(
+    /// The delegate of the view's pointer interaction: every region is styled hidden.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "BenillaPointerHider"]
+    struct PointerHider;
+
+    unsafe impl NSObjectProtocol for PointerHider {}
+
+    // Conformance only: the one optional method is below, because `define_class!` cannot yet
+    // return a `Retained` from a protocol method.
+    unsafe impl UIPointerInteractionDelegate for PointerHider {}
+
+    impl PointerHider {
+        /// `-pointerInteraction:styleForRegion:`: no system pointer over the view. The returned
+        /// style is autoreleased, as an Objective-C getter's result is.
+        #[unsafe(method(pointerInteraction:styleForRegion:))]
+        fn style_for_region(
+            &self,
+            _interaction: &UIPointerInteraction,
+            _region: &UIPointerRegion,
+        ) -> *mut UIPointerStyle {
+            Retained::autorelease_return(UIPointerStyle::hiddenPointerStyle(self.mtm()))
+        }
+    }
+);
+
+impl PointerHider {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = mtm.alloc::<Self>().set_ivars(());
+        // SAFETY: NSObject's designated initialiser.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// Hides the system pointer over winit's view with a `UIPointerInteraction` whose style is
+/// hidden, once the window exists; retried each frame until it does. The game draws its own
+/// cursor (`benilla-app`'s `cursor.rs`), as the 1.12 client does. A hidden pointer style only
+/// suppresses the drawing: the pointer still exists, so `UIHoverGestureRecognizer` keeps
+/// delivering hover (documented UIKit behaviour; unverified on device). Main thread only
+/// (NonSend).
+pub fn attach_pointer_hider(
+    mut native: NonSendMut<Native>,
+    window: Query<&RawHandleWrapper, With<PrimaryWindow>>,
+) {
+    if native.pointer.is_some() {
+        return;
+    }
+    let Ok(handle) = window.single() else { return };
+    let RawWindowHandle::UiKit(h) = handle.get_window_handle() else {
+        return;
+    };
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    // SAFETY: winit's `ui_view` is a live UIView owned by the window; NonSend, so main thread.
+    let view: &UIView = unsafe { h.ui_view.cast::<UIView>().as_ref() };
+    let delegate = PointerHider::new(mtm);
+    let interaction = UIPointerInteraction::initWithDelegate(
+        mtm.alloc::<UIPointerInteraction>(),
+        Some(ProtocolObject::from_ref(&*delegate)),
+    );
+    view.addInteraction(ProtocolObject::from_ref(&*interaction));
+    native.pointer = Some((interaction, delegate));
+    info!("ios input: system pointer hidden over the view");
 }
 
 /// `-(BOOL)prefersPointerLocked`, answering the flag [`crate::PointerLock`] sets.
