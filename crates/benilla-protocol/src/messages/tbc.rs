@@ -1,13 +1,14 @@
 //! The 2.4.3 server-packet dispatch. A packet is read for 2.4.3 only when its layout there has
 //! been checked, so this is an allow-list; every other opcode is [`ServerPacket::Other`], never
-//! 1.12.1's parser (five opcode numbers changed meaning between the builds).
+//! 1.12.1's parser (five opcode numbers changed meaning between the builds). A packet whose bytes
+//! are the same in both builds is read here by its own arm, never by delegating.
 
-use std::io;
+use std::io::{self, Read};
 
-use crate::wire::{capacity_hint, read_u32_le, read_u8};
+use crate::wire::{capacity_hint, read_f32_le, read_u32_le, read_u8, Vector3d};
 
 use super::parse::read_addon_info;
-use super::{opcode, Character, ServerPacket};
+use super::{opcode, update_object, Character, ServerPacket};
 
 /// The billing group of an `AUTH_OK`: `u32` time remaining, `u8` plan flags, `u32` time rested.
 const BILLING_GROUP: usize = 9;
@@ -17,7 +18,12 @@ fn invalid(what: String) -> io::Error {
 }
 
 /// Decode one 2.4.3 server body; `cursor` advances past what the arm read only on success.
-pub(super) fn parse_tbc_body(opcode: u16, cursor: &mut &[u8]) -> io::Result<ServerPacket> {
+/// `inner_tail` takes the unread rest of an inflated update object, the one arm with a second stream.
+pub(super) fn parse_tbc_body(
+    opcode: u16,
+    cursor: &mut &[u8],
+    inner_tail: &mut usize,
+) -> io::Result<ServerPacket> {
     let mut r: &[u8] = cursor;
     let packet = match opcode {
         opcode::SMSG_AUTH_CHALLENGE => ServerPacket::AuthChallenge {
@@ -38,6 +44,36 @@ pub(super) fn parse_tbc_body(opcode: u16, cursor: &mut &[u8]) -> io::Result<Serv
         opcode::SMSG_ADDON_INFO => ServerPacket::AddonInfo {
             statuses: read_addon_info(&mut r, true),
         },
+        // Same bytes as 1.12.1 (checked in both emulators); the update blocks differ inside.
+        opcode::SMSG_CHARACTER_LOGIN_FAILED => ServerPacket::CharacterLoginFailed {
+            result: read_u8(&mut r)?,
+        },
+        opcode::SMSG_LOGIN_VERIFY_WORLD => ServerPacket::LoginVerifyWorld {
+            map: read_u32_le(&mut r)?,
+            position: Vector3d::read(&mut r)?,
+            orientation: read_f32_le(&mut r)?,
+        },
+        opcode::SMSG_LOGOUT_COMPLETE => ServerPacket::LogoutComplete,
+        opcode::SMSG_LOGOUT_RESPONSE => ServerPacket::LogoutResponse {
+            reason: read_u32_le(&mut r)?,
+            instant: read_u8(&mut r)? != 0,
+        },
+        opcode::SMSG_UPDATE_OBJECT => ServerPacket::UpdateObject {
+            objects: update_object::read_update_object_tbc(&mut r)?,
+        },
+        opcode::SMSG_COMPRESSED_UPDATE_OBJECT => {
+            let _decompressed_size = read_u32_le(&mut r)?;
+            // `&mut r` so the cursor moves over the zlib bytes; `bufread`, so the decoder takes
+            // no more than its stream.
+            let mut decoder = flate2::bufread::ZlibDecoder::new(&mut r);
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed)?;
+            drop(decoder);
+            let mut dr = decompressed.as_slice();
+            let objects = update_object::read_update_object_tbc(&mut dr)?;
+            *inner_tail = dr.len();
+            ServerPacket::UpdateObject { objects }
+        }
         other => ServerPacket::Other { opcode: other },
     };
     *cursor = r;
@@ -295,7 +331,7 @@ mod tests {
     /// `SMSG_IGNORE_LIST`) and an opcode only 1.12.1 reads both come back as `Other`.
     #[test]
     fn everything_off_the_allow_list_is_other() {
-        for op in [0x006B, opcode::SMSG_UPDATE_OBJECT, 0x014F, 0x0293] {
+        for op in [0x006B, opcode::SMSG_DESTROY_OBJECT, 0x014F, 0x0293] {
             match parse(op, &[0xff; 16]).unwrap() {
                 ServerPacket::Other { opcode } => assert_eq!(opcode, op),
                 other => panic!("{:#x} read as {}", op, other.name()),

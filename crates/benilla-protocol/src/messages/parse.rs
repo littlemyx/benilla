@@ -280,7 +280,7 @@ fn parse_server_with_tail_in(
     let mut inner_tail = 0;
     let packet = match dialect {
         Dialect::Vanilla(fields) => parse_server_body(fields, opcode, &mut r, &mut inner_tail)?,
-        Dialect::Tbc => super::tbc::parse_tbc_body(opcode, &mut r)?,
+        Dialect::Tbc => super::tbc::parse_tbc_body(opcode, &mut r, &mut inner_tail)?,
     };
     let tail = match packet {
         ServerPacket::Other { .. } => 0,
