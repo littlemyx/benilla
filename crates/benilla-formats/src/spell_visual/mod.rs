@@ -602,7 +602,7 @@ pub fn load_spell_visual_catalog(chain: &mut Chain) -> Result<SpellVisualCatalog
                 missile_sound: u32_at(r, sound_slot).and_then(some_unless_none),
                 strike_sound: u32_at(r, strike_slot).and_then(some_unless_none),
                 missile_gate: g(gate_slot),
-                area_gate: area_slot.map_or(0, |at| g(at)),
+                area_gate: area_slot.map_or(0, g),
                 area_effect: area_slot.map_or(0, |at| g(at + 1)),
                 area_kit: area_slot.map_or(0, |at| g(at + 2)),
             },
