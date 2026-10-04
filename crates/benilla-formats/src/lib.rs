@@ -23,7 +23,7 @@ pub use tga::tga_to_rgba;
 mod install;
 pub use install::{
     addon_corpus, addon_corpus_candidates, candidates, project_folder, set_project_folder, skipped,
-    wow_data,
+    skipped_tbc, wow_data, wow_data_tbc,
 };
 mod characters;
 pub use characters::{

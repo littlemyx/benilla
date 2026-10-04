@@ -215,6 +215,18 @@ pub fn run_with(build: BuildId, extend: impl FnOnce(&mut App)) -> AppExit {
     launch(build, Some(Box::new(extend)))
 }
 
+/// The startup line for an install whose build is recognised but not playable, or `None` when the
+/// client can play it.
+fn unplayable_notice(build: &benilla_build::ClientBuild) -> Option<String> {
+    let [major, minor, patch] = build.version;
+    (!build.playable()).then(|| {
+        format!(
+            "benilla: install is {major}.{minor}.{patch} (build {}), which this client cannot play yet",
+            build.build
+        )
+    })
+}
+
 /// What a crate on top of benilla adds to the built app ([`run_with`]).
 type Extension<'a> = Box<dyn FnOnce(&mut App) + 'a>;
 
@@ -309,6 +321,12 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
                 .and_then(|chain| benilla_formats::detect_build(&chain))
             {
                 Ok(build) => {
+                    // A recognised build the client cannot play stops here, before any asset
+                    // source or plugin (window included) exists.
+                    if let Some(notice) = unplayable_notice(&build) {
+                        eprintln!("{notice}");
+                        return AppExit::error();
+                    }
                     let [major, minor, patch] = build.version;
                     eprintln!(
                         "benilla: install is {major}.{minor}.{patch} (build {})",
@@ -459,4 +477,22 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     // Returns the app's exit status: a failed capture sets `AppExit::error()`
     // (`capture::drive_capture`), which must not exit 0 with no PNG on disk.
     app.run()
+}
+
+#[cfg(test)]
+mod unplayable_notice_tests {
+    use super::unplayable_notice;
+
+    #[test]
+    fn a_known_build_the_client_cannot_play_is_refused_by_name() {
+        assert_eq!(
+            unplayable_notice(&benilla_build::TBC_2_4_3).as_deref(),
+            Some("benilla: install is 2.4.3 (build 8606), which this client cannot play yet")
+        );
+    }
+
+    #[test]
+    fn a_playable_build_is_not_refused() {
+        assert_eq!(unplayable_notice(&benilla_build::VANILLA_1_12_1), None);
+    }
 }

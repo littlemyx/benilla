@@ -119,6 +119,46 @@ macro_rules! wow_data_or_skip {
     };
 }
 
+/// The second install the tests read: `$WOW_DATA_TBC`, a 2.4.3 `Data` directory, or `None` when it
+/// is unset or empty. Only a test names it; the client never reads it.
+pub fn wow_data_tbc() -> Option<PathBuf> {
+    std::env::var_os("WOW_DATA_TBC")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// The 2.4.3 install, or skip this test, used as [`wow_data_or_skip!`] is. Unset skips, and
+/// `BENILLA_REQUIRE_DATA` does not refuse it (the gate resolves only the vanilla install); set to a
+/// path that is not a directory fails.
+#[macro_export]
+macro_rules! wow_data_tbc_or_skip {
+    () => {
+        $crate::wow_data_tbc_or_skip!(())
+    };
+    ($ret:expr) => {
+        match $crate::wow_data_tbc() {
+            Some(data) => {
+                assert!(
+                    data.is_dir(),
+                    "WOW_DATA_TBC is set to {data:?}, which is not a directory"
+                );
+                data
+            }
+            None => {
+                $crate::skipped_tbc("WOW_DATA_TBC not set");
+                return $ret;
+            }
+        }
+    };
+}
+
+/// A skip of a [`wow_data_tbc_or_skip!`] test: printed and counted, never a failure.
+#[doc(hidden)]
+pub fn skipped_tbc(what: &str) {
+    eprintln!("skipping: {what}");
+    log_skip(what);
+}
+
 /// A data-gated test's skip, printed; a panic under `BENILLA_REQUIRE_DATA=1`, which the gate sets
 /// where the data is, since libtest hides a passing test's stderr and a lost install reads green.
 #[doc(hidden)]
@@ -128,7 +168,12 @@ pub fn skipped(what: &str, looked_in: &[PathBuf]) {
         what,
         looked_in,
     );
-    // `$BENILLA_SKIP_LOG`: libtest hides the line above, so the gate counts skips from this file.
+    log_skip(what);
+}
+
+/// Appends `what` to `$BENILLA_SKIP_LOG`: libtest hides a passing test's stderr, so the gate counts
+/// skips from this file.
+fn log_skip(what: &str) {
     if let Some(log) = std::env::var_os("BENILLA_SKIP_LOG").filter(|p| !p.is_empty()) {
         use std::io::Write;
         if let Ok(mut f) = std::fs::OpenOptions::new()
