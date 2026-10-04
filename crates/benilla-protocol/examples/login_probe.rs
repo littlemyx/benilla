@@ -242,24 +242,16 @@ fn print_own(own: &OwnPlayer, character: &Character, verify: Option<(u32, Vector
         f.unit_mount_display_id(),
     );
     shown.value("base health", t.unit_base_health, f.unit_base_health());
-    shown.value("aura state", t.unit_aurastate, Some(f.unit_aura_state()));
-    shown.value(
+    shown.plain("aura state", t.unit_aurastate, f.unit_aura_state());
+    shown.plain(
         "bounding radius",
         t.unit_boundingradius,
-        Some(f.unit_bounding_radius()),
+        f.unit_bounding_radius(),
     );
-    shown.value(
-        "combat reach",
-        t.unit_combatreach,
-        Some(f.unit_combat_reach()),
-    );
-    shown.value("npc flags", t.unit_npc_flags, Some(f.unit_npc_flags()));
-    shown.value("stand state", t.unit_bytes_1, Some(f.unit_stand_state()));
-    shown.value(
-        "shapeshift form",
-        t.unit_bytes_1,
-        Some(f.unit_shapeshift_form()),
-    );
+    shown.plain("combat reach", t.unit_combatreach, f.unit_combat_reach());
+    shown.plain("npc flags", t.unit_npc_flags, f.unit_npc_flags());
+    shown.plain("stand state", t.unit_bytes_1, f.unit_stand_state());
+    shown.plain("shapeshift form", t.unit_bytes_1, f.unit_shapeshift_form());
     shown.value("sheath state", t.unit_bytes_2, f.unit_sheath_state());
     shown.value("strength", t.unit_stat0, f.unit_stat(0));
     shown.value("armor", t.unit_resistances, f.unit_resistance(0));
@@ -297,9 +289,9 @@ fn print_own(own: &OwnPlayer, character: &Character, verify: Option<(u32, Vector
     );
     shown.value("skill slot 0", t.player_skill_info_1_1, f.player_skill(0));
     shown.value(
-        "inventory slot 0 guid",
+        "inventory slot 3 (shirt) guid",
         t.player_inv_slot_head,
-        f.player_inv_slot(0),
+        f.player_inv_slot(3),
     );
     shown.value(
         "quest log slot 0",
@@ -390,6 +382,8 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
     let mut by_update_type: BTreeMap<&str, u32> = BTreeMap::new();
     let mut out_of_range_guids = 0usize;
     let mut near_guids = 0usize;
+    let mut move_flags: BTreeMap<String, u32> = BTreeMap::new();
+    let mut splines = 0u32;
     let mut other: BTreeMap<u16, u32> = BTreeMap::new();
     let mut typed: BTreeMap<String, u32> = BTreeMap::new();
     let mut parse_errors: Vec<String> = Vec::new();
@@ -443,6 +437,10 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
                         } => {
                             *by_update_type.entry("create").or_default() += 1;
                             *creates.entry(format!("{object_type:?}")).or_default() += 1;
+                            if let Some(m) = movement.mover {
+                                *move_flags.entry(format!("{:#x}", m.flags)).or_default() += 1;
+                            }
+                            splines += u32::from(movement.spline.is_some());
                             if guid == character.guid && own.is_none() {
                                 own = Some(OwnPlayer {
                                     fields: mask,
@@ -486,20 +484,26 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
         None => println!("the own player's create never arrived"),
     }
     println!("objects created, by type: {creates:?}");
+    println!(
+        "movement flags on living creates: {move_flags:?}; creates riding a spline: {splines}"
+    );
     println!("update blocks, by update type: {by_update_type:?} (out-of-range guids {out_of_range_guids}, near guids {near_guids})");
     println!("typed packets other than updates: {typed:?}");
     let mut ranked: Vec<(u16, u32)> = other.iter().map(|(&op, &n)| (op, n)).collect();
     ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     println!(
-        "`Other` opcodes ({} distinct, by count; names from the 1.12.1 table where it has one):",
+        "`Other` opcodes ({} distinct, by count; names from cmangos-tbc, else the 1.12.1 table):",
         ranked.len()
     );
     for (op, n) in ranked {
         println!(
             "    {op:#06x} x{n}  {}",
             tbc_opcode_name(op)
-                .or_else(|| messages::opcode_name(op))
-                .unwrap_or("(no name known)")
+                .map(str::to_string)
+                .or_else(|| {
+                    messages::opcode_name(op).map(|n| format!("(1.12.1 table only: {n})"))
+                })
+                .unwrap_or_else(|| "(no name known)".to_string())
         );
     }
     println!("parse errors: {}", parse_errors.len());
@@ -516,15 +520,44 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
     Ok(())
 }
 
-/// Names of the 2.4.3 opcodes whose number the 1.12.1 table names otherwise or not at all, for the
-/// `Other` tally (cmangos-tbc `Opcodes.h`); anything else falls back to the 1.12.1 table.
+/// Names of the 2.4.3 opcodes the entry run reads, from cmangos-tbc `Opcodes.h`: the 1.12.1 table
+/// names several of these numbers otherwise or not at all (0x209, 0x33B), so it is only a fallback.
 fn tbc_opcode_name(opcode: u16) -> Option<&'static str> {
     Some(match opcode {
+        0x042 => "SMSG_LOGIN_SETTIMESPEED",
         0x067 => "SMSG_CONTACT_LIST",
+        0x096 => "SMSG_MESSAGECHAT",
+        0x0DD => "SMSG_MONSTER_MOVE",
+        0x0FA => "SMSG_TRIGGER_CINEMATIC",
+        0x0FD => "SMSG_TUTORIAL_FLAGS",
+        0x122 => "SMSG_INITIALIZE_FACTIONS",
+        0x127 => "SMSG_SET_PROFICIENCY",
+        0x129 => "SMSG_ACTION_BUTTONS",
+        0x12A => "SMSG_INITIAL_SPELLS",
+        0x131 => "SMSG_SPELL_START",
+        0x132 => "SMSG_SPELL_GO",
+        0x137 => "SMSG_UPDATE_AURA_DURATION",
         0x14F => "SMSG_SPELLBREAKLOG",
+        0x155 => "SMSG_BINDPOINTUPDATE",
+        0x1CB => "SMSG_NOTIFICATION",
+        0x209 => "SMSG_ACCOUNT_DATA_TIMES",
+        0x21E => "SMSG_SET_REST_START",
+        0x24C => "SMSG_SPELLLOGEXECUTE",
         0x293 => "SMSG_MEETINGSTONE_LEAVE",
+        0x2C2 => "SMSG_INIT_WORLD_STATES",
+        0x2F4 => "SMSG_WEATHER",
+        0x329 => "MSG_SET_DUNGEON_DIFFICULTY",
+        0x332 => "SMSG_EXPECTED_SPAM_RECORDS",
         0x33A => "SMSG_DEFENSE_MESSAGE",
-        //TBC_NAMES
+        0x33B => "SMSG_INSTANCE_DIFFICULTY",
+        0x33D => "SMSG_MOTD",
+        0x36C => "SMSG_LFG_UPDATE",
+        0x390 => "SMSG_TIME_SYNC_REQ",
+        0x3A3 => "SMSG_INIT_EXTRA_AURA_INFO",
+        0x3A4 => "SMSG_SET_EXTRA_AURA_INFO",
+        0x3A6 => "SMSG_CLEAR_EXTRA_AURA_INFO",
+        0x3C8 => "SMSG_FEATURE_SYSTEM_STATUS",
+        0x41D => "SMSG_SEND_UNLEARN_SPELLS",
         _ => return None,
     })
 }
