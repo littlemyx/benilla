@@ -28,7 +28,7 @@
 //! The pointer is locked by answering `prefersPointerLocked` on winit's root view controller,
 //! which winit does not implement; see [`PointerLock::set_locked`].
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
@@ -100,9 +100,78 @@ pub struct InputState {
     hover_seen: bool,
     /// The kinds of [`Raw`] already logged once, for the on-device channel diagnostics.
     logged: HashSet<&'static str>,
+    /// Events the drag trace may still log; armed to [`TRACE_EVENTS`] by the first Left press.
+    trace_remaining: u32,
+    /// The trace has armed (once per process).
+    trace_armed: bool,
+    /// The last [`TRACE_RING`] events before the trace armed, dumped when it does.
+    trace_ring: VecDeque<TraceEv>,
+}
+
+/// How many events the drag trace logs after the first Left press.
+const TRACE_EVENTS: u32 = 400;
+/// How many pre-arm events the trace remembers.
+const TRACE_RING: usize = 8;
+const TRACE: &str = "benilla_ios_input::trace";
+
+/// One event the drag trace remembers or logs.
+#[derive(Debug, Clone, Copy)]
+enum TraceEv {
+    Raw(Raw),
+    Touch {
+        phase: TouchPhase,
+        id: u64,
+        pos: Vec2,
+    },
 }
 
 impl InputState {
+    /// Whether the drag trace is logging.
+    fn tracing(&self) -> bool {
+        self.trace_remaining > 0
+    }
+
+    /// Feeds the drag trace one event, before it is handled: remembered while unarmed, armed by the
+    /// first Left press (dumping the ring), logged while armed until the cap.
+    fn trace(&mut self, ev: TraceEv, locked: bool) {
+        if !self.trace_armed {
+            if matches!(
+                ev,
+                TraceEv::Raw(Raw::Button {
+                    button: MouseButton::Left,
+                    pressed: true
+                })
+            ) {
+                self.trace_armed = true;
+                self.trace_remaining = TRACE_EVENTS;
+                info!(target: TRACE, "armed by the first Left press; last {} events before it:", self.trace_ring.len());
+                for old in std::mem::take(&mut self.trace_ring) {
+                    info!(target: TRACE, "pre {old:?}");
+                }
+            } else {
+                if self.trace_ring.len() == TRACE_RING {
+                    self.trace_ring.pop_front();
+                }
+                self.trace_ring.push_back(ev);
+                return;
+            }
+        }
+        if self.trace_remaining == 0 {
+            return;
+        }
+        self.trace_remaining -= 1;
+        let (held, cursor) = (&self.held_buttons, self.cursor);
+        let lock = if locked { " locked" } else { "" };
+        match ev {
+            TraceEv::Raw(raw) => {
+                info!(target: TRACE, "raw {raw:?} held={held:?} cursor={cursor:?}{lock}")
+            }
+            TraceEv::Touch { phase, id, pos } => {
+                info!(target: TRACE, "touch {phase:?} id={id} pos={pos:?} held={held:?} cursor={cursor:?}{lock}")
+            }
+        }
+    }
+
     /// Logs the first occurrence of each event kind per process; no per-event logging.
     fn first(&mut self, raw: &Raw) {
         let kind = match raw {
@@ -198,6 +267,9 @@ fn move_cursor(
     let delta = state.cursor.map(|prev| pos - prev);
     state.cursor = Some(pos);
     win.set_physical_cursor_position(Some((pos * scale).as_dvec2()));
+    if state.tracing() {
+        info!(target: TRACE, "  cursor write pos={pos:?} delta={delta:?} physical={:?}", win.physical_cursor_position());
+    }
     cursor.write(CursorMoved {
         window,
         position: pos,
@@ -228,6 +300,7 @@ pub fn drain(
     let state = &mut *state;
     while let Ok(raw) = rx.try_recv() {
         state.first(&raw);
+        state.trace(TraceEv::Raw(raw), lock.is_locked());
         match raw {
             Raw::Key { hid, pressed } => {
                 let Some(key_code) = key_code(hid) else {
@@ -281,6 +354,8 @@ pub fn drain(
                     state.cursor = None;
                     win.set_physical_cursor_position(None);
                     left.write(CursorLeft { window });
+                } else if state.tracing() {
+                    info!(target: TRACE, "  HoverEnd ignored (locked={}, held={:?})", lock.is_locked(), state.held_buttons);
                 }
             }
             Raw::Button { button, pressed } => {
@@ -340,6 +415,14 @@ pub fn drain(
     // is silent: that touch is the cursor. With no button held a touch is a finger and is left
     // alone, so the screen does not move the software cursor.
     for touch in touches.read() {
+        state.trace(
+            TraceEv::Touch {
+                phase: touch.phase,
+                id: touch.id,
+                pos: touch.position,
+            },
+            lock.is_locked(),
+        );
         if state.held_buttons.is_empty() || lock.is_locked() {
             continue;
         }
@@ -551,6 +634,54 @@ mod tests {
         app.update();
         assert_eq!(cursor_of(&mut app), None);
         assert_eq!(read::<CursorLeft>(&app).len(), 1);
+    }
+
+    #[test]
+    fn trace_arms_on_left_press_and_stops_at_the_cap() {
+        let (mut app, tx) = app();
+        for i in 0..20 {
+            tx.send(Raw::Hover {
+                x: i as f32,
+                y: 0.0,
+            })
+            .unwrap();
+        }
+        app.update();
+        let st = app.world().resource::<InputState>();
+        assert_eq!(st.trace_remaining, 0);
+        assert!(!st.trace_armed);
+        assert_eq!(st.trace_ring.len(), TRACE_RING);
+
+        tx.send(Raw::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        })
+        .unwrap();
+        app.update();
+        let st = app.world().resource::<InputState>();
+        assert!(st.trace_armed);
+        assert!(st.trace_ring.is_empty());
+        assert_eq!(st.trace_remaining, TRACE_EVENTS - 1);
+
+        for _ in 0..TRACE_EVENTS + 50 {
+            tx.send(Raw::Move { dx: 1.0, dy: 0.0 }).unwrap();
+        }
+        app.update();
+        assert_eq!(app.world().resource::<InputState>().trace_remaining, 0);
+
+        // Armed once per process: a second press does not re-arm.
+        tx.send(Raw::Button {
+            button: MouseButton::Left,
+            pressed: false,
+        })
+        .unwrap();
+        tx.send(Raw::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        })
+        .unwrap();
+        app.update();
+        assert_eq!(app.world().resource::<InputState>().trace_remaining, 0);
     }
 
     #[test]
