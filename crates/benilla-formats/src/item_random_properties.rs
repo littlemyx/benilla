@@ -14,7 +14,8 @@ use crate::Chain;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::DbcLayout;
 
 const ITEM_RANDOM_PROPERTIES: &str = "DBFilesClient\\ItemRandomProperties.dbc";
 
@@ -75,8 +76,8 @@ impl RandomPropertyCatalog {
     }
 }
 
-pub(crate) fn item_random_properties_schema() -> Schema {
-    let mut s = Schema::new("ItemRandomProperties");
+pub(crate) fn item_random_properties_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ItemRandomProperties");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("Name", FieldType::String));
     for i in 0..RANDOM_PROPERTY_SLOTS {
@@ -85,10 +86,7 @@ pub(crate) fn item_random_properties_schema() -> Schema {
             FieldType::UInt32,
         ));
     }
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Suffix{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("SuffixFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Suffix", FieldType::LocString));
     s
 }
 
@@ -98,21 +96,19 @@ pub fn load_random_property_catalog(chain: &mut Chain) -> Result<RandomPropertyC
     let bytes = chain
         .read_file(ITEM_RANDOM_PROPERTIES)
         .with_context(|| format!("reading {ITEM_RANDOM_PROPERTIES}"))?;
-    let rs = parse(
-        &bytes,
-        item_random_properties_schema(),
-        "ItemRandomProperties",
-    )?;
+    let schema = item_random_properties_schema(chain.dbc_layout());
+    let [enchant0, suffix_slot] = slots(&schema, ["Enchantment0", "Suffix"])?;
+    let rs = parse(&bytes, schema, "ItemRandomProperties")?;
     let mut rows = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
-        // Field 7, `Suffix0`: the enUS string at `0x1c`, the one the name formatter reads.
-        let Some(suffix) = str_at(&rs, r, 7) else {
+        // The enUS suffix, the one the name formatter reads (offset `0x1c` in 5875).
+        let Some(suffix) = str_at(&rs, r, suffix_slot) else {
             continue;
         };
         let mut enchants = [0u32; RANDOM_PROPERTY_SLOTS];
         for (slot, e) in enchants.iter_mut().enumerate() {
-            *e = u32_at(r, 2 + slot).unwrap_or(0);
+            *e = u32_at(r, enchant0 + slot).unwrap_or(0);
         }
         rows.insert(id, RandomProperty { suffix, enchants });
     }
@@ -145,5 +141,18 @@ mod tests {
         for id in [0, -1, 999_999] {
             assert_eq!(cat.suffixed_name("Chipped Claw", id), "Chipped Claw");
         }
+    }
+
+    /// 2.4.3's table: the same 2012 ids, "of Striking" with the enchantments 2.4.3 gives it.
+    #[test]
+    fn the_2_4_3_suffixes_read_through_the_wide_string() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_random_property_catalog(&mut chain).expect("ItemRandomProperties.dbc");
+        let striking = cat.get(2163).expect("id 2163");
+        assert_eq!(striking.suffix, "of Striking");
+        assert_eq!(striking.enchants, [367, 363, 371, 0, 0]);
+        assert_eq!(cat.get(5).map(|r| r.suffix.as_str()), Some("of Intellect"));
+        assert_eq!(cat.get(5).unwrap().enchants, [79, 0, 0, 0, 0]);
     }
 }

@@ -628,10 +628,6 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
             "SpellItemEnchantment.dbc",
             item_visuals::spell_item_enchantment_schema,
         ),
-        (
-            "ItemRandomProperties.dbc",
-            item_random_properties::item_random_properties_schema,
-        ),
         ("AreaTrigger.dbc", area_trigger::area_trigger_schema),
     ] {
         if base.eq_ignore_ascii_case(name) {
@@ -904,16 +900,8 @@ mod tests {
         "CreatureSoundData",
         "GameObjectDisplayInfo",
         "HelmetGeosetVisData",
-        "ItemBagFamily",
-        "ItemClass",
         "ItemDisplayInfo",
-        "ItemRandomProperties",
-        "ItemSet",
-        "ItemSubClass",
-        "ItemSubClassMask",
-        "Languages",
         "LightSkybox",
-        "LockType",
         "Map",
         "Material",
         "Package",

@@ -10,16 +10,10 @@ use crate::Chain;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::DbcLayout;
 
 const LOCK_TYPE: &str = "DBFilesClient\\LockType.dbc";
-/// The file's column count, which `benilla-dbc` checks against the header.
-const LOCK_TYPE_FIELDS: usize = 29;
-/// `CursorName`, the `[row+0x70]` that `0x5f3070` reads.
-const CURSOR_NAME_FIELD: usize = 28;
-/// The `Name` block's enUS column, the toast's `[row + locale*4 + 4]` at locale 0.
-const NAME_FIELD: usize = 1;
-
 /// `LockType.Id` → `CursorName` for the three rows with one, plus every row's `Name`.
 pub struct LockTypeCatalog {
     cursors: HashMap<u32, String>,
@@ -48,17 +42,14 @@ impl LockTypeCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("LockType");
-    for i in 0..LOCK_TYPE_FIELDS {
-        // The unread columns are 4-byte filler, declared so the record size matches the header.
-        let ty = if i == CURSOR_NAME_FIELD || i == NAME_FIELD {
-            FieldType::String
-        } else {
-            FieldType::UInt32
-        };
-        s.add_field(SchemaField::new(format!("F{i}"), ty));
-    }
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("LockType");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
+    s.add_field(SchemaField::new("ResourceName", FieldType::LocString));
+    s.add_field(SchemaField::new("Verb", FieldType::LocString));
+    // `CursorName`, the `[row+0x70]` in 5875 that `0x5f3070` reads.
+    s.add_field(SchemaField::new("CursorName", FieldType::String));
     s
 }
 
@@ -67,15 +58,17 @@ pub fn load_lock_type_catalog(chain: &mut Chain) -> Result<LockTypeCatalog> {
     let bytes = chain
         .read_file(LOCK_TYPE)
         .with_context(|| format!("reading {LOCK_TYPE}"))?;
-    let rs = parse(&bytes, schema(), "LockType.dbc")?;
+    let schema = schema(chain.dbc_layout());
+    let [name_slot, cursor_slot] = slots(&schema, ["Name", "CursorName"])?;
+    let rs = parse(&bytes, schema, "LockType.dbc")?;
     let mut cursors = HashMap::new();
     let mut names = HashMap::new();
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
-        if let Some(name) = str_at(&rs, r, CURSOR_NAME_FIELD) {
+        if let Some(name) = str_at(&rs, r, cursor_slot) {
             cursors.insert(id, name);
         }
-        if let Some(name) = str_at(&rs, r, NAME_FIELD) {
+        if let Some(name) = str_at(&rs, r, name_slot) {
             names.insert(id, name);
         }
     }
@@ -112,5 +105,21 @@ mod tests {
         assert_eq!(cat.name(3), Some("Mining"));
         assert_eq!(cat.name(19), Some("Fishing"));
         assert_eq!(cat.name(0), None);
+    }
+
+    /// 2.4.3's table: 20 types, the new REUSEME, Lockpicking renamed, the cursor name read after
+    /// three wide strings.
+    #[test]
+    fn the_2_4_3_types_read_their_names_and_cursors() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_lock_type_catalog(&mut chain).expect("LockType.dbc");
+        assert_eq!(cat.len(), 3, "the rows with a cursor: Pick, Gather, Mine");
+        assert_eq!(cat.name(1), Some("Lockpicking"), "5875: Pick Lock");
+        assert_eq!(cat.cursor_name(1), Some("PickLock"));
+        assert_eq!(cat.name(2), Some("Herbalism"));
+        assert_eq!(cat.cursor_name(2), Some("GatherHerbs"));
+        assert_eq!(cat.name(20), Some("REUSEME"));
+        assert_eq!(cat.cursor_name(20), None);
     }
 }

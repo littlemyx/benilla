@@ -147,27 +147,24 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("GroundEffectDoodad", ground_effects::doodad_schema()),
     plain!("GroundEffectTexture", ground_effects::texture_schema()),
     plain!("HelmetGeosetVisData", characters::helmet_vis_schema()),
-    plain!("ItemBagFamily", itembagfamily::item_bag_family_schema()),
-    plain!("ItemClass", itemclass::item_class_schema()),
+    wide!("ItemBagFamily", itembagfamily::item_bag_family_schema),
+    wide!("ItemClass", itemclass::item_class_schema),
     plain!("ItemDisplayInfo", items::item_display_info_schema()),
     plain!("ItemGroupSounds", item_sounds::item_group_sounds_schema()),
     wide!("ItemPetFood", creature_families::food_schema),
-    plain!(
+    wide!(
         "ItemRandomProperties",
-        item_random_properties::item_random_properties_schema()
+        item_random_properties::item_random_properties_schema
     ),
-    plain!("ItemSet", itemsets::item_set_schema()),
-    plain!("ItemSubClass", itemsubclass::item_sub_class_schema()),
-    plain!(
-        "ItemSubClassMask",
-        itemsubclass::item_sub_class_mask_schema()
-    ),
+    wide!("ItemSet", itemsets::item_set_schema),
+    wide!("ItemSubClass", itemsubclass::item_sub_class_schema),
+    wide!("ItemSubClassMask", itemsubclass::item_sub_class_mask_schema),
     plain!(
         "ItemVisualEffects",
         item_visuals::item_visual_effects_schema()
     ),
     plain!("ItemVisuals", item_visuals::item_visuals_schema()),
-    plain!("Languages", languages::languages_schema()),
+    wide!("Languages", languages::languages_schema),
     plain!("LanguageWords", languages::language_words_schema()),
     plain!("Light", light::light_schema()),
     plain!("LightFloatBand", light::float_band_schema()),
@@ -176,7 +173,7 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("LightSkybox", light::light_skybox_schema()),
     plain!("LoadingScreens", loading_screen::schema()),
     plain!("Lock", lock::schema()),
-    plain!("LockType", lock_type::schema()),
+    wide!("LockType", lock_type::schema),
     plain!("Map", maps::map_schema()),
     plain!("Material", material::schema()),
     plain!("NPCSounds", npc_greeting::npcsounds_schema()),
