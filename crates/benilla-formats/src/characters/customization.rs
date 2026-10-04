@@ -435,7 +435,7 @@ fn load_facial_hair_styles(chain: &mut Chain) -> Result<HashMap<(u8, u8), HashSe
         .with_context(|| format!("reading {CHAR_FACIAL_HAIR_STYLES}"))?;
     let rs = parse(
         &bytes,
-        all_u32_schema("CharacterFacialHairStyles", 9),
+        super::geosets::char_facial_hair_schema(chain.dbc_layout()),
         "CharacterFacialHairStyles",
     )?;
     let mut map: HashMap<(u8, u8), HashSet<u8>> = HashMap::new();

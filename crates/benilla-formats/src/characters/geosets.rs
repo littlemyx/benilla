@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, u32_at, unread};
+use crate::{Chain, DbcLayout};
 
 const CHAR_HAIR_GEOSETS: &str = "DBFilesClient\\CharHairGeosets.dbc";
 const CHAR_FACIAL_HAIR: &str = "DBFilesClient\\CharacterFacialHairStyles.dbc";
@@ -205,7 +205,7 @@ impl CharacterGeosets {
                 .with_context(|| format!("reading {CHAR_FACIAL_HAIR}"))?;
             let rs = parse(
                 &bytes,
-                char_facial_hair_schema(),
+                char_facial_hair_schema(chain.dbc_layout()),
                 "CharacterFacialHairStyles",
             )?;
             let mut m = HashMap::with_capacity(rs.records().len());
@@ -228,7 +228,11 @@ impl CharacterGeosets {
         // HelmetGeosetVisData, the helm hide-masks: without the file, helms hide nothing.
         let helmet_vis = match chain.read_file(HELMET_GEOSET_VIS) {
             Ok(bytes) => {
-                let rs = parse(&bytes, helmet_vis_schema(), "HelmetGeosetVisData")?;
+                let rs = parse(
+                    &bytes,
+                    helmet_vis_schema(chain.dbc_layout()),
+                    "HelmetGeosetVisData",
+                )?;
                 let mut m = HashMap::with_capacity(rs.records().len());
                 for r in rs.records() {
                     if let Some(id) = u32_at(r, 0) {
@@ -264,9 +268,10 @@ pub(crate) fn char_hair_geosets_schema() -> Schema {
 }
 
 /// HelmetGeosetVisData.dbc: 6 fields, 0x18-byte records (loader `0x546f00`); the five masks are
-/// race bitmasks (`0x4799a0`).
-pub(crate) fn helmet_vis_schema() -> Schema {
-    let mut s = Schema::new("HelmetGeosetVisData");
+/// race bitmasks (`0x4799a0`). 2.4.3 appends two more masks (8 fields) and sets the new races' bits
+/// in the five (measured: 0.94 of the shared masks agree on the first nine race bits).
+pub(crate) fn helmet_vis_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("HelmetGeosetVisData");
     for (name, ty) in [
         ("ID", FieldType::UInt32),
         ("HideHair", FieldType::UInt32),
@@ -277,12 +282,16 @@ pub(crate) fn helmet_vis_schema() -> Schema {
     ] {
         s.add_field(SchemaField::new(name, ty));
     }
+    if layout.is_tbc() {
+        unread(&mut s, "AppendedMasks", 2);
+    }
     s
 }
 
-/// CharacterFacialHairStyles.dbc: 9 fields, no ID column.
-pub(crate) fn char_facial_hair_schema() -> Schema {
-    let mut s = Schema::new("CharacterFacialHairStyles");
+/// CharacterFacialHairStyles.dbc: 9 fields, no ID column; 2.4.3 appends two geoset columns (the
+/// read ones keep their slots: measured on the 136 shared rows, the emulator's format agrees).
+pub(crate) fn char_facial_hair_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("CharacterFacialHairStyles");
     for (name, ty) in [
         ("RaceID", FieldType::UInt32),
         ("SexID", FieldType::UInt32),
@@ -295,6 +304,9 @@ pub(crate) fn char_facial_hair_schema() -> Schema {
         ("Geoset200", FieldType::UInt32),
     ] {
         s.add_field(SchemaField::new(name, ty));
+    }
+    if layout.is_tbc() {
+        unread(&mut s, "AppendedGeosets", 2);
     }
     s
 }
@@ -663,5 +675,30 @@ mod tests {
         // Race 9 ships only sex-0 rows, so the goblin female keeps the region base, the same scalp.
         let f = cg.visible_geosets(9, 1, 0, 0, &EquipGeosets::default());
         assert!(f.contains(&1) && !f.contains(&2), "goblin female unchanged");
+    }
+
+    /// 2.4.3: the facial-hair rows of the new races and the helm hide masks, two columns wider.
+    #[test]
+    fn the_2_4_3_geoset_tables_cover_the_new_races() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let geosets = CharacterGeosets::load(&mut chain).expect("load geoset tables");
+        let naked = EquipGeosets::default();
+        // A Draenei female, facial hair 2 (row geoset 4): group 1 shows 104.
+        assert!(geosets.visible_geosets(11, 1, 0, 2, &naked).contains(&104));
+        // A Blood Elf female, facial hair 2 (row 0, 3, 0): group 3 shows 303 and 301 is gone.
+        let belf = geosets.visible_geosets(10, 1, 0, 2, &naked);
+        assert!(belf.contains(&303) && !belf.contains(&301));
+        // A 1.12.1 race through the same rows: the Human male's facial hair 1 is (1, 2, 1).
+        let human = geosets.visible_geosets(1, 0, 0, 1, &naked);
+        assert!(human.contains(&101) && human.contains(&302) && human.contains(&201));
+        // Helm row 372 hides the ears (mask 5 is all ones): 702 becomes 701.
+        assert!(geosets.visible_geosets(10, 0, 0, 0, &naked).contains(&702));
+        let helmed = EquipGeosets {
+            helm_vis: Some([372, 372]),
+            ..naked
+        };
+        let hidden = geosets.visible_geosets(10, 0, 0, 0, &helmed);
+        assert!(hidden.contains(&701) && !hidden.contains(&702));
     }
 }

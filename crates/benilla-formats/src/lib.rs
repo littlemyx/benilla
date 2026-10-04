@@ -598,10 +598,11 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
     let base = dbc_name.rsplit(['/', '\\']).next().unwrap_or(dbc_name);
 
     // A table with a typed loader reuses its schema, so a dump reads what the loader reads.
+    // The ones that take a layout dump as 1.12.1 lays them out.
     for (name, ctor) in [
         (
             "CreatureDisplayInfo.dbc",
-            creatures::creature_display_info_schema as fn() -> Schema,
+            creatures::creature_display_info_schema as fn(DbcLayout) -> Schema,
         ),
         (
             "CreatureDisplayInfoExtra.dbc",
@@ -611,14 +612,23 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
             "CreatureModelData.dbc",
             creatures::creature_model_data_schema,
         ),
-        ("CharHairGeosets.dbc", characters::char_hair_geosets_schema),
         (
             "CharacterFacialHairStyles.dbc",
             characters::char_facial_hair_schema,
         ),
         ("HelmetGeosetVisData.dbc", characters::helmet_vis_schema),
+        ("ItemDisplayInfo.dbc", items::item_display_info_schema_for),
+    ] {
+        if base.eq_ignore_ascii_case(name) {
+            return Some(ctor(DbcLayout::VANILLA_1_12_1));
+        }
+    }
+    for (name, ctor) in [
+        (
+            "CharHairGeosets.dbc",
+            characters::char_hair_geosets_schema as fn() -> Schema,
+        ),
         ("CharSections.dbc", characters::char_sections_schema),
-        ("ItemDisplayInfo.dbc", items::item_display_info_schema),
         ("ItemVisuals.dbc", item_visuals::item_visuals_schema),
         (
             "ItemVisualEffects.dbc",
@@ -889,15 +899,8 @@ mod tests {
     /// converted, and a table that fits while listed fails.
     const NOT_YET_2_4_3: &[&str] = &[
         "Cfg_Categories",
-        "CharacterFacialHairStyles",
         "ChatProfanity",
-        "CreatureDisplayInfo",
-        "CreatureDisplayInfoExtra",
-        "CreatureModelData",
         "CreatureSoundData",
-        "GameObjectDisplayInfo",
-        "HelmetGeosetVisData",
-        "ItemDisplayInfo",
         "LightSkybox",
         "Material",
         "Spell",

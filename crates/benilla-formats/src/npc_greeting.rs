@@ -57,14 +57,6 @@ pub(crate) fn npcsounds_schema() -> Schema {
     s
 }
 
-fn cdi_schema() -> Schema {
-    let mut s = Schema::new("CreatureDisplayInfo");
-    for i in 0..12 {
-        s.add_field(SchemaField::new(format!("f{i}"), FieldType::UInt32));
-    }
-    s
-}
-
 /// Read `NPCSounds.dbc` + `CreatureDisplayInfo.dbc` off the patch chain into the joined catalog.
 pub fn load_npc_greeting_catalog(chain: &mut Chain) -> Result<NpcGreetingCatalog> {
     let bytes = chain
@@ -87,10 +79,12 @@ pub fn load_npc_greeting_catalog(chain: &mut Chain) -> Result<NpcGreetingCatalog
     let bytes = chain
         .read_file("DBFilesClient\\CreatureDisplayInfo.dbc")
         .context("reading CreatureDisplayInfo.dbc")?;
-    let rs = parse(&bytes, cdi_schema(), "CreatureDisplayInfo")?;
+    let schema = crate::creatures::creature_display_info_schema(chain.dbc_layout());
+    let [npc_sound_slot] = crate::dbc::slots(&schema, ["NPCSoundID"])?;
+    let rs = parse(&bytes, schema, "CreatureDisplayInfo")?;
     let mut display_to_sound = HashMap::new();
     for r in rs.records() {
-        let (Some(id), Some(npc_sound)) = (u32_at(r, 0), u32_at(r, 11)) else {
+        let (Some(id), Some(npc_sound)) = (u32_at(r, 0), u32_at(r, npc_sound_slot)) else {
             continue;
         };
         if npc_sound != 0 {
@@ -131,5 +125,20 @@ mod tests {
             cat.for_display(26).is_none(),
             "beast display does not greet"
         );
+    }
+
+    /// 2.4.3: the NPC sound column of the display table moved up a slot, so the join still resolves.
+    #[test]
+    fn real_2_4_3_npc_greeting_resolves() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_npc_greeting_catalog(&mut chain).expect("load npc greetings");
+        assert_eq!(cat.len(), 209, "NPCSounds rows");
+        let g = cat.for_display(793).expect("display 793 greets");
+        assert_eq!((g.hello, g.goodbye, g.pissed), (5977, 5978, 5979));
+        // A Draenei female display new in 2.x carries NPC sound 205.
+        let g = cat.for_display(17001).expect("display 17001 greets");
+        assert_eq!((g.hello, g.goodbye, g.pissed), (9758, 9757, 9759));
+        assert!(cat.for_display(26).is_none());
     }
 }

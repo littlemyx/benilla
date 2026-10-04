@@ -71,9 +71,9 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("BankBagSlotPrices", bank_bag_slot_prices::schema()),
     plain!("CameraShakes", camera_shakes::camera_shakes_schema()),
     plain!("Cfg_Categories", cfg_categories::cfg_categories_schema()),
-    plain!(
+    wide!(
         "CharacterFacialHairStyles",
-        characters::char_facial_hair_schema()
+        characters::char_facial_hair_schema
     ),
     // `load_combos` refuses any header but 2 fields of 2 bytes.
     Table {
@@ -100,16 +100,16 @@ pub(crate) static TABLES: &[Table] = &[
     wide!("ChrRaces", factions::chr_races_schema),
     plain!("CinematicCamera", cinematics::cameras_schema()),
     plain!("CinematicSequences", cinematics::sequences_schema()),
-    plain!(
+    wide!(
         "CreatureDisplayInfo",
-        creatures::creature_display_info_schema()
+        creatures::creature_display_info_schema
     ),
-    plain!(
+    wide!(
         "CreatureDisplayInfoExtra",
-        creatures::creature_display_info_extra_schema()
+        creatures::creature_display_info_extra_schema
     ),
     wide!("CreatureFamily", creature_families::family_schema),
-    plain!("CreatureModelData", creatures::creature_model_data_schema()),
+    wide!("CreatureModelData", creatures::creature_model_data_schema),
     plain!("CreatureSoundData", creature_sound::csd_schema()),
     wide!("CreatureType", creature_types::creature_type_schema),
     plain!(
@@ -135,7 +135,7 @@ pub(crate) static TABLES: &[Table] = &[
         "FootstepTerrainLookup",
         footsteps::n_u32_schema("FootstepTerrainLookup", 5, &[])
     ),
-    plain!("GameObjectDisplayInfo", gameobjects::schema()),
+    wide!("GameObjectDisplayInfo", gameobjects::schema),
     wide!("GameTips", game_tips::schema),
     wide!(
         "GMTicketCategory",
@@ -143,10 +143,10 @@ pub(crate) static TABLES: &[Table] = &[
     ),
     plain!("GroundEffectDoodad", ground_effects::doodad_schema()),
     plain!("GroundEffectTexture", ground_effects::texture_schema()),
-    plain!("HelmetGeosetVisData", characters::helmet_vis_schema()),
+    wide!("HelmetGeosetVisData", characters::helmet_vis_schema),
     wide!("ItemBagFamily", itembagfamily::item_bag_family_schema),
     wide!("ItemClass", itemclass::item_class_schema),
-    plain!("ItemDisplayInfo", items::item_display_info_schema()),
+    wide!("ItemDisplayInfo", items::item_display_info_schema_for),
     plain!("ItemGroupSounds", item_sounds::item_group_sounds_schema()),
     wide!("ItemPetFood", creature_families::food_schema),
     wide!(
