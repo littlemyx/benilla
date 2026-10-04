@@ -6,6 +6,8 @@ use benilla_build::ClientBuild;
 
 use super::super::movement::ObjectType;
 
+const ABSENT: u16 = FieldTable::ABSENT;
+
 macro_rules! field_table {
     ($($(#[$doc:meta])* $name:ident,)*) => {
         /// The descriptor indices of one build, `u16` each.
@@ -517,6 +519,214 @@ pub const FIELDS_5875: FieldTable = FieldTable {
     corpse_end: 38,
 };
 
+/// 2.4.3 (8606), from cmangos-tbc's `UpdateFields.h` for that build (one source; each packing and
+/// length named below was read in its code). A member is filled only when its accessors read the
+/// right answer on 2.4.3 as written: same meaning, packing, array length and stride. Every other
+/// member is [`FieldTable::ABSENT`], with the difference named above it.
+pub const FIELDS_8606: FieldTable = FieldTable {
+    object_type: 2,
+    object_scale_x: 4,
+    gameobject_created_by: 6,
+    gameobject_displayid: 8,
+    gameobject_flags: 9,
+    gameobject_rotation: 10,
+    gameobject_state: 14,
+    gameobject_pos_x: 15,
+    gameobject_pos_y: 16,
+    gameobject_pos_z: 17,
+    gameobject_facing: 18,
+    gameobject_dyn_flags: 19,
+    gameobject_faction: 20,
+    gameobject_type_id: 21,
+    gameobject_level: 22,
+    corpse_dynamic_flags: 38,
+    unit_target: 16,
+    unit_charm: 6,
+    unit_summon: 8,
+    unit_charmedby: 10,
+    unit_summonedby: 12,
+    unit_createdby: 14,
+    unit_channel_object: 20,
+    unit_health: 22,
+    unit_power1: 23,
+    unit_power2: 24,
+    unit_power5: 27,
+    unit_maxhealth: 28,
+    unit_maxpower1: 29,
+    unit_maxpower2: 30,
+    unit_level: 34,
+    unit_factiontemplate: 35,
+    unit_bytes_0: 36,
+    // byte 2 is the vis flags and byte 3 the misc flags, where the accessors read stealth, ghost
+    // and untrackable from byte 3 and the shapeshift form from byte 2 (the 2.4.3 form is BYTES_2
+    // byte 3)
+    unit_bytes_1: ABSENT,
+    unit_flags: 46,
+    // 56 slots against the 48 the accessors assume
+    unit_aura: ABSENT,
+    // byte-packed over 14 dwords against 1.12.1's 8-slot nibbles over 6
+    unit_auraflags: ABSENT,
+    // 56 byte-packed slots over 14 dwords against 48 over 12
+    unit_auralevels: ABSENT,
+    // 56 byte-packed slots over 14 dwords against 48 over 12
+    unit_auraapplications: ABSENT,
+    unit_aurastate: 146,
+    unit_boundingradius: 150,
+    unit_combatreach: 151,
+    unit_base_mana: 207,
+    unit_base_health: 208,
+    unit_displayid: 152,
+    unit_nativedisplayid: 153,
+    unit_mountdisplayid: 154,
+    unit_petnumber: 160,
+    unit_pet_name_timestamp: 161,
+    unit_petexperience: 162,
+    unit_petnextlevelexp: 163,
+    // the packing is not checked: the server stores a signed display value (`GetDispTP`) in a
+    // TWO_SHORT field
+    unit_training_points: ABSENT,
+    unit_dynamic_flags: 164,
+    unit_channel_spell: 165,
+    unit_created_by_spell: 167,
+    unit_npc_flags: 168,
+    unit_npc_emotestate: 169,
+    unit_virtual_item_slot_display: 37,
+    // byte layout differs: class, subclass, unknown, material in the first dword, then inventory
+    // type and sheath in the second (1.12.1: class, subclass, material, inventory type, then
+    // sheath)
+    unit_virtual_item_info: ABSENT,
+    unit_bytes_2: 209,
+    unit_baseattacktime: 147,
+    unit_rangedattacktime: 149,
+    unit_mindamage: 155,
+    unit_maxdamage: 156,
+    unit_minoffhanddamage: 157,
+    unit_maxoffhanddamage: 158,
+    unit_stat0: 171,
+    unit_resistances: 186,
+    unit_attack_power: 210,
+    unit_attack_power_mods: 211,
+    unit_attack_power_multiplier: 212,
+    unit_ranged_attack_power: 213,
+    unit_ranged_attack_power_mods: 214,
+    unit_ranged_attack_power_multiplier: 215,
+    unit_minrangeddamage: 216,
+    unit_maxrangeddamage: 217,
+    player_bytes: 239,
+    player_bytes_2: 240,
+    // byte 3 is the arena faction and byte 2 is unused, where the accessors read the honor rank
+    // and the city-protector medal
+    player_bytes_3: ABSENT,
+    // 25 slots of 4 fields against 20 of 3
+    player_quest_log_1_1: ABSENT,
+    item_stack_count: 14,
+    // 11 slots of 3 against 7
+    item_enchantment: ABSENT,
+    container_num_slots: 60,
+    container_slot_1: 62,
+    // 16 fields per slot against 12
+    player_visible_item_1_creator: ABSENT,
+    player_inv_slot_head: 650,
+    player_pack_slot_1: 696,
+    // 28 slots against 24
+    player_bank_slot_1: ABSENT,
+    // 7 slots against 6
+    player_bank_bag_slot_1: ABSENT,
+    player_vendorbuyback_slot_1: 798,
+    player_keyring_slot_1: 822,
+    player_farsight: 922,
+    player_buyback_price_1: 1490,
+    player_buyback_timestamp_1: 1502,
+    player_field_coinage: 1461,
+    player_xp: 926,
+    player_next_level_xp: 927,
+    player_watched_faction_index: 1519,
+    player_rest_state_experience: 1460,
+    player_block_percentage: 1316,
+    player_dodge_percentage: 1317,
+    player_parry_percentage: 1318,
+    player_crit_percentage: 1321,
+    // 128 slots against 64
+    player_explored_zones_1: ABSENT,
+    player_posstat0: 176,
+    player_negstat0: 181,
+    player_resistancebuffmodspositive: 193,
+    player_resistancebuffmodsnegative: 200,
+    player_mod_damage_done_pos: 1462,
+    player_mod_damage_done_neg: 1469,
+    player_mod_damage_done_pct: 1476,
+    player_skill_info_1_1: 928,
+    player_character_points1: 1312,
+    player_character_points2: 1313,
+    player_track_creatures: 1314,
+    player_track_resources: 1315,
+    player_ammo_id: 1487,
+    player_self_res_spell: 1488,
+    player_flags: 236,
+    player_duel_arbiter: 234,
+    player_duel_team: 242,
+    player_guildid: 237,
+    player_guildrank: 238,
+    // no such field: combo points and their target are sent by `SMSG_UPDATE_COMBO_POINTS`
+    player_field_combo_target: ABSENT,
+    // byte 1 is the refer-a-friend grantable level and byte 3 the lifetime top PvP rank, where the
+    // accessors read combo points from byte 1
+    player_field_bytes: ABSENT,
+    // honor block replaced: one `PLAYER_FIELD_KILLS` pair, today and yesterday contribution, honor
+    // and arena currency, no weekly or standing fields
+    player_field_session_kills: ABSENT,
+    // honor block replaced (see session kills)
+    player_field_yesterday_kills: ABSENT,
+    // honor block replaced (see session kills)
+    player_field_last_week_kills: ABSENT,
+    // honor block replaced (see session kills)
+    player_field_this_week_kills: ABSENT,
+    // honor block replaced (see session kills)
+    player_field_this_week_contribution: ABSENT,
+    // honor block replaced (see session kills)
+    player_field_lifetime_honorable_kills: ABSENT,
+    // honor block replaced: no lifetime dishonorable counter
+    player_field_lifetime_dishonorable_kills: ABSENT,
+    // honor block replaced (see session kills)
+    player_field_yesterday_contribution: ABSENT,
+    // honor block replaced: no last-week contribution
+    player_field_last_week_contribution: ABSENT,
+    // honor block replaced: no weekly standing
+    player_field_last_week_rank: ABSENT,
+    // byte 0 is no longer the honor rank bar; the 2.4.3 byte flags (stealth, invisibility glow)
+    // sit in byte 1
+    player_field_bytes2: ABSENT,
+    object_entry: 3,
+    item_spell_charges: 16,
+    item_creator: 10,
+    item_flags: 21,
+    item_random_properties_id: 56,
+    item_text_id: 57,
+    item_durability: 58,
+    item_max_durability: 59,
+    corpse_owner: 6,
+    corpse_display_id: 14,
+    corpse_item: 15,
+    corpse_bytes_1: 34,
+    corpse_bytes_2: 35,
+    corpse_guild: 36,
+    corpse_flags: 37,
+    dynamicobject_caster: 6,
+    dynamicobject_bytes: 8,
+    dynamicobject_spell_id: 9,
+    dynamicobject_radius: 10,
+    dynamicobject_pos_x: 11,
+    dynamicobject_facing: 14,
+    object_end: 6,
+    item_end: 60,
+    container_end: 134,
+    unit_end: 234,
+    player_end: 1592,
+    gameobject_end: 26,
+    dynamicobject_end: 16,
+    corpse_end: 40,
+};
+
 /// The table of `build`; a build without one is a programming error, not a runtime condition.
 pub fn field_table(build: &ClientBuild) -> &'static FieldTable {
     match build_field_table(build) {
@@ -525,18 +735,23 @@ pub fn field_table(build: &ClientBuild) -> &'static FieldTable {
     }
 }
 
-/// The table of `build`, `None` for a known build that has none yet (2.4.3); a build number that
-/// names no known build is a programming error and panics.
+/// The table of `build`, `None` for a known build that has none; a build number that names no
+/// known build is a programming error and panics.
 pub fn build_field_table(build: &ClientBuild) -> Option<&'static FieldTable> {
     match build.build {
         5875 => Some(&FIELDS_5875),
+        8606 => Some(&FIELDS_8606),
         other if ClientBuild::from_build(other).is_some() => None,
         other => panic!("no update-field table for build {other}"),
     }
 }
 
 /// The widest descriptor of any build's table, in dwords, which bounds a values block's mask.
-pub(super) const MAX_PLAYER_END: u16 = FIELDS_5875.player_end;
+pub(super) const MAX_PLAYER_END: u16 = if FIELDS_5875.player_end > FIELDS_8606.player_end {
+    FIELDS_5875.player_end
+} else {
+    FIELDS_8606.player_end
+};
 
 impl FieldTable {
     /// A member the build has no counterpart of, or whose layout there is not checked yet; every
@@ -565,6 +780,7 @@ mod tests {
 
     use benilla_build::VANILLA_1_12_1;
 
+    use super::super::{at, ObjectFields};
     use super::*;
 
     #[test]
@@ -612,5 +828,261 @@ mod tests {
         lens.sort_unstable();
         assert!(lens.windows(2).all(|w| w[0] != w[1]));
         assert_eq!(t.descriptor_len(ObjectType::Player), 1282);
+    }
+
+    // ---- 2.4.3 (8606) ----
+
+    /// The block a member's name prefix names; a member is checked against that block's end.
+    fn block_of(name: &str) -> (&'static str, fn(&FieldTable) -> u16) {
+        match name.split('_').next().unwrap() {
+            "object" => ("object", |t| t.object_end),
+            "item" => ("item", |t| t.item_end),
+            "container" => ("container", |t| t.container_end),
+            "unit" => ("unit", |t| t.unit_end),
+            "player" => ("player", |t| t.player_end),
+            "gameobject" => ("gameobject", |t| t.gameobject_end),
+            "dynamicobject" => ("dynamicobject", |t| t.dynamicobject_end),
+            "corpse" => ("corpse", |t| t.corpse_end),
+            other => panic!("member {name} belongs to no block ({other})"),
+        }
+    }
+
+    #[test]
+    fn the_tbc_build_reads_the_8606_table() {
+        assert_eq!(field_table(&benilla_build::TBC_2_4_3), &FIELDS_8606);
+        assert_eq!(
+            build_field_table(&benilla_build::TBC_2_4_3),
+            Some(&FIELDS_8606)
+        );
+    }
+
+    // No two filled members of one block share an index; an absent member makes no claim.
+    #[test]
+    fn no_two_filled_members_of_an_8606_block_share_an_index() {
+        let mut seen: HashMap<(&str, u16), &str> = HashMap::new();
+        for (name, index) in FIELDS_8606.entries() {
+            if index == FieldTable::ABSENT || name.ends_with("_end") {
+                continue;
+            }
+            let (block, _) = block_of(name);
+            if let Some(other) = seen.insert((block, index), name) {
+                panic!("{other} and {name} share index {index}");
+            }
+        }
+    }
+
+    // A filled index lies inside its own block's descriptor.
+    #[test]
+    fn every_filled_8606_index_is_inside_its_blocks_descriptor() {
+        for (name, index) in FIELDS_8606.entries() {
+            if index == FieldTable::ABSENT || name.ends_with("_end") {
+                continue;
+            }
+            let (_, end) = block_of(name);
+            assert!(
+                index < end(&FIELDS_8606),
+                "{name} at {index} is past its block's end {}",
+                end(&FIELDS_8606)
+            );
+        }
+    }
+
+    // A filled array member fits whole inside its block, at the length its accessors assume.
+    #[test]
+    fn filled_8606_arrays_fit_their_blocks() {
+        let t = &FIELDS_8606;
+        let arrays: [(&str, u16, u16, u16); 20] = [
+            ("unit_power1", t.unit_power1, 5, t.unit_end),
+            ("unit_maxpower1", t.unit_maxpower1, 5, t.unit_end),
+            ("unit_stat0", t.unit_stat0, 5, t.unit_end),
+            ("unit_resistances", t.unit_resistances, 7, t.unit_end),
+            ("unit_baseattacktime", t.unit_baseattacktime, 2, t.unit_end),
+            ("player_posstat0", t.player_posstat0, 5, t.unit_end),
+            ("player_negstat0", t.player_negstat0, 5, t.unit_end),
+            (
+                "buff mods +",
+                t.player_resistancebuffmodspositive,
+                7,
+                t.unit_end,
+            ),
+            (
+                "buff mods -",
+                t.player_resistancebuffmodsnegative,
+                7,
+                t.unit_end,
+            ),
+            ("container_slot_1", t.container_slot_1, 72, t.container_end),
+            ("item_spell_charges", t.item_spell_charges, 5, t.item_end),
+            ("corpse_item", t.corpse_item, 19, t.corpse_end),
+            ("inv_slot_head", t.player_inv_slot_head, 46, t.player_end),
+            ("pack_slot_1", t.player_pack_slot_1, 32, t.player_end),
+            (
+                "buyback_slot",
+                t.player_vendorbuyback_slot_1,
+                24,
+                t.player_end,
+            ),
+            ("keyring_slot_1", t.player_keyring_slot_1, 64, t.player_end),
+            ("buyback_price", t.player_buyback_price_1, 12, t.player_end),
+            (
+                "buyback_time",
+                t.player_buyback_timestamp_1,
+                12,
+                t.player_end,
+            ),
+            ("skill_info", t.player_skill_info_1_1, 384, t.player_end),
+            (
+                "mod_damage_pct",
+                t.player_mod_damage_done_pct,
+                7,
+                t.player_end,
+            ),
+        ];
+        for (name, base, len, end) in arrays {
+            assert_ne!(base, FieldTable::ABSENT, "{name} is absent");
+            assert!(base + len <= end, "{name}: {base} + {len} > {end}");
+        }
+    }
+
+    #[test]
+    fn the_8606_descriptor_lengths_are_the_2_4_3_totals() {
+        let t = &FIELDS_8606;
+        let lens = [
+            (ObjectType::Object, 6),
+            (ObjectType::Item, 60),
+            (ObjectType::Container, 134),
+            (ObjectType::Unit, 234),
+            (ObjectType::Player, 1592),
+            (ObjectType::GameObject, 26),
+            (ObjectType::DynamicObject, 16),
+            (ObjectType::Corpse, 40),
+        ];
+        for (ty, len) in lens {
+            assert_eq!(t.descriptor_len(ty), len, "{ty:?}");
+        }
+        let mut sorted: Vec<u16> = lens.iter().map(|&(_, l)| l).collect();
+        sorted.sort_unstable();
+        assert!(sorted.windows(2).all(|w| w[0] != w[1]));
+    }
+
+    #[test]
+    fn the_mask_bound_covers_the_widest_descriptor_of_any_table() {
+        assert!(MAX_PLAYER_END >= FIELDS_5875.player_end);
+        assert!(MAX_PLAYER_END >= FIELDS_8606.player_end);
+    }
+
+    // The 2.4.3 positions the live probe leans on, by 2.4.3 name.
+    #[test]
+    fn the_8606_unit_and_player_positions_are_the_2_4_3_ones() {
+        let t = &FIELDS_8606;
+        assert_eq!(
+            [
+                t.unit_health,
+                t.unit_power1,
+                t.unit_maxhealth,
+                t.unit_maxpower1
+            ],
+            [22, 23, 28, 29]
+        );
+        assert_eq!(
+            [
+                t.unit_level,
+                t.unit_factiontemplate,
+                t.unit_bytes_0,
+                t.unit_flags
+            ],
+            [34, 35, 36, 46]
+        );
+        assert_eq!([t.unit_displayid, t.unit_nativedisplayid], [152, 153]);
+        assert_eq!(
+            [t.unit_aurastate, t.unit_base_mana, t.unit_bytes_2],
+            [146, 207, 209]
+        );
+        assert_eq!(
+            [t.player_flags, t.player_bytes, t.player_xp],
+            [236, 239, 926]
+        );
+        assert_eq!(
+            [t.player_field_coinage, t.player_skill_info_1_1],
+            [1461, 928]
+        );
+    }
+
+    // The members left absent are the structural differences, and 1.12.1 has none.
+    #[test]
+    fn the_absent_members_of_8606_are_the_checked_structural_differences() {
+        let absent: Vec<&str> = FIELDS_8606
+            .entries()
+            .into_iter()
+            .filter(|&(_, i)| i == FieldTable::ABSENT)
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(absent.len(), 27, "{absent:?}");
+        for name in [
+            "unit_aura",
+            "unit_auraflags",
+            "unit_bytes_1",
+            "player_quest_log_1_1",
+            "player_visible_item_1_creator",
+            "item_enchantment",
+            "player_explored_zones_1",
+            "player_field_combo_target",
+        ] {
+            assert!(absent.contains(&name), "{name} should be absent");
+        }
+        assert!(FIELDS_5875
+            .entries()
+            .iter()
+            .all(|&(_, i)| i != FieldTable::ABSENT));
+    }
+
+    #[test]
+    fn slot_arithmetic_on_an_absent_base_stays_absent_and_never_overflows() {
+        let absent = FieldTable::ABSENT;
+        assert_eq!(at(absent, 0), absent);
+        assert_eq!(at(absent, 7), absent);
+        assert_eq!(at(absent, u16::MAX), absent);
+        assert_eq!(at(u16::MAX - 1, 1), absent);
+        assert_eq!(at(u16::MAX - 1, 2), absent);
+        assert_eq!(at(1, u16::MAX), absent);
+        assert_eq!(at(0, u16::MAX), absent);
+        assert_eq!(at(10, 5), 15);
+        assert_eq!(at(0, 0), 0);
+    }
+
+    #[test]
+    fn an_absent_member_reads_none_whatever_the_store_holds() {
+        // Every index set, so only the ABSENT guard can make a read miss.
+        let all: Vec<(u16, u32)> = (0..1592).map(|i| (i, 1)).collect();
+        let f = ObjectFields::from_pairs_in(&FIELDS_8606, &all).into_created(ObjectType::Player);
+        assert_eq!(f.player_quest_log(0), None);
+        assert_eq!(f.unit_aura(0), None);
+        assert_eq!(f.player_visible_item_entry(0), None);
+        assert_eq!(f.player_visible_item_enchant(0, 0), None);
+        assert_eq!(f.player_bank_slot(0), None);
+        assert_eq!(f.player_bank_bag_slot(0), None);
+        assert_eq!(f.item_enchant(0), None);
+        assert_eq!(f.player_combo_points(), None);
+        assert_eq!(f.player_pvp_rank(), None);
+        assert_eq!(f.player_session_kills(), None);
+        assert_eq!(f.unit_virtual_item_info(0), None);
+        // A reader that defaults an absent value gives its default, not a neighbour's number.
+        assert_eq!(f.unit_aura_ids().max(), Some(0));
+        assert_eq!(f.player_explored_zone_slot(0), 0);
+        assert_eq!(f.player_combo_target(), 0);
+        assert!(!f.unit_is_stealthed());
+        assert_eq!(f.unit_shapeshift_form(), 0);
+        // A filled member of the same store still reads.
+        assert_eq!(f.unit_health(), Some(1));
+        assert_eq!(f.player_xp(), Some(1));
+    }
+
+    #[test]
+    fn an_index_of_u16_max_is_never_a_carried_field() {
+        let f = ObjectFields::from_pairs_in(&FIELDS_8606, &[(u16::MAX, 9)]);
+        assert_eq!(f.get_raw(FieldTable::ABSENT), None);
+        assert!(!f.contains(FieldTable::ABSENT));
+        assert_eq!(f.get_u32(FieldTable::ABSENT), None);
+        assert_eq!(f.get_guid(FieldTable::ABSENT), None);
     }
 }

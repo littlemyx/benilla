@@ -625,7 +625,7 @@ fn at(base: u16, offset: u16) -> u16 {
     }
 }
 
-pub use table::{build_field_table, field_table, FieldTable, FIELDS_5875};
+pub use table::{build_field_table, field_table, FieldTable, FIELDS_5875, FIELDS_8606};
 pub use unit::{power_display_scale, OwnerFallback};
 
 #[cfg(test)]
