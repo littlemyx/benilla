@@ -7,12 +7,10 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const SPELL_FOCUS_OBJECT: &str = "DBFilesClient\\SpellFocusObject.dbc";
-const SPELL_FOCUS_FIELDS: usize = 10;
-const COL_NAME_ENUS: usize = 1;
 
 /// `SpellFocusObject` id → its enUS name.
 pub struct SpellFocusCatalog {
@@ -34,16 +32,10 @@ impl SpellFocusCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("SpellFocusObject");
-    for i in 0..SPELL_FOCUS_FIELDS {
-        let ty = if i == COL_NAME_ENUS {
-            FieldType::String
-        } else {
-            FieldType::UInt32
-        };
-        s.add_field(SchemaField::new(format!("F{i}"), ty));
-    }
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("SpellFocusObject");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -52,11 +44,13 @@ pub fn load_spell_focus_catalog(chain: &mut Chain) -> Result<SpellFocusCatalog> 
     let bytes = chain
         .read_file(SPELL_FOCUS_OBJECT)
         .with_context(|| format!("reading {SPELL_FOCUS_OBJECT}"))?;
-    let rs = parse(&bytes, schema(), "SpellFocusObject.dbc")?;
+    let schema = schema(chain.dbc_layout());
+    let [name_slot] = slots(&schema, ["Name"])?;
+    let rs = parse(&bytes, schema, "SpellFocusObject.dbc")?;
     let mut names = HashMap::new();
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
-        if let Some(name) = str_at(&rs, r, COL_NAME_ENUS) {
+        if let Some(name) = str_at(&rs, r, name_slot) {
             names.insert(id, name);
         }
     }
@@ -78,5 +72,17 @@ mod tests {
         assert_eq!(cat.name(4), Some("Cooking Fire"));
         assert_eq!(cat.name(0), None, "0 = no requirement");
         assert_eq!(cat.len(), 138, "the 5875 file's full row count");
+    }
+
+    /// 2.4.3's table: 246 foci, the new Eversong Runestone and Altar of Aggonar among them.
+    #[test]
+    fn the_2_4_3_table_names_the_new_foci() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_spell_focus_catalog(&mut chain).expect("load SpellFocusObject");
+        assert_eq!(cat.len(), 246);
+        assert_eq!(cat.name(1), Some("Anvil"));
+        assert_eq!(cat.name(1363), Some("Eversong Runestone"));
+        assert_eq!(cat.name(1367), Some("Altar of Aggonar"));
     }
 }

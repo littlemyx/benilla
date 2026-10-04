@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{i32_at, parse, u32_at};
-use crate::Chain;
+use crate::dbc::{i32_at, parse, slots, u32_at};
+use crate::{Chain, DbcLayout};
 
 const ITEM_SUB_CLASS: &str = "DBFilesClient\\ItemSubClass.dbc";
 /// The group names, read before [`ITEM_SUB_CLASS`] when a whole subclass mask needs a name.
@@ -164,8 +164,8 @@ impl ItemSubClassCatalog {
     }
 }
 
-pub(crate) fn item_sub_class_schema() -> Schema {
-    let mut s = Schema::new("ItemSubClass");
+pub(crate) fn item_sub_class_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ItemSubClass");
     s.add_field(SchemaField::new("Class", FieldType::UInt32));
     s.add_field(SchemaField::new("SubClass", FieldType::UInt32));
     s.add_field(SchemaField::new(
@@ -181,31 +181,16 @@ pub(crate) fn item_sub_class_schema() -> Schema {
     for name in ["ParrySeq", "ReadySeq", "AttackSeq", "SwingSize"] {
         s.add_field(SchemaField::new(format!("Weapon{name}"), FieldType::UInt32));
     }
-    for i in 0..8 {
-        s.add_field(SchemaField::new(
-            format!("DisplayName{i}"),
-            FieldType::String,
-        ));
-    }
-    s.add_field(SchemaField::new("DisplayNameFlags", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(
-            format!("VerboseName{i}"),
-            FieldType::String,
-        ));
-    }
-    s.add_field(SchemaField::new("VerboseNameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("DisplayName", FieldType::LocString));
+    s.add_field(SchemaField::new("VerboseName", FieldType::LocString));
     s
 }
 
-pub(crate) fn item_sub_class_mask_schema() -> Schema {
-    let mut s = Schema::new("ItemSubClassMask");
+pub(crate) fn item_sub_class_mask_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ItemSubClassMask");
     s.add_field(SchemaField::new("ClassID", FieldType::UInt32));
     s.add_field(SchemaField::new("Mask", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -214,21 +199,22 @@ pub fn load_item_sub_classes(chain: &mut Chain) -> Result<ItemSubClassCatalog> {
     let bytes = chain
         .read_file(ITEM_SUB_CLASS)
         .with_context(|| format!("reading {ITEM_SUB_CLASS}"))?;
-    let rs = parse(&bytes, item_sub_class_schema(), "ItemSubClass")?;
+    let schema = item_sub_class_schema(chain.dbc_layout());
+    let [swing_size, display_slot, verbose_slot] =
+        slots(&schema, ["WeaponSwingSize", "DisplayName", "VerboseName"])?;
+    let rs = parse(&bytes, schema, "ItemSubClass")?;
     let mask_bytes = chain
         .read_file(ITEM_SUB_CLASS_MASK)
         .with_context(|| format!("reading {ITEM_SUB_CLASS_MASK}"))?;
-    let mask_rs = parse(
-        &mask_bytes,
-        item_sub_class_mask_schema(),
-        "ItemSubClassMask",
-    )?;
+    let mask_schema = item_sub_class_mask_schema(chain.dbc_layout());
+    let [mask_name_slot] = slots(&mask_schema, ["Name"])?;
+    let mask_rs = parse(&mask_bytes, mask_schema, "ItemSubClassMask")?;
     let mut mask_groups = Vec::with_capacity(mask_rs.records().len());
     for r in mask_rs.records() {
         let (Some(class), Some(mask), Some(name)) = (
             u32_at(r, 0),
             u32_at(r, 1),
-            crate::dbc::str_at(&mask_rs, r, 2).filter(|n| !n.is_empty()),
+            crate::dbc::str_at(&mask_rs, r, mask_name_slot).filter(|n| !n.is_empty()),
         ) else {
             continue;
         };
@@ -250,12 +236,12 @@ pub fn load_item_sub_classes(chain: &mut Chain) -> Result<ItemSubClassCatalog> {
                 postrequisite_proficiency: i32_at(r, 3).unwrap_or(-1),
                 flags: u32_at(r, 4).unwrap_or(0),
                 display_flags: u32_at(r, 5).unwrap_or(0),
-                weapon_swing_size: u32_at(r, 9).unwrap_or(0),
+                weapon_swing_size: u32_at(r, swing_size).unwrap_or(0),
             },
         );
-        // The enUS verbose name (column 19) first, the display name (column 10) as fallback.
-        let display = crate::dbc::str_at(&rs, r, 10).filter(|n| !n.is_empty());
-        let name = crate::dbc::str_at(&rs, r, 19)
+        // The enUS verbose name first, the display name as fallback.
+        let display = crate::dbc::str_at(&rs, r, display_slot).filter(|n| !n.is_empty());
+        let name = crate::dbc::str_at(&rs, r, verbose_slot)
             .filter(|n| !n.is_empty())
             .or_else(|| display.clone());
         if let Some(name) = name {
@@ -388,5 +374,32 @@ mod tests {
         assert!(cat.hides_name(4, 0));
         assert!(!cat.hides_name(4, 1), "Cloth prints");
         assert!(!cat.hides_name(2, 7), "Sword prints");
+    }
+
+    /// 2.4.3's tables: the three new bag subclasses, Fishing Poles' verbose name, the renumbered
+    /// weapon-group mask, and the Engineering Bag's display flags that 2.4.3 cleared.
+    #[test]
+    fn the_2_4_3_subclasses_read_through_the_wide_names() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_item_sub_classes(&mut chain).expect("ItemSubClass.dbc");
+        assert_eq!(cat.len(), 104);
+        assert_eq!(cat.name(1, 7), Some("Leatherworking Bag"));
+        assert_eq!(cat.name(1, 5), Some("Gem Bag"));
+        assert_eq!(cat.name(2, 20), Some("Fishing Poles"));
+        assert_eq!(cat.display_name(2, 20), Some("Fishing Pole"));
+        assert_eq!(cat.flags(2, 19), 256);
+        assert_eq!(cat.weapon_swing_size(2, 0), Some(1));
+        assert_eq!(cat.display_flags(1, 4), 0, "5875: 2");
+        assert_eq!(cat.display_flags(1, 1), 4);
+        assert_eq!(cat.subclasses_of(1), [0, 1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(
+            cat.requirement_name(2, 41105).as_deref(),
+            Some("One-Handed Melee Weapon")
+        );
+        assert_eq!(
+            cat.requirement_name(2, 262_156).as_deref(),
+            Some("Ranged Weapon")
+        );
     }
 }

@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const ITEM_BAG_FAMILY: &str = "DBFilesClient\\ItemBagFamily.dbc";
 
@@ -36,13 +36,10 @@ impl ItemBagFamilyCatalog {
     }
 }
 
-pub(crate) fn item_bag_family_schema() -> Schema {
-    let mut s = Schema::new("ItemBagFamily");
+pub(crate) fn item_bag_family_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ItemBagFamily");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -51,11 +48,15 @@ pub fn load_item_bag_families(chain: &mut Chain) -> Result<ItemBagFamilyCatalog>
     let bytes = chain
         .read_file(ITEM_BAG_FAMILY)
         .with_context(|| format!("reading {ITEM_BAG_FAMILY}"))?;
-    let rs = parse(&bytes, item_bag_family_schema(), "ItemBagFamily")?;
+    let schema = item_bag_family_schema(chain.dbc_layout());
+    let [name_slot] = slots(&schema, ["Name"])?;
+    let rs = parse(&bytes, schema, "ItemBagFamily")?;
     let mut names = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
-        let (Some(id), Some(name)) = (u32_at(r, 0), str_at(&rs, r, 1).filter(|n| !n.is_empty()))
-        else {
+        let (Some(id), Some(name)) = (
+            u32_at(r, 0),
+            str_at(&rs, r, name_slot).filter(|n| !n.is_empty()),
+        ) else {
             continue;
         };
         names.insert(id, name);
@@ -85,5 +86,22 @@ mod tests {
         assert_eq!(cat.name(5), None);
         assert_eq!(cat.name(0), None, "family 0 must not render as \"NONE\"");
         assert_eq!(cat.len(), 8, "the whole shipped table");
+    }
+
+    /// 2.4.3's table: 14 families, with the four new specialised bags and 4 and 5 now present.
+    #[test]
+    fn the_2_4_3_families_name_the_new_bags() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_item_bag_families(&mut chain).expect("ItemBagFamily.dbc");
+        assert_eq!(cat.len(), 14);
+        assert_eq!(cat.name(1), Some("Arrows"));
+        assert_eq!(cat.name(4), Some("Leatherworking Supplies"));
+        assert_eq!(cat.name(5), Some("Unused"));
+        assert_eq!(cat.name(10), Some("Gems"));
+        assert_eq!(cat.name(11), Some("Mining Supplies"));
+        assert_eq!(cat.name(12), Some("Soulbound Equipment"));
+        assert_eq!(cat.name(13), Some("Vanity Pets"));
+        assert_eq!(cat.name(0), None);
     }
 }

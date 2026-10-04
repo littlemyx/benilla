@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const EMOTES_TEXT: &str = "DBFilesClient\\EmotesText.dbc";
 const EMOTES_TEXT_DATA: &str = "DBFilesClient\\EmotesTextData.dbc";
@@ -20,8 +20,9 @@ const EMOTES_TEXT_DATA: &str = "DBFilesClient\\EmotesTextData.dbc";
 /// `EmoteText[]`'s width, which the 4-bit selector indexes.
 const FORMS: usize = 16;
 
-/// Locale columns per `EmotesTextData.dbc` row: id, 8 strings and flags make the 10 fields the
-/// loader checks (`0x544579`); the client reads the slot named in `[0xc0e080]`.
+/// Locale columns read per `EmotesTextData.dbc` row: id, 8 strings and flags make the 10 fields
+/// the 1.12.1 loader checks (`0x544579`); the client reads the slot named in `[0xc0e080]`. The
+/// 2.4.3 file has 16 locale slots, of which the first 8 are read.
 const LOCALES: usize = 8;
 
 /// The joined text-emote sentence tables.
@@ -143,15 +144,12 @@ pub(crate) fn emotes_text_schema() -> Schema {
     s
 }
 
-/// `EmotesTextData.dbc`: a 1.12 `LocalizedString` block, the 40-byte record the reader checks
-/// (`cmp eax,0x28`).
-pub(crate) fn emotes_text_data_schema() -> Schema {
-    let mut s = Schema::new("EmotesTextData");
+/// `EmotesTextData.dbc`: an id and one localized string, the 40-byte record the 1.12.1 reader
+/// checks (`cmp eax,0x28`).
+pub(crate) fn emotes_text_data_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("EmotesTextData");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
-    for i in 0..LOCALES {
-        s.add_field(SchemaField::new(format!("Text{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("Flags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Text", FieldType::LocString));
     s
 }
 
@@ -174,7 +172,9 @@ pub fn load_emote_text_catalog(chain: &mut Chain) -> Result<EmoteTextCatalog> {
     let bytes = chain
         .read_file(EMOTES_TEXT_DATA)
         .with_context(|| format!("reading {EMOTES_TEXT_DATA}"))?;
-    let rs = parse(&bytes, emotes_text_data_schema(), "EmotesTextData.dbc")?;
+    let schema = emotes_text_data_schema(chain.dbc_layout());
+    let [text_slot] = slots(&schema, ["Text"])?;
+    let rs = parse(&bytes, schema, "EmotesTextData.dbc")?;
     let mut data = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -182,7 +182,7 @@ pub fn load_emote_text_catalog(chain: &mut Chain) -> Result<EmoteTextCatalog> {
         for (locale, slot) in texts.iter_mut().enumerate() {
             // `str_at` answers `None` for an empty string: the reference's blank-means-next-rung
             // test (`cmpb $0,(%edx)`).
-            *slot = str_at(&rs, r, 1 + locale);
+            *slot = str_at(&rs, r, text_slot + locale);
         }
         data.insert(id, texts);
     }
@@ -352,5 +352,28 @@ mod tests {
         }
         silent.dedup();
         assert_eq!(silent, [86, 141, 264], "the silent set is SIT/STAND/TRAIN");
+    }
+
+    /// 2.4.3's tables: 183 forms, and SERIOUS (a new emote) composes through the wide strings.
+    #[test]
+    fn the_2_4_3_tables_compose_serious() {
+        const SERIOUS: u32 = 365;
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = Chain::open(&data).expect("open patch chain");
+        let cat = load_emote_text_catalog(&mut chain).expect("load");
+        assert_eq!(cat.len(), 183);
+        assert_eq!(
+            cat.compose(SERIOUS, &line("Bob", "Jane", "Me"), 0)
+                .as_deref(),
+            Some("Bob thinks Jane is serious.")
+        );
+        assert_eq!(
+            cat.compose(SERIOUS, &line("Bob", "Me", "Me"), 0).as_deref(),
+            Some("Bob thinks you are serious.")
+        );
+        assert_eq!(
+            cat.compose(SERIOUS, &line("Bob", "", "Me"), 0).as_deref(),
+            Some("Bob thinks this is serious business.")
+        );
     }
 }

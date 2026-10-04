@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const ITEM_CLASS: &str = "DBFilesClient\\ItemClass.dbc";
 
@@ -33,15 +33,12 @@ impl ItemClassCatalog {
     }
 }
 
-pub(crate) fn item_class_schema() -> Schema {
-    let mut s = Schema::new("ItemClass");
+pub(crate) fn item_class_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ItemClass");
     s.add_field(SchemaField::new("ClassID", FieldType::UInt32));
     s.add_field(SchemaField::new("SubClassMapID", FieldType::UInt32));
     s.add_field(SchemaField::new("Flags", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -50,11 +47,15 @@ pub fn load_item_classes(chain: &mut Chain) -> Result<ItemClassCatalog> {
     let bytes = chain
         .read_file(ITEM_CLASS)
         .with_context(|| format!("reading {ITEM_CLASS}"))?;
-    let rs = parse(&bytes, item_class_schema(), "ItemClass")?;
+    let schema = item_class_schema(chain.dbc_layout());
+    let [name_slot] = slots(&schema, ["Name"])?;
+    let rs = parse(&bytes, schema, "ItemClass")?;
     let mut names = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
-        let (Some(id), Some(name)) = (u32_at(r, 0), str_at(&rs, r, 3).filter(|n| !n.is_empty()))
-        else {
+        let (Some(id), Some(name)) = (
+            u32_at(r, 0),
+            str_at(&rs, r, name_slot).filter(|n| !n.is_empty()),
+        ) else {
             continue;
         };
         names.insert(id, name);
@@ -85,5 +86,18 @@ mod tests {
         assert_eq!(cat.name(10), Some("Money(OBSOLETE)"));
         assert_eq!(cat.name(16), None);
         assert_eq!(cat.len(), 16, "the whole shipped table");
+    }
+
+    /// 2.4.3's table: the same sixteen classes, named through the wide strings.
+    #[test]
+    fn the_2_4_3_classes_are_named() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_item_classes(&mut chain).expect("ItemClass.dbc");
+        assert_eq!(cat.len(), 16);
+        assert_eq!(cat.name(0), Some("Consumable"));
+        assert_eq!(cat.name(7), Some("Trade Goods"));
+        assert_eq!(cat.name(11), Some("Quiver"));
+        assert_eq!(cat.name(15), Some("Miscellaneous"));
     }
 }

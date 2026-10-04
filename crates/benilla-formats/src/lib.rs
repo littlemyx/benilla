@@ -628,10 +628,6 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
             "SpellItemEnchantment.dbc",
             item_visuals::spell_item_enchantment_schema,
         ),
-        (
-            "ItemRandomProperties.dbc",
-            item_random_properties::item_random_properties_schema,
-        ),
         ("AreaTrigger.dbc", area_trigger::area_trigger_schema),
     ] {
         if base.eq_ignore_ascii_case(name) {
@@ -888,13 +884,11 @@ mod tests {
         }
     }
 
-    /// The tables whose schema does not fit their 2.4.3 file yet: 54 that grew by more than
-    /// localized-string widening (new columns) or whose columns are not yet read by name. An entry
+    /// The tables whose schema does not fit their 2.4.3 file yet: 25 that grew by more than
+    /// localized-string widening (new columns). An entry
     /// leaves this list when its table is converted, and a table that fits while listed fails.
     const NOT_YET_2_4_3: &[&str] = &[
-        "AreaPOI",
         "AreaTable",
-        "AuctionHouse",
         "Cfg_Categories",
         "CharacterFacialHairStyles",
         "ChatProfanity",
@@ -902,50 +896,23 @@ mod tests {
         "ChrRaces",
         "CreatureDisplayInfo",
         "CreatureDisplayInfoExtra",
-        "CreatureFamily",
         "CreatureModelData",
         "CreatureSoundData",
-        "EmotesTextData",
-        "Exhaustion",
-        "Faction",
-        "FactionGroup",
         "GameObjectDisplayInfo",
-        "GameTips",
-        "GMTicketCategory",
         "HelmetGeosetVisData",
-        "ItemBagFamily",
-        "ItemClass",
         "ItemDisplayInfo",
-        "ItemPetFood",
-        "ItemRandomProperties",
-        "ItemSet",
-        "ItemSubClass",
-        "ItemSubClassMask",
-        "Languages",
         "LightSkybox",
-        "LockType",
         "Map",
         "Material",
-        "Package",
-        "PetLoyalty",
-        "PetPersonality",
-        "ServerMessages",
-        "SkillLine",
-        "SkillLineCategory",
         "Spell",
         "SpellChainEffects",
         "SpellDispelType",
-        "SpellFocusObject",
         "SpellItemEnchantment",
-        "SpellMechanic",
-        "SpellRange",
         "SpellShapeshiftForm",
         "SpellVisual",
         "SpellVisualKit",
         "TaxiPathNode",
-        "WMOAreaTable",
         "WorldMapArea",
-        "WorldStateUI",
     ];
 
     /// The registered tables whose file header disagrees with the schema (or hand-parsed shape)

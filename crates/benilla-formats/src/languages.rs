@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const LANGUAGES: &str = "DBFilesClient\\Languages.dbc";
 const CHR_RACES: &str = "DBFilesClient\\ChrRaces.dbc";
@@ -40,13 +40,10 @@ impl DefaultLanguages {
     }
 }
 
-pub(crate) fn languages_schema() -> Schema {
-    let mut s = Schema::new("Languages");
+pub(crate) fn languages_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("Languages");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
-    for i in 0..LOCALES {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -102,13 +99,15 @@ pub fn load_languages(chain: &mut Chain) -> Result<Languages> {
     let bytes = chain
         .read_file(LANGUAGES)
         .with_context(|| format!("reading {LANGUAGES}"))?;
-    let langs = parse(&bytes, languages_schema(), "Languages.dbc")?;
+    let schema = languages_schema(chain.dbc_layout());
+    let [name_slot] = slots(&schema, ["Name"])?;
+    let langs = parse(&bytes, schema, "Languages.dbc")?;
     let mut rows = Vec::with_capacity(langs.records().len());
     for r in langs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
         let mut names: [Option<String>; LOCALES] = Default::default();
         for (locale, slot) in names.iter_mut().enumerate() {
-            *slot = str_at(&langs, r, 1 + locale);
+            *slot = str_at(&langs, r, name_slot + locale);
         }
         rows.push((id, names));
     }
@@ -120,13 +119,15 @@ pub fn load_default_languages(chain: &mut Chain) -> Result<DefaultLanguages> {
     let lang_bytes = chain
         .read_file(LANGUAGES)
         .with_context(|| format!("reading {LANGUAGES}"))?;
-    let langs = parse(&lang_bytes, languages_schema(), "Languages.dbc")?;
+    let lang_schema = languages_schema(chain.dbc_layout());
+    let [name_slot] = slots(&lang_schema, ["Name"])?;
+    let langs = parse(&lang_bytes, lang_schema, "Languages.dbc")?;
     let mut by_id: HashMap<u32, [Option<String>; LOCALES]> = HashMap::new();
     for r in langs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
         let mut names: [Option<String>; LOCALES] = Default::default();
         for (locale, slot) in names.iter_mut().enumerate() {
-            *slot = str_at(&langs, r, 1 + locale);
+            *slot = str_at(&langs, r, name_slot + locale);
         }
         by_id.insert(id, names);
     }
@@ -318,5 +319,22 @@ mod tests {
             total += p.words().len();
         }
         assert_eq!(total, 1481, "every LanguageWords row landed in a pool");
+    }
+
+    /// 2.4.3's table: 17 languages, the new Draenei, Zombie and the two binary tongues included.
+    /// (The race-to-language join also reads ChrRaces, which is not converted yet.)
+    #[test]
+    fn the_2_4_3_table_adds_draenei() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let langs = load_languages(&mut chain).expect("Languages.dbc");
+        assert_eq!(langs.len(), 17);
+        let names: Vec<(u32, &str)> = langs.names(0).collect();
+        assert_eq!(names.len(), 17);
+        assert!(names.contains(&(1, "Orcish")));
+        assert!(names.contains(&(35, "Draenei")));
+        assert!(names.contains(&(36, "Zombie")));
+        assert!(names.contains(&(37, "Gnomish Binary")));
+        assert!(names.contains(&(38, "Goblin Binary")));
     }
 }

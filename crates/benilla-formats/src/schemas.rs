@@ -62,7 +62,7 @@ macro_rules! wide {
 
 pub(crate) static TABLES: &[Table] = &[
     plain!("AnimationData", anim_data::schema()),
-    plain!("AreaPOI", area_poi::schema()),
+    wide!("AreaPOI", area_poi::schema),
     plain!("AreaTable", area_table::schema()),
     plain!("AreaTable", area_sound::area_schema()),
     Table {
@@ -70,7 +70,7 @@ pub(crate) static TABLES: &[Table] = &[
         shape: Shape::Schema(|l| dbc::id_name_schema("AreaTable", l, 11, 25)),
     },
     plain!("AreaTrigger", area_trigger::area_trigger_schema()),
-    plain!("AuctionHouse", auction_house::auction_house_schema()),
+    wide!("AuctionHouse", auction_house::auction_house_schema),
     plain!("BankBagSlotPrices", bank_bag_slot_prices::schema()),
     plain!("CameraShakes", camera_shakes::camera_shakes_schema()),
     plain!("Cfg_Categories", cfg_categories::cfg_categories_schema()),
@@ -111,7 +111,7 @@ pub(crate) static TABLES: &[Table] = &[
         "CreatureDisplayInfoExtra",
         creatures::creature_display_info_extra_schema()
     ),
-    plain!("CreatureFamily", creature_families::family_schema()),
+    wide!("CreatureFamily", creature_families::family_schema),
     plain!("CreatureModelData", creatures::creature_model_data_schema()),
     plain!("CreatureSoundData", creature_sound::csd_schema()),
     wide!("CreatureType", creature_types::creature_type_schema),
@@ -123,12 +123,12 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("DurabilityQuality", durability::qualities_schema()),
     plain!("Emotes", emotes::schema("Emotes", 7, &[1])),
     plain!("EmotesText", emote_text::emotes_text_schema()),
-    plain!("EmotesTextData", emote_text::emotes_text_data_schema()),
+    wide!("EmotesTextData", emote_text::emotes_text_data_schema),
     plain!("EmotesTextSound", emotes::schema("EmotesTextSound", 5, &[])),
     plain!("EnvironmentalDamage", environmental_damage::schema()),
-    plain!("Exhaustion", exhaustion::exhaustion_schema()),
-    plain!("Faction", factions::faction_schema()),
-    plain!("FactionGroup", factions::faction_group_schema()),
+    wide!("Exhaustion", exhaustion::exhaustion_schema),
+    wide!("Faction", factions::faction_schema),
+    wide!("FactionGroup", factions::faction_group_schema),
     plain!("FactionTemplate", factions::faction_template_schema()),
     plain!(
         "FootprintTextures",
@@ -139,35 +139,32 @@ pub(crate) static TABLES: &[Table] = &[
         footsteps::n_u32_schema("FootstepTerrainLookup", 5, &[])
     ),
     plain!("GameObjectDisplayInfo", gameobjects::schema()),
-    plain!("GameTips", game_tips::schema()),
-    plain!(
+    wide!("GameTips", game_tips::schema),
+    wide!(
         "GMTicketCategory",
-        gm_ticket_category::gm_ticket_category_schema()
+        gm_ticket_category::gm_ticket_category_schema
     ),
     plain!("GroundEffectDoodad", ground_effects::doodad_schema()),
     plain!("GroundEffectTexture", ground_effects::texture_schema()),
     plain!("HelmetGeosetVisData", characters::helmet_vis_schema()),
-    plain!("ItemBagFamily", itembagfamily::item_bag_family_schema()),
-    plain!("ItemClass", itemclass::item_class_schema()),
+    wide!("ItemBagFamily", itembagfamily::item_bag_family_schema),
+    wide!("ItemClass", itemclass::item_class_schema),
     plain!("ItemDisplayInfo", items::item_display_info_schema()),
     plain!("ItemGroupSounds", item_sounds::item_group_sounds_schema()),
-    plain!("ItemPetFood", creature_families::food_schema()),
-    plain!(
+    wide!("ItemPetFood", creature_families::food_schema),
+    wide!(
         "ItemRandomProperties",
-        item_random_properties::item_random_properties_schema()
+        item_random_properties::item_random_properties_schema
     ),
-    plain!("ItemSet", itemsets::item_set_schema()),
-    plain!("ItemSubClass", itemsubclass::item_sub_class_schema()),
-    plain!(
-        "ItemSubClassMask",
-        itemsubclass::item_sub_class_mask_schema()
-    ),
+    wide!("ItemSet", itemsets::item_set_schema),
+    wide!("ItemSubClass", itemsubclass::item_sub_class_schema),
+    wide!("ItemSubClassMask", itemsubclass::item_sub_class_mask_schema),
     plain!(
         "ItemVisualEffects",
         item_visuals::item_visual_effects_schema()
     ),
     plain!("ItemVisuals", item_visuals::item_visuals_schema()),
-    plain!("Languages", languages::languages_schema()),
+    wide!("Languages", languages::languages_schema),
     plain!("LanguageWords", languages::language_words_schema()),
     plain!("Light", light::light_schema()),
     plain!("LightFloatBand", light::float_band_schema()),
@@ -176,17 +173,17 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("LightSkybox", light::light_skybox_schema()),
     plain!("LoadingScreens", loading_screen::schema()),
     plain!("Lock", lock::schema()),
-    plain!("LockType", lock_type::schema()),
+    wide!("LockType", lock_type::schema),
     plain!("Map", maps::map_schema()),
     plain!("Material", material::schema()),
     plain!("NPCSounds", npc_greeting::npcsounds_schema()),
-    plain!("Package", packages::package_schema()),
+    wide!("Package", packages::package_schema),
     plain!(
         "PageTextMaterial",
         page_text_material::page_text_material_schema()
     ),
-    plain!("PetLoyalty", pet_stats::loyalty_schema()),
-    plain!("PetPersonality", pet_stats::personality_schema()),
+    wide!("PetLoyalty", pet_stats::loyalty_schema),
+    wide!("PetPersonality", pet_stats::personality_schema),
     Table {
         name: "QuestInfo",
         shape: Shape::Schema(|l| dbc::id_name_schema("QuestInfo", l, 1, 10)),
@@ -195,14 +192,11 @@ pub(crate) static TABLES: &[Table] = &[
         name: "QuestSort",
         shape: Shape::Schema(|l| dbc::id_name_schema("QuestSort", l, 1, 10)),
     },
-    plain!("ServerMessages", server_messages::schema()),
+    wide!("ServerMessages", server_messages::schema),
     plain!("SheatheSoundLookups", sheathe::schema()),
-    plain!("SkillLine", skill_lines::skill_line_schema()),
+    wide!("SkillLine", skill_lines::skill_line_schema),
     plain!("SkillLineAbility", skill_lines::skill_line_ability_schema()),
-    plain!(
-        "SkillLineCategory",
-        skill_lines::skill_line_category_schema()
-    ),
+    wide!("SkillLineCategory", skill_lines::skill_line_category_schema),
     plain!(
         "SkillRaceClassInfo",
         skill_lines::skill_race_class_info_schema()
@@ -225,15 +219,15 @@ pub(crate) static TABLES: &[Table] = &[
         "SpellEffectCameraShakes",
         camera_shakes::spell_effect_camera_shakes_schema()
     ),
-    plain!("SpellFocusObject", spell_focus::schema()),
+    wide!("SpellFocusObject", spell_focus::schema),
     plain!("SpellIcon", dbc::spell_icon_schema()),
     plain!(
         "SpellItemEnchantment",
         item_visuals::spell_item_enchantment_schema()
     ),
-    plain!("SpellMechanic", spell_mechanic::schema()),
+    wide!("SpellMechanic", spell_mechanic::schema),
     plain!("SpellRadius", spells::spell_radius_schema()),
-    plain!("SpellRange", spells::spell_range_schema()),
+    wide!("SpellRange", spells::spell_range_schema),
     plain!("SpellShapeshiftForm", spells::shapeshift_form_schema()),
     plain!("SpellVisual", spell_visual::spell_visual_schema()),
     plain!("SpellVisualEffectName", spell_visual::effect_name_schema()),
@@ -259,11 +253,11 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("VocalUISounds", vocal_ui_sounds::vocal_ui_sounds_schema()),
     plain!("WeaponImpactSounds", weapon_impact::schema()),
     plain!("WeaponSwingSounds2", weapon_swing::schema()),
-    plain!("WMOAreaTable", wmo_area::schema()),
+    wide!("WMOAreaTable", wmo_area::schema),
     plain!("WorldMapArea", world_map_area::schema()),
     plain!("WorldMapContinent", world_map_continent::schema()),
     plain!("WorldMapOverlay", world_map_overlay::schema()),
-    plain!("WorldStateUI", world_state_ui::schema()),
+    wide!("WorldStateUI", world_state_ui::schema),
     plain!("ZoneIntroMusicTable", area_sound::intro_schema()),
     plain!("ZoneMusic", area_sound::zone_music_schema()),
 ];

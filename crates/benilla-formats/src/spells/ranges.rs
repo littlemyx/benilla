@@ -7,7 +7,8 @@ use crate::Chain;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, u32_at};
+use crate::dbc::{f32_at, parse, slots, u32_at};
+use crate::DbcLayout;
 
 /// One `SpellRange.dbc` row, in yards.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -212,17 +213,15 @@ impl SpellRangeCatalog {
 }
 
 const SPELL_RANGE: &str = "DBFilesClient\\SpellRange.dbc";
-const SPELL_RANGE_FIELDS: usize = 22;
 
-pub(crate) fn spell_range_schema() -> Schema {
-    let mut schema = Schema::new("SpellRange");
-    for i in 0..SPELL_RANGE_FIELDS {
-        match i {
-            1 => schema.add_field(SchemaField::new("MinRange", FieldType::Float32)),
-            2 => schema.add_field(SchemaField::new("MaxRange", FieldType::Float32)),
-            _ => schema.add_field(SchemaField::new(format!("F{i}"), FieldType::UInt32)),
-        }
-    }
+pub(crate) fn spell_range_schema(layout: DbcLayout) -> Schema {
+    let mut schema = layout.schema("SpellRange");
+    schema.add_field(SchemaField::new("ID", FieldType::UInt32));
+    schema.add_field(SchemaField::new("MinRange", FieldType::Float32));
+    schema.add_field(SchemaField::new("MaxRange", FieldType::Float32));
+    schema.add_field(SchemaField::new("Flags", FieldType::UInt32));
+    schema.add_field(SchemaField::new("DisplayName", FieldType::LocString));
+    schema.add_field(SchemaField::new("DisplayNameShort", FieldType::LocString));
     schema
 }
 
@@ -231,16 +230,18 @@ pub fn load_spell_ranges(chain: &mut Chain) -> Result<SpellRangeCatalog> {
     let bytes = chain
         .read_file(SPELL_RANGE)
         .context("reading SpellRange.dbc")?;
-    let set = parse(&bytes, spell_range_schema(), "SpellRange.dbc")?;
+    let schema = spell_range_schema(chain.dbc_layout());
+    let [min_slot, max_slot, flags_slot] = slots(&schema, ["MinRange", "MaxRange", "Flags"])?;
+    let set = parse(&bytes, schema, "SpellRange.dbc")?;
     let mut ranges = HashMap::new();
     for r in set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
         ranges.insert(
             id,
             SpellRange {
-                min: f32_at(r, 1).unwrap_or(0.0),
-                max: f32_at(r, 2).unwrap_or(0.0),
-                flags: u32_at(r, 3).unwrap_or(0),
+                min: f32_at(r, min_slot).unwrap_or(0.0),
+                max: f32_at(r, max_slot).unwrap_or(0.0),
+                flags: u32_at(r, flags_slot).unwrap_or(0),
             },
         );
     }
@@ -771,5 +772,21 @@ mod tests {
         let nuke = ranges.get(4).expect("row 4");
         assert_eq!((nuke.min, nuke.max), (0.0, 30.0));
         assert!(!nuke.is_melee());
+    }
+
+    /// 2.4.3's table: 35 ranges, the new eight-yard row 137 and the 5-45 Long Range Hunter row 138.
+    #[test]
+    fn real_2_4_3_spell_ranges_read_the_new_rows() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let ranges = load_spell_ranges(&mut chain).expect("load SpellRange");
+        assert_eq!(ranges.len(), 35);
+        let melee = ranges.get(2).expect("row 2");
+        assert_eq!((melee.min, melee.max), (0.0, 5.0));
+        assert!(melee.is_melee());
+        let eight = ranges.get(137).expect("row 137");
+        assert_eq!((eight.min, eight.max, eight.flags), (0.0, 8.0, 0));
+        let hunter = ranges.get(138).expect("row 138");
+        assert_eq!((hunter.min, hunter.max, hunter.flags), (5.0, 45.0, 0));
     }
 }

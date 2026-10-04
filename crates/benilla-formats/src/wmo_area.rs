@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 /// One `WMOAreaTable` row's audio fields, `0` for none or inherit.
 #[derive(Clone)]
@@ -106,8 +106,8 @@ impl WmoAreaCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("WMOAreaTable");
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("WMOAreaTable");
     for name in [
         "ID",
         "WMOID",
@@ -123,10 +123,7 @@ pub(crate) fn schema() -> Schema {
     ] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
-    s.add_field(SchemaField::new("AreaName", FieldType::String));
-    for i in 12..20 {
-        s.add_field(SchemaField::new(format!("_pad{i}"), FieldType::UInt32));
-    }
+    s.add_field(SchemaField::new("AreaName", FieldType::LocString));
     s
 }
 
@@ -135,7 +132,9 @@ pub fn load_wmo_area_catalog(chain: &mut Chain) -> Result<WmoAreaCatalog> {
     let bytes = chain
         .read_file("DBFilesClient\\WMOAreaTable.dbc")
         .context("reading WMOAreaTable.dbc")?;
-    let rs = parse(&bytes, schema(), "WMOAreaTable")?;
+    let schema = schema(chain.dbc_layout());
+    let [name_slot] = slots(&schema, ["AreaName"])?;
+    let rs = parse(&bytes, schema, "WMOAreaTable")?;
     let mut groups = HashMap::new();
     let mut defaults = HashMap::new();
     for r in rs.records() {
@@ -149,7 +148,7 @@ pub fn load_wmo_area_catalog(chain: &mut Chain) -> Result<WmoAreaCatalog> {
             zone_music: u32_at(r, 7).unwrap_or(0),
             intro_sound: u32_at(r, 8).unwrap_or(0),
             area_table_id: u32_at(r, 10).unwrap_or(0),
-            name: str_at(&rs, r, 11).unwrap_or_default(),
+            name: str_at(&rs, r, name_slot).unwrap_or_default(),
         };
         if group == u32::MAX {
             defaults.insert((wmo_id, name_set), area);
@@ -201,5 +200,24 @@ mod tests {
             .resolve(53, 2, 9999)
             .or_else(|| cat.resolve(53, 0, 9999));
         assert!(inn.is_some(), "the Goldshire inn WMO has rows");
+    }
+
+    /// 2.4.3's table: 16221 distinct keys of its 16234 rows, Deepwater Tavern's whole-WMO row and
+    /// the Shepherd's Gate group row read through the wide name.
+    #[test]
+    fn the_2_4_3_table_names_the_new_wmo_rows() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_wmo_area_catalog(&mut chain).expect("load WMOAreaTable");
+        assert_eq!(cat.len(), 16221);
+        let tavern = cat.default_row(53, 1).expect("WMO 53, name set 1");
+        assert_eq!(tavern.name, "Deepwater Tavern");
+        assert_eq!(tavern.id, 20255);
+        assert_eq!(tavern.sound_provider, [0, 11]);
+        assert_eq!((tavern.ambience, tavern.zone_music), (170, 156));
+        assert_eq!(tavern.area_table_id, 2104);
+        let gate = cat.group_row(5099, 0, 23593).expect("WMO 5099 group 23593");
+        assert_eq!(gate.name, "The Shepherd's Gate");
+        assert_eq!(gate.id, 42933);
     }
 }

@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, slots, str_at, u32_at};
+use crate::{Chain, DbcLayout};
 
 const AUCTION_HOUSE: &str = "DBFilesClient\\AuctionHouse.dbc";
 
@@ -55,16 +55,13 @@ impl AuctionHouseCatalog {
     }
 }
 
-pub(crate) fn auction_house_schema() -> Schema {
-    let mut s = Schema::new("AuctionHouse");
+pub(crate) fn auction_house_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("AuctionHouse");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("FactionID", FieldType::UInt32));
     s.add_field(SchemaField::new("DepositPercent", FieldType::UInt32));
     s.add_field(SchemaField::new("CutPercent", FieldType::UInt32));
-    for i in 0..8 {
-        s.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
-    }
-    s.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
+    s.add_field(SchemaField::new("Name", FieldType::LocString));
     s
 }
 
@@ -73,7 +70,9 @@ pub fn load_auction_houses(chain: &mut Chain) -> Result<AuctionHouseCatalog> {
     let bytes = chain
         .read_file(AUCTION_HOUSE)
         .with_context(|| format!("reading {AUCTION_HOUSE}"))?;
-    let rs = parse(&bytes, auction_house_schema(), "AuctionHouse")?;
+    let schema = auction_house_schema(chain.dbc_layout());
+    let [name_slot] = slots(&schema, ["Name"])?;
+    let rs = parse(&bytes, schema, "AuctionHouse")?;
     let mut houses = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let (Some(id), Some(faction), Some(deposit_percent), Some(cut_percent)) =
@@ -87,7 +86,7 @@ pub fn load_auction_houses(chain: &mut Chain) -> Result<AuctionHouseCatalog> {
                 faction,
                 deposit_percent,
                 cut_percent,
-                name: str_at(&rs, r, 4).unwrap_or_default(),
+                name: str_at(&rs, r, name_slot).unwrap_or_default(),
             },
         );
     }
@@ -123,5 +122,19 @@ mod tests {
         assert_eq!(neutral.name, "Blackwater Auction House");
 
         assert_eq!(cat.deposit_percent(8), None);
+    }
+
+    /// 2.4.3's table: the same seven houses, the neutral one's name read through the wide string.
+    #[test]
+    fn the_2_4_3_table_reads_the_neutral_house() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_auction_houses(&mut chain).expect("AuctionHouse.dbc");
+        assert_eq!(cat.len(), 7);
+        let neutral = cat.get(7).expect("house 7");
+        assert_eq!(neutral.faction, 369);
+        assert_eq!(neutral.deposit_percent, 25);
+        assert_eq!(neutral.cut_percent, 15);
+        assert_eq!(neutral.name, "Blackwater Auction House");
     }
 }
