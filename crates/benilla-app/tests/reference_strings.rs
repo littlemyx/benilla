@@ -142,6 +142,16 @@ fn no_user_facing_sentence_is_written_in_rust_when_the_reference_ships_one() {
     let data = benilla_formats::wow_data_or_skip!();
     let mut chain = benilla_formats::open_chain(&data).expect("open chain");
     let mut shipped: HashMap<String, Vec<String>> = HashMap::new();
+    // The client's locale, from the marker its `Localization.lua` defines.
+    let marker = chain
+        .read_file("Interface\\FrameXML\\Localization.lua")
+        .expect("Localization.lua");
+    let marker = String::from_utf8_lossy(&marker);
+    let en_us = marker.contains("LOCALE_enUS = true");
+    assert!(
+        en_us != marker.contains("LOCALE_enGB = true"),
+        "the client is neither enUS nor enGB"
+    );
     // The base tables and the locale patches: where `Localize()` redefines a key, its wording is
     // the one the player reads.
     for file in [
@@ -166,8 +176,15 @@ fn no_user_facing_sentence_is_written_in_rust_when_the_reference_ships_one() {
             }
         }
         // Every source must contribute: the `Localize()` files wrap their assignments in a
-        // function, a shape the base tables never have.
-        assert!(taken > 0, "{file} contributed no sentences");
+        // function, a shape the base tables never have. The enUS client's `Localize()` is
+        // empty, so its locale files have nothing to give.
+        let empty_patch =
+            en_us && (file.ends_with("Localization.lua") || file.ends_with("GlueLocalization.lua"));
+        assert!(taken > 0 || empty_patch, "{file} contributed no sentences");
+        assert!(
+            !empty_patch || taken == 0,
+            "{file} patches strings on an enUS client"
+        );
     }
 
     let mut sources = Vec::new();
