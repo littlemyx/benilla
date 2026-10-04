@@ -101,7 +101,13 @@ fn the_production_load_stays_inside_the_1_12_surface() {
         "the layer defined no global: it did not load"
     );
 
-    let (globals, methods) = production_beyond(&s, &engine);
+    let (mut globals, methods) = production_beyond(&s, &engine);
+    // The enUS `Localization.lua` defines `LOCALE_enUS`; the table lists only the enGB marker.
+    let data = benilla_formats::wow_data_or_skip!();
+    let mut chain = benilla_formats::open_chain(&data).expect("open chain");
+    if crate::test_support::client_locale(&mut chain) == "enUS" {
+        globals.retain(|n| n != "LOCALE_enUS");
+    }
     assert!(
         globals.is_empty(),
         "the production load exposes {} global(s) the 1.12.1 client does not:\n    {}\n\n\

@@ -215,18 +215,32 @@ end
         let base = parse_glue_strings(&String::from_utf8_lossy(&base));
         let table = table_from_chain(&mut chain);
 
-        for key in ["AUTH_BANNED", "LOGIN_UNKNOWN_ACCOUNT", "PVP_PARENTHESES"] {
-            let before = base.get(key).expect("key in the base file").as_str();
-            let after = table.get(key).expect("key in the patched table");
-            assert_ne!(before, after, "{key} was not patched by Localize()");
-        }
+        let locale = crate::test_support::client_locale(&mut chain);
+        if locale == "enGB" {
+            for key in ["AUTH_BANNED", "LOGIN_UNKNOWN_ACCOUNT", "PVP_PARENTHESES"] {
+                let before = base.get(key).expect("key in the base file").as_str();
+                let after = table.get(key).expect("key in the patched table");
+                assert_ne!(before, after, "{key} was not patched by Localize()");
+            }
 
-        // The enGB patch drops the parentheses: `CharSelectRealmName` reads "Realm PVP".
-        assert_eq!(
-            base.get("PVP_PARENTHESES").map(String::as_str),
-            Some("(PVP)")
-        );
-        assert_eq!(table.get("PVP_PARENTHESES"), Some("PVP"));
+            // The enGB patch drops the parentheses: `CharSelectRealmName` reads "Realm PVP".
+            assert_eq!(
+                base.get("PVP_PARENTHESES").map(String::as_str),
+                Some("(PVP)")
+            );
+            assert_eq!(table.get("PVP_PARENTHESES"), Some("PVP"));
+        } else {
+            // The enUS `Localize()` is empty: the table is the base file, key for key.
+            assert_eq!(locale, "enUS");
+            for key in ["AUTH_BANNED", "LOGIN_UNKNOWN_ACCOUNT", "PVP_PARENTHESES"] {
+                assert_eq!(
+                    base.get(key).map(String::as_str),
+                    table.get(key),
+                    "{key} was patched on enUS"
+                );
+            }
+            assert_eq!(table.get("PVP_PARENTHESES"), Some("(PVP)"));
+        }
 
         // The patch overwrites keys; it does not replace the table.
         assert!(table.get("FACTION_INFO_HORDE").is_some(), "base lost");
