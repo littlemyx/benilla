@@ -1129,19 +1129,19 @@ pub(crate) fn fire_transitions(
     // `UNIT_FLAGS` (id 40), the per-field watch bridge: `0x51bbb0` registers one watch per named
     // unit field, and on any change of the dword the notifier `0x465570` fires `0x51bd50` →
     // `0x515e50`, once per token naming the unit, `arg1` the token. The stock pet bar reads it.
-    if edges.moved(cur.guid, benilla_protocol::field::FIELD_UNIT_FLAGS) {
+    if edges.moved(cur.guid, |t| t.unit_flags) {
         script.fire_event("UNIT_FLAGS", vec![tok()]);
     }
     // `PLAYER_FLAGS_CHANGED` (id 407, `0x5eea35` into `0x515e50`): no bit test after the XOR diff
     // (`0x5ee9b8`) and above the local-GUID gate (`0x5eea93`), so any bit of any player fires it,
     // once per token naming it (none, nothing: `0x515e63`). The sole 1.12 consumer is the target
     // frame's leader icon (`TargetFrame.lua:88-95`); 1.12 has no AFK/DND unit-frame badge.
-    if edges.moved(cur.guid, benilla_protocol::field::FIELD_PLAYER_FLAGS) {
+    if edges.moved(cur.guid, |t| t.player_flags) {
         script.fire_event("PLAYER_FLAGS_CHANGED", vec![tok()]);
     }
     // `UNIT_DYNAMIC_FLAGS` (id 137), the bridge's third arm: the watch is one dword, so any bit
     // fires it. No stock file registers it; addons do, to repaint the tapped state.
-    if edges.moved(cur.guid, benilla_protocol::field::FIELD_UNIT_DYNAMIC_FLAGS) {
+    if edges.moved(cur.guid, |t| t.unit_dynamic_flags) {
         script.fire_event("UNIT_DYNAMIC_FLAGS", vec![tok()]);
     }
     // 1.12 names the power events per resource (`UNIT_MANA`, `UNIT_MAXRAGE`, …;
@@ -2543,7 +2543,7 @@ mod tests {
             flags: 0x8,
             ..Default::default()
         };
-        let moved = FieldEdges::of(&[(PET, benilla_protocol::field::FIELD_UNIT_FLAGS)]);
+        let moved = FieldEdges::of(&[(PET, benilla_protocol::messages::FIELDS_5875.unit_flags)]);
         assert_eq!(
             fired(
                 Some(base.clone()),
@@ -2573,7 +2573,7 @@ mod tests {
             fired(
                 Some(base.clone()),
                 base.clone(),
-                &FieldEdges::of(&[(PET + 1, benilla_protocol::field::FIELD_UNIT_FLAGS)]),
+                &FieldEdges::of(&[(PET + 1, benilla_protocol::messages::FIELDS_5875.unit_flags)]),
             ),
             Vec::<String>::new()
         );
@@ -2749,7 +2749,7 @@ mod tests {
             ghost: flags & 0x10 != 0,
             ..base.clone()
         };
-        let moved = FieldEdges::of(&[(THEM, benilla_protocol::field::FIELD_PLAYER_FLAGS)]);
+        let moved = FieldEdges::of(&[(THEM, benilla_protocol::messages::FIELDS_5875.player_flags)]);
         let still = FieldEdges::default();
 
         // `PLAYER_FLAGS_GROUP_LEADER`, the bit the 1.12 target frame reads.
@@ -2798,7 +2798,10 @@ mod tests {
             s.eval::<Vec<String>>("return SEEN").unwrap()
         };
         const MOB: u64 = 0xF130_0000_0000_0007;
-        let moved = FieldEdges::of(&[(MOB, benilla_protocol::field::FIELD_UNIT_DYNAMIC_FLAGS)]);
+        let moved = FieldEdges::of(&[(
+            MOB,
+            benilla_protocol::messages::FIELDS_5875.unit_dynamic_flags,
+        )]);
         let still = FieldEdges::default();
         let with = |dyn_flags: u32| UnitState {
             exists: true,

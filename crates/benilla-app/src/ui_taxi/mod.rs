@@ -309,7 +309,7 @@ impl Plugin for UiTaxiPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use benilla_protocol::field::FIELD_UNIT_FLAGS;
+    const FIELD_UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
     use benilla_protocol::ObjectFields;
 
     /// `1` with the bit, `nil` without it; the feed reads nothing about server splines.
@@ -358,7 +358,8 @@ mod tests {
     /// show 0 (`0x4dc423`).
     #[test]
     fn the_map_shows_discounted_fares_and_the_express_sends_the_raw_sum() {
-        use benilla_protocol::field::FIELD_UNIT_FACTIONTEMPLATE;
+        const FIELD_UNIT_FACTIONTEMPLATE: u16 =
+            benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
         use bevy::ecs::system::RunSystemOnce;
 
         /// `UNIT_FIELD_BYTES_0`, `PLAYER_BYTES_3`: absolute descriptor indices.

@@ -960,8 +960,7 @@ pub(super) fn route_cast_visuals(
 }
 
 /// The reference's aura watch span (`0x604d00`, registered at `0x604226`): from
-/// `FIELD_UNIT_AURA`, 54 dwords, the 48 slot ids and the 6 packed flag words.
-const AURA_WATCH_BASE: u16 = benilla_protocol::field::FIELD_UNIT_AURA;
+/// `UNIT_FIELD_AURA`, 54 dwords, the 48 slot ids and the 6 packed flag words.
 const AURA_WATCH_SPAN: u16 = 54;
 
 /// Arm and reap each aura's state kit (stage 2) off the unit's `UNIT_AURA` slots: a spell entering
@@ -998,7 +997,7 @@ pub(crate) fn arm_aura_state_fx(
             edges
                 .read()
                 .filter(|e| {
-                    e.unit_array_slot(AURA_WATCH_BASE, AURA_WATCH_SPAN)
+                    e.unit_array_slot(e.fields.unit_aura, AURA_WATCH_SPAN)
                         .is_some()
                 })
                 .map(|e| e.entity),
@@ -1104,20 +1103,16 @@ pub(super) fn arm_loot_fx(
     let scan = if full_sweep {
         units.iter().collect::<Vec<_>>()
     } else {
-        use benilla_protocol::field::{
-            FIELD_CORPSE_DYNAMIC_FLAGS, FIELD_UNIT_DYNAMIC_FLAGS, FIELD_UNIT_HEALTH,
-            FIELD_UNIT_MAXHEALTH,
-        };
         let mut due: EntityHashSet = arrived.iter().collect();
         due.extend(
             edges
                 .read()
                 .filter(|e| {
-                    e.unit_field(FIELD_UNIT_DYNAMIC_FLAGS)
-                        || e.unit_field(FIELD_UNIT_HEALTH)
-                        || e.unit_field(FIELD_UNIT_MAXHEALTH)
+                    e.unit_field(e.fields.unit_dynamic_flags)
+                        || e.unit_field(e.fields.unit_health)
+                        || e.unit_field(e.fields.unit_maxhealth)
                         || (e.kind == benilla_protocol::messages::ObjectType::Corpse
-                            && e.index == FIELD_CORPSE_DYNAMIC_FLAGS)
+                            && e.index == e.fields.corpse_dynamic_flags)
                 })
                 .map(|e| e.entity),
         );
@@ -1177,7 +1172,7 @@ pub(super) fn arm_level_up_fx(
     mut fx: MessageWriter<SpellKitFx>,
 ) {
     for e in edges.read() {
-        if !e.unit_field(benilla_protocol::field::FIELD_UNIT_LEVEL) {
+        if !e.unit_field(e.fields.unit_level) {
             continue;
         }
         let Some((effect, path)) = visuals
@@ -1217,7 +1212,7 @@ pub(super) fn arm_mount_poof_fx(
 ) {
     for e in edges.read() {
         // A dismount spawns nothing; the edge stream skips creation.
-        if !e.unit_field(benilla_protocol::field::FIELD_UNIT_MOUNTDISPLAYID) || e.new == 0 {
+        if !e.unit_field(e.fields.unit_mountdisplayid) || e.new == 0 {
             continue;
         }
         let Some((effect, path)) = visuals
@@ -1279,7 +1274,7 @@ pub(super) fn arm_morph_latch(
     if let Some(spells) = spells.as_deref() {
         for e in edges.read() {
             if e.unit_array_slot(
-                benilla_protocol::field::FIELD_UNIT_AURA,
+                e.fields.unit_aura,
                 u16::from(benilla_protocol::messages::UNIT_AURA_SLOTS),
             )
             .is_none()

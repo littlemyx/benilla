@@ -743,7 +743,8 @@ mod tests {
     /// [`tabbed_world`]'s seating, into any world.
     fn seat_tabbed(world: &mut World) -> crossbeam_channel::Receiver<ClientCommand> {
         use crate::net::{Guid, GuidIndex, NetEntity, ObjectStore, SelfPlayer};
-        use benilla_protocol::field::{FIELD_UNIT_FLAGS, FIELD_UNIT_HEALTH};
+        const FIELD_UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
+        const FIELD_UNIT_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
         use benilla_protocol::messages::{ObjectFields, ObjectType};
         use benilla_protocol::EntityKind::{GameObject, Unit};
         let unit = |kind, type_mask, pairs: &[(u16, u32)]| {
@@ -943,7 +944,9 @@ mod tests {
     #[test]
     fn looting_a_hostile_body_while_swinging_never_swings_at_it() {
         use crate::net::{ObjectStore, SelfPlayer};
-        use benilla_protocol::field::{FIELD_UNIT_FACTIONTEMPLATE, FIELD_UNIT_HEALTH};
+        const FIELD_UNIT_FACTIONTEMPLATE: u16 =
+            benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
+        const FIELD_UNIT_HEALTH: u16 = benilla_protocol::messages::FIELDS_5875.unit_health;
         use benilla_protocol::messages::{ObjectFields, ObjectType};
         const UNIT_FIELD_BYTES_0: u16 = benilla_protocol::messages::FIELDS_5875.unit_bytes_0;
         let data = benilla_formats::wow_data_or_skip!();

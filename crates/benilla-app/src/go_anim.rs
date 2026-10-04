@@ -252,7 +252,7 @@ fn sync_wire_go_state(
     let mut live = gos.p1();
     for e in edges.read() {
         if e.kind != benilla_protocol::messages::ObjectType::GameObject
-            || e.index != benilla_protocol::field::FIELD_GAMEOBJECT_STATE
+            || e.index != e.fields.gameobject_state
         {
             continue;
         }
@@ -575,7 +575,7 @@ fn drive_go_collision(
 ) {
     let state_edges = edges.read().filter(|e| {
         e.kind == benilla_protocol::messages::ObjectType::GameObject
-            && e.index == benilla_protocol::field::FIELD_GAMEOBJECT_STATE
+            && e.index == e.fields.gameobject_state
     });
     let mut due: bevy::ecs::entity::EntityHashSet = arrived.iter().collect();
     due.extend(state_edges.map(|e| e.entity));

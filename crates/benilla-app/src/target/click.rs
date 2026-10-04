@@ -2492,7 +2492,7 @@ mod tests {
     /// Our body hostile to nobody in particular and a wolf three yards off, the attack cursor on
     /// it.
     fn wolf_world() -> (World, Entity, crossbeam_channel::Receiver<ClientCommand>) {
-        const F_UNIT_FLAGS: u16 = benilla_protocol::field::FIELD_UNIT_FLAGS;
+        const F_UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
         let (mut world, _vendor, rx) = walking_world(Vec3::ZERO, false);
         let me = world
             .query_filtered::<Entity, With<SelfPlayer>>()
@@ -2619,7 +2619,10 @@ mod tests {
         let corpse = world
             .spawn((
                 Guid(CORPSE),
-                store(&[(benilla_protocol::field::FIELD_CORPSE_DYNAMIC_FLAGS, 0x1)]),
+                store(&[(
+                    benilla_protocol::messages::FIELDS_5875.corpse_dynamic_flags,
+                    0x1,
+                )]),
                 Transform::from_xyz(0.0, 0.0, -12.0),
             ))
             .id();
@@ -2900,7 +2903,7 @@ mod tests {
     /// The mounted gate (`0x60c1bc`) skips the walk and the swing alike.
     #[test]
     fn a_mounted_attack_does_not_walk() {
-        const F_MOUNT: u16 = benilla_protocol::field::FIELD_UNIT_MOUNTDISPLAYID;
+        const F_MOUNT: u16 = benilla_protocol::messages::FIELDS_5875.unit_mountdisplayid;
         let (mut world, _vendor, rx) = walking_world(Vec3::new(14.0, 0.0, 0.0), true);
         let me = world
             .query_filtered::<Entity, With<SelfPlayer>>()
@@ -3016,7 +3019,10 @@ mod tests {
         let corpse = world
             .spawn((
                 Guid(CORPSE),
-                store(&[(benilla_protocol::field::FIELD_CORPSE_DYNAMIC_FLAGS, 0x1)]),
+                store(&[(
+                    benilla_protocol::messages::FIELDS_5875.corpse_dynamic_flags,
+                    0x1,
+                )]),
                 Transform::from_xyz(0.0, 0.0, at),
             ))
             .id();

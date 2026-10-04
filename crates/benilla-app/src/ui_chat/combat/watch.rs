@@ -107,7 +107,7 @@ pub(crate) fn death_lines(
     mut log: ResMut<ChatLog>,
 ) {
     for e in edges.read() {
-        if !(e.unit_field(benilla_protocol::field::FIELD_UNIT_HEALTH) && e.old > 0 && e.new == 0) {
+        if !(e.unit_field(e.fields.unit_health) && e.old > 0 && e.new == 0) {
             continue;
         }
         let Ok((_, store)) = stores.get(e.entity) else {
@@ -159,7 +159,6 @@ pub(crate) fn aura_lines(
     poses: Query<&Transform>,
     mut log: ResMut<ChatLog>,
 ) {
-    use benilla_protocol::field::{FIELD_UNIT_AURA, FIELD_UNIT_AURAAPPLICATIONS};
     /// Slots below it are helpful (`0x61238e`).
     const FIRST_HARMFUL_SLOT: u16 = 0x20;
     const SLOTS: u16 = benilla_protocol::messages::UNIT_AURA_SLOTS as u16;
@@ -170,16 +169,16 @@ pub(crate) fn aura_lines(
     let batch: Vec<FieldChanged> = edges.read().copied().collect();
     let slot_edges: Vec<&FieldChanged> = batch
         .iter()
-        .filter(|e| e.unit_array_slot(FIELD_UNIT_AURA, SLOTS).is_some())
+        .filter(|e| e.unit_array_slot(e.fields.unit_aura, SLOTS).is_some())
         .collect();
     let slot_moved = |entity: Entity, slot: u16| {
         slot_edges
             .iter()
-            .any(|e| e.entity == entity && e.index - FIELD_UNIT_AURA == slot)
+            .any(|e| e.entity == entity && e.index - e.fields.unit_aura == slot)
     };
 
     for e in &slot_edges {
-        let slot = e.index - FIELD_UNIT_AURA;
+        let slot = e.index - e.fields.unit_aura;
         let class = ctx.classify(e.guid, &stores);
         // Arrival first, so a replace words the new aura before the old one's removal.
         if e.new != 0 {
@@ -228,10 +227,10 @@ pub(crate) fn aura_lines(
 
     // Stack counts: four slots per dword, one byte each, holding `stack - 1`.
     for e in batch.iter().filter(|e| {
-        e.unit_array_slot(FIELD_UNIT_AURAAPPLICATIONS, SLOTS / 4)
+        e.unit_array_slot(e.fields.unit_auraapplications, SLOTS / 4)
             .is_some()
     }) {
-        let word = e.index - FIELD_UNIT_AURAAPPLICATIONS;
+        let word = e.index - e.fields.unit_auraapplications;
         let Ok((_, store)) = stores.get(e.entity) else {
             continue; // gone in the same drain
         };
@@ -285,7 +284,7 @@ pub(crate) fn pet_loyalty_lines(
     mut log: ResMut<ChatLog>,
 ) {
     for e in edges.read() {
-        if !e.unit_field(benilla_protocol::field::FIELD_UNIT_BYTES_1) {
+        if !e.unit_field(e.fields.unit_bytes_1) {
             continue;
         }
         // Byte 1, as `ObjectFields::unit_loyalty_level` reads it.

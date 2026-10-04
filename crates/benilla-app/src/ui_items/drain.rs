@@ -924,7 +924,7 @@ mod tests {
     fn a_worn_repair_click_sounds_and_ships_the_items_guid() {
         const VENDOR: u64 = 0xF130_0000_0000_0042;
         const HELM: u64 = 0x4000_0000_0000_0777;
-        let head = benilla_protocol::field::FIELD_PLAYER_INV_SLOT_HEAD;
+        let head = benilla_protocol::messages::FIELDS_5875.player_inv_slot_head;
         let (mut app, rx) = open_the_clam();
         while rx.try_recv().is_ok() {} // drain the clam's own send
         app.world_mut()
@@ -990,7 +990,8 @@ mod tests {
     /// through `PickupInventoryItem`.
     fn click_to_repair_the_sword(money: u32, worn: bool) -> RepairClick {
         use crate::ui_merchant::purse_fixture::{player, record_errors, seat, SWORD_ENTRY};
-        use benilla_protocol::field::FIELD_PLAYER_INV_SLOT_HEAD;
+        const FIELD_PLAYER_INV_SLOT_HEAD: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_inv_slot_head;
         let (mut app, rx) = open_the_clam();
         while rx.try_recv().is_ok() {} // drain the clam's own send
         seat(app.world_mut());

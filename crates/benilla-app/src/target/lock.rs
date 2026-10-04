@@ -319,7 +319,9 @@ mod tests {
     #[test]
     fn the_lock_value_tracks_the_players_skill_not_their_level() {
         use benilla_formats::{OpenLock, SkillLineCatalog, SpellCatalog, SpellDisplay};
-        use benilla_protocol::messages::{ObjectFields, FIELD_PLAYER_SKILL_INFO_1_1};
+        use benilla_protocol::messages::ObjectFields;
+        const FIELD_PLAYER_SKILL_INFO_1_1: u16 =
+            benilla_protocol::messages::FIELDS_5875.player_skill_info_1_1;
 
         // Mining 2575, real shape: `−1 + 1 + 5.0·Δ`, baseLevel 0, LockType 3.
         let mining = SpellDisplay {

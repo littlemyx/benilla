@@ -80,7 +80,9 @@ pub(crate) const HUMAN_WARRIOR: u32 = 1 | (1 << 8);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use benilla_protocol::field::{FIELD_UNIT_FACTIONTEMPLATE, FIELD_UNIT_FLAGS};
+    const FIELD_UNIT_FACTIONTEMPLATE: u16 =
+        benilla_protocol::messages::FIELDS_5875.unit_factiontemplate;
+    const FIELD_UNIT_FLAGS: u16 = benilla_protocol::messages::FIELDS_5875.unit_flags;
     use benilla_protocol::ObjectFields;
 
     /// The five values `0x612b80` can return, as the f64 bits its `st0` holds.

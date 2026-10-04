@@ -4,28 +4,27 @@ use crate::wire::{capacity_hint, read_u32_le, read_u8, Vector3d};
 
 use super::movement::ObjectType;
 
-// The 1.12.1 view of the field table: the indices benilla-app still reads by name.
-pub const FIELD_GAMEOBJECT_STATE: u16 = FIELDS_5875.gameobject_state;
-pub const FIELD_CORPSE_DYNAMIC_FLAGS: u16 = FIELDS_5875.corpse_dynamic_flags;
-pub const FIELD_UNIT_HEALTH: u16 = FIELDS_5875.unit_health;
+// The 1.12.1 table's indices this module's tests read by name.
+#[cfg(test)]
+const FIELD_UNIT_HEALTH: u16 = FIELDS_5875.unit_health;
 #[cfg(test)]
 const FIELD_UNIT_POWER1: u16 = FIELDS_5875.unit_power1;
-pub const FIELD_UNIT_MAXHEALTH: u16 = FIELDS_5875.unit_maxhealth;
+#[cfg(test)]
+const FIELD_UNIT_MAXHEALTH: u16 = FIELDS_5875.unit_maxhealth;
 #[cfg(test)]
 const FIELD_UNIT_MAXPOWER1: u16 = FIELDS_5875.unit_maxpower1;
-pub const FIELD_UNIT_LEVEL: u16 = FIELDS_5875.unit_level;
-pub const FIELD_UNIT_FACTIONTEMPLATE: u16 = FIELDS_5875.unit_factiontemplate;
-pub const FIELD_UNIT_BYTES_1: u16 = FIELDS_5875.unit_bytes_1;
-pub const FIELD_UNIT_FLAGS: u16 = FIELDS_5875.unit_flags;
-pub const FIELD_UNIT_AURA: u16 = FIELDS_5875.unit_aura;
-pub const FIELD_UNIT_AURAFLAGS: u16 = FIELDS_5875.unit_auraflags;
+#[cfg(test)]
+const FIELD_UNIT_BYTES_1: u16 = FIELDS_5875.unit_bytes_1;
+#[cfg(test)]
+const FIELD_UNIT_AURA: u16 = FIELDS_5875.unit_aura;
+#[cfg(test)]
+const FIELD_UNIT_AURAFLAGS: u16 = FIELDS_5875.unit_auraflags;
 #[cfg(test)]
 const FIELD_UNIT_AURALEVELS: u16 = FIELDS_5875.unit_auralevels;
-pub const FIELD_UNIT_AURAAPPLICATIONS: u16 = FIELDS_5875.unit_auraapplications;
-pub const FIELD_UNIT_MOUNTDISPLAYID: u16 = FIELDS_5875.unit_mountdisplayid;
-pub const FIELD_UNIT_DYNAMIC_FLAGS: u16 = FIELDS_5875.unit_dynamic_flags;
-pub const FIELD_UNIT_CHANNEL_SPELL: u16 = FIELDS_5875.unit_channel_spell;
-pub const FIELD_UNIT_NPC_FLAGS: u16 = FIELDS_5875.unit_npc_flags;
+#[cfg(test)]
+const FIELD_UNIT_AURAAPPLICATIONS: u16 = FIELDS_5875.unit_auraapplications;
+#[cfg(test)]
+const FIELD_UNIT_DYNAMIC_FLAGS: u16 = FIELDS_5875.unit_dynamic_flags;
 #[cfg(test)]
 const FIELD_UNIT_BASEATTACKTIME: u16 = FIELDS_5875.unit_baseattacktime;
 #[cfg(test)]
@@ -103,18 +102,12 @@ impl UnitAuraSlot {
 const FIELD_PLAYER_BYTES_3: u16 = FIELDS_5875.player_bytes_3;
 pub const FIELD_PLAYER_QUEST_LOG_1_1: u16 = FIELDS_5875.player_quest_log_1_1;
 
-/// The indices a field watch names: the same constants the accessors read, so the two agree.
+/// What a field watch names that is not a table index: the dead bit of a dynamic-flags edge, and
+/// the quest-log base the probes read.
 pub mod field {
     /// The bit a watcher tests on a raw `UNIT_DYNAMIC_FLAGS` edge (feign death).
     pub use super::unit::UNIT_DYNFLAG_DEAD;
-    pub use super::{
-        FIELD_CORPSE_DYNAMIC_FLAGS, FIELD_GAMEOBJECT_STATE, FIELD_PLAYER_FIELD_COINAGE,
-        FIELD_PLAYER_FLAGS, FIELD_PLAYER_INV_SLOT_HEAD, FIELD_PLAYER_QUEST_LOG_1_1,
-        FIELD_PLAYER_SKILL_INFO_1_1, FIELD_UNIT_AURA, FIELD_UNIT_AURAAPPLICATIONS,
-        FIELD_UNIT_AURAFLAGS, FIELD_UNIT_BYTES_1, FIELD_UNIT_CHANNEL_SPELL,
-        FIELD_UNIT_DYNAMIC_FLAGS, FIELD_UNIT_FACTIONTEMPLATE, FIELD_UNIT_FLAGS, FIELD_UNIT_HEALTH,
-        FIELD_UNIT_LEVEL, FIELD_UNIT_MAXHEALTH, FIELD_UNIT_MOUNTDISPLAYID, FIELD_UNIT_NPC_FLAGS,
-    };
+    pub use super::FIELD_PLAYER_QUEST_LOG_1_1;
 }
 
 /// `MAX_QUEST_LOG_SIZE` (`QuestDef.h:34`).
@@ -140,7 +133,8 @@ pub mod quest_slot_state {
     pub const FAIL: u8 = 0x02;
 }
 
-pub const FIELD_PLAYER_INV_SLOT_HEAD: u16 = FIELDS_5875.player_inv_slot_head;
+#[cfg(test)]
+const FIELD_PLAYER_INV_SLOT_HEAD: u16 = FIELDS_5875.player_inv_slot_head;
 #[cfg(test)]
 const FIELD_PLAYER_KEYRING_SLOT_1: u16 = FIELDS_5875.player_keyring_slot_1;
 #[cfg(test)]
@@ -149,7 +143,8 @@ const FIELD_PLAYER_FARSIGHT: u16 = FIELDS_5875.player_farsight;
 const FIELD_PLAYER_BUYBACK_PRICE_1: u16 = FIELDS_5875.player_buyback_price_1;
 #[cfg(test)]
 const FIELD_PLAYER_BUYBACK_TIMESTAMP_1: u16 = FIELDS_5875.player_buyback_timestamp_1;
-pub const FIELD_PLAYER_FIELD_COINAGE: u16 = FIELDS_5875.player_field_coinage;
+#[cfg(test)]
+const FIELD_PLAYER_FIELD_COINAGE: u16 = FIELDS_5875.player_field_coinage;
 #[cfg(test)]
 const FIELD_PLAYER_XP: u16 = FIELDS_5875.player_xp;
 #[cfg(test)]
@@ -177,7 +172,8 @@ const FIELD_PLAYER_MOD_DAMAGE_DONE_NEG: u16 = FIELDS_5875.player_mod_damage_done
 #[cfg(test)]
 const FIELD_PLAYER_MOD_DAMAGE_DONE_PCT: u16 = FIELDS_5875.player_mod_damage_done_pct;
 // (`Player.cpp:3336`, `Player.cpp:7274`)
-pub const FIELD_PLAYER_SKILL_INFO_1_1: u16 = FIELDS_5875.player_skill_info_1_1;
+#[cfg(test)]
+const FIELD_PLAYER_SKILL_INFO_1_1: u16 = FIELDS_5875.player_skill_info_1_1;
 
 #[cfg(test)]
 const FIELD_PLAYER_CHARACTER_POINTS1: u16 = FIELDS_5875.player_character_points1;
@@ -189,7 +185,8 @@ const FIELD_PLAYER_TRACK_CREATURES: u16 = FIELDS_5875.player_track_creatures;
 const FIELD_PLAYER_TRACK_RESOURCES: u16 = FIELDS_5875.player_track_resources;
 #[cfg(test)]
 const FIELD_PLAYER_AMMO_ID: u16 = FIELDS_5875.player_ammo_id;
-pub const FIELD_PLAYER_FLAGS: u16 = FIELDS_5875.player_flags;
+#[cfg(test)]
+const FIELD_PLAYER_FLAGS: u16 = FIELDS_5875.player_flags;
 #[cfg(test)]
 const FIELD_PLAYER_FIELD_COMBO_TARGET: u16 = FIELDS_5875.player_field_combo_target;
 #[cfg(test)]
@@ -565,6 +562,11 @@ impl ObjectFields {
                 self.insert(index, value);
             }
         }
+    }
+
+    /// The field table these indices are read against.
+    pub fn table(&self) -> &'static FieldTable {
+        self.table
     }
 
     /// The type this was created as, from its descriptor length (the eight lengths are distinct).
