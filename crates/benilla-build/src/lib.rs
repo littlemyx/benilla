@@ -10,6 +10,7 @@ use std::fmt;
 #[non_exhaustive]
 pub enum Expansion {
     Vanilla,
+    Tbc,
 }
 
 /// One frozen client build.
@@ -32,10 +33,22 @@ pub const VANILLA_1_12_1: ClientBuild = ClientBuild {
     expansion: Expansion::Vanilla,
 };
 
-/// Every build this client can play as.
+/// 2.4.3 (8606), the Burning Crusade client's last build: the exe's version string and the
+/// install's patch-enGB `FrameXML.toc`.
+pub const TBC_2_4_3: ClientBuild = ClientBuild {
+    build: 8606,
+    version: [2, 4, 3],
+    interface: 20400,
+    expansion: Expansion::Tbc,
+};
+
+/// Every build this client recognises from an install.
+pub const KNOWN: &[ClientBuild] = &[VANILLA_1_12_1, TBC_2_4_3];
+
+/// Every build this client can play as: those of [`KNOWN`] whose protocol and data it speaks.
 pub const SUPPORTED: &[ClientBuild] = &[VANILLA_1_12_1];
 
-/// An `## Interface:` number that names no supported build.
+/// An `## Interface:` number that names no known build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UnknownBuild {
     pub interface: u32,
@@ -45,10 +58,10 @@ impl fmt::Display for UnknownBuild {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "the install states Interface {}, which is no supported build (supported:",
+            "the install states Interface {}, which is no known build (known:",
             self.interface
         )?;
-        for (i, b) in SUPPORTED.iter().enumerate() {
+        for (i, b) in KNOWN.iter().enumerate() {
             let [major, minor, patch] = b.version;
             let sep = if i == 0 { " " } else { ", " };
             write!(
@@ -64,18 +77,23 @@ impl fmt::Display for UnknownBuild {
 impl std::error::Error for UnknownBuild {}
 
 impl ClientBuild {
-    /// The supported build whose stock `FrameXML.toc` states `interface`.
+    /// The known build whose stock `FrameXML.toc` states `interface`.
     pub fn from_interface(interface: u32) -> Result<ClientBuild, UnknownBuild> {
-        SUPPORTED
+        KNOWN
             .iter()
             .find(|b| b.interface == interface)
             .copied()
             .ok_or(UnknownBuild { interface })
     }
 
-    /// The supported build with this build number.
+    /// The known build with this build number.
     pub fn from_build(build: u16) -> Option<ClientBuild> {
-        SUPPORTED.iter().find(|b| b.build == build).copied()
+        KNOWN.iter().find(|b| b.build == build).copied()
+    }
+
+    /// Whether this client can play as the build, not merely recognise it.
+    pub fn playable(&self) -> bool {
+        SUPPORTED.contains(self)
     }
 }
 
@@ -93,26 +111,36 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_number_is_an_error_that_names_it_and_the_supported_builds() {
+    fn an_unknown_number_is_an_error_that_names_it_and_the_known_builds() {
         let err = ClientBuild::from_interface(30300).unwrap_err();
         assert_eq!(err, UnknownBuild { interface: 30300 });
         let text = err.to_string();
         assert!(text.contains("30300"), "{text}");
         assert!(text.contains("1.12.1"), "{text}");
+        assert!(text.contains("2.4.3"), "{text}");
         assert_eq!(ClientBuild::from_build(1), None);
     }
 
     #[test]
-    fn every_supported_build_round_trips_and_none_repeats() {
-        for b in SUPPORTED {
+    fn every_known_build_round_trips_and_none_repeats() {
+        for b in KNOWN {
             assert_eq!(ClientBuild::from_interface(b.interface), Ok(*b));
             assert_eq!(ClientBuild::from_build(b.build), Some(*b));
         }
-        for (i, a) in SUPPORTED.iter().enumerate() {
-            for b in &SUPPORTED[i + 1..] {
+        for (i, a) in KNOWN.iter().enumerate() {
+            for b in &KNOWN[i + 1..] {
                 assert_ne!(a.build, b.build);
                 assert_ne!(a.interface, b.interface);
             }
         }
+    }
+
+    #[test]
+    fn tbc_is_known_but_not_playable_and_vanilla_is_both() {
+        assert_eq!(ClientBuild::from_interface(20400), Ok(TBC_2_4_3));
+        assert_eq!(ClientBuild::from_build(8606), Some(TBC_2_4_3));
+        assert!(!TBC_2_4_3.playable());
+        assert!(VANILLA_1_12_1.playable());
+        assert!(SUPPORTED.iter().all(|b| KNOWN.contains(b)));
     }
 }
