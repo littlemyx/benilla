@@ -467,14 +467,16 @@ const SCRIPT_KINDS: [&str; 39] = [
 /// `PostClick` and `OnAttributeChanged` fire (the click path and `SetAttribute`); the other four
 /// are registered and never fired yet: `OnTooltipSetItem` and `OnTooltipSetUnit` wait on the
 /// tooltip's item and unit fills, `OnCharComposition` on IME input, `OnInputLanguageChanged` on
-/// the input language.
-const SCRIPT_KINDS_243: [&str; 6] = [
+/// the input language. 1.12.1 has the last slot too, but its list keeps the name refused until
+/// something fires it.
+const SCRIPT_KINDS_243: [&str; 7] = [
     "PreClick",
     "PostClick",
     "OnAttributeChanged",
     "OnTooltipSetItem",
     "OnTooltipSetUnit",
     "OnCharComposition",
+    "OnInputLanguageChanged",
 ];
 
 /// The handler kind `name` names for this VM's build, in its canonical spelling.

@@ -208,6 +208,37 @@ fn lookup_attribute(per: &Table, prefix: &str, name: &str, suffix: &str) -> mlua
     Ok(Value::Nil)
 }
 
+/// What a 2.4.3 layout element names for drawing that is not applied here yet: the text-wrapping
+/// attributes (`nonspacewrap`, `bytes`, `maxLines`, `indented`), a font's `monochrome`, a button's
+/// `<PushedTextOffset>` and a scrolling message frame's `insertMode`. The loader reads and keeps
+/// them under the owner's key (`id:<n>` for a frame or region, `font:<name>` for a font object) for
+/// the renderer; none changes drawing yet (gap).
+pub(crate) fn store_hint(lua: &Lua, owner: String, name: &str, value: &str) {
+    lua.app_data_mut::<Model>()
+        .expect("model app_data")
+        .xml_hints
+        .entry(owner)
+        .or_default()
+        .push((name.to_string(), value.to_string()));
+}
+
+/// The key of a frame or region wrapper's hints.
+pub(crate) fn hint_owner(this: &Table) -> Option<String> {
+    decode_id(this).ok().map(|id| format!("id:{id}"))
+}
+
+impl super::UiScript {
+    /// The value of the layout hint `name` that the loader kept for `owner` (see [`store_hint`]).
+    pub fn xml_hint(&self, owner: &str, name: &str) -> Option<String> {
+        self.model_ref()
+            .xml_hints
+            .get(owner)?
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.clone())
+    }
+}
+
 /// `protected="true"` from the XML: the flag `IsProtected` answers.
 pub(crate) fn set_protected(lua: &Lua, this: &Table, on: bool) -> mlua::Result<()> {
     let h = frame_handle_of(lua, this)?;
@@ -355,6 +386,68 @@ mod tests {
         assert!(c.reverse && c.draw_edge);
         assert_eq!(s.eval::<i64>("return CD2:IsShown() and 1 or 0").unwrap(), 0);
         assert!(s.eval::<bool>("return F2.SetCooldown == nil").unwrap());
+    }
+
+    const HINT_XML: &str = r#"<Ui>
+        <Font name="HintFont" monochrome="true" font="x.ttf"/>
+        <Button name="HintBtn">
+            <PushedTextOffset><AbsDimension x="2" y="-3"/></PushedTextOffset>
+            <ButtonText name="HintBtnText" nonspacewrap="true"/>
+            <Layers><Layer><FontString name="HintFS" bytes="64" maxLines="2" indented="true"
+                nonspacewrap="true"><FontHeight><AbsValue val="20"/></FontHeight></FontString></Layer></Layers>
+        </Button>
+        <ScrollingMessageFrame name="HintMsg" insertMode="TOP"/></Ui>"#;
+
+    #[test]
+    fn the_layout_attributes_of_2_4_3_are_read_and_kept_for_the_renderer() {
+        let s = s51();
+        let report = load(&s, &crate::framexml::parse(HINT_XML).unwrap(), &|_| None);
+        assert!(
+            report.unknown_attributes.is_empty() && report.unknown_elements.is_empty(),
+            "{report:?}"
+        );
+        let owner = |name: &str| {
+            let t: Table = s.lua().globals().get(name).unwrap();
+            hint_owner(&t).unwrap()
+        };
+        assert_eq!(
+            s.xml_hint(&owner("HintBtn"), "pushedTextOffset").as_deref(),
+            Some("2,-3")
+        );
+        assert_eq!(
+            s.xml_hint(&owner("HintBtnText"), "nonspacewrap").as_deref(),
+            Some("true")
+        );
+        for (attr, want) in [("bytes", "64"), ("maxLines", "2"), ("indented", "true")] {
+            assert_eq!(s.xml_hint(&owner("HintFS"), attr).as_deref(), Some(want));
+        }
+        assert_eq!(
+            s.xml_hint(&owner("HintMsg"), "insertMode").as_deref(),
+            Some("TOP")
+        );
+        assert_eq!(
+            s.xml_hint("font:HintFont", "monochrome").as_deref(),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn the_same_attributes_stay_unread_and_reported_on_1_12_1() {
+        let v = UiScript::new().unwrap();
+        let report = load(&v, &crate::framexml::parse(HINT_XML).unwrap(), &|_| None);
+        for want in [
+            "<FontString nonspacewrap>",
+            "<FontString bytes>",
+            "<Font monochrome>",
+        ] {
+            assert!(
+                report.unknown_attributes.contains(&want.to_string()),
+                "{want}: {report:?}"
+            );
+        }
+        assert!(report
+            .unknown_elements
+            .contains(&"<Button><PushedTextOffset>".to_string()));
     }
 
     #[test]
@@ -542,6 +635,7 @@ mod tests {
             "OnTooltipSetItem",
             "OnTooltipSetUnit",
             "OnCharComposition",
+            "OnInputLanguageChanged",
         ] {
             assert!(
                 s.eval::<bool>(&format!(

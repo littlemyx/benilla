@@ -366,8 +366,24 @@ const FRAME_CHILDREN_243: &[&str] = &["attributes"];
 const ATTRS_243: &[(&str, &[&str])] = &[
     ("attribute", &["name", "type", "value"]),
     ("cooldown", &["drawedge", "reverse"]),
+    // Kept for the renderer, not drawn yet (`ui243::store_hint`).
+    (
+        "fontstring",
+        &["nonspacewrap", "bytes", "maxlines", "indented"],
+    ),
+    ("buttontext", &["nonspacewrap"]),
+    ("font", &["monochrome"]),
+    ("scrollingmessageframe", &["insertmode"]),
 ];
-const CHILDREN_243: &[(&str, &[&str])] = &[("attributes", &["attribute"])];
+const CHILDREN_243: &[(&str, &[&str])] = &[
+    ("attributes", &["attribute"]),
+    ("button", &["pushedtextoffset"]),
+    ("pushedtextoffset", &["absdimension"]),
+    // Read only behind `font=` (`apply_fontstring_font`), the reference's own gate, so the form
+    // with no `font=` is inert, not unread.
+    ("fontstring", &["fontheight"]),
+    ("fontheight", &["absvalue"]),
+];
 
 fn listed(table: &[(&str, &[&str])], tag: &str, name: &str) -> bool {
     table

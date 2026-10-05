@@ -431,6 +431,8 @@ pub(crate) struct Model {
     pub(crate) account_expansion: u8,
     /// Calls of the secure-execution verbs, while the taint model is pending.
     pub(crate) secure_model_calls: std::collections::BTreeMap<&'static str, u64>,
+    /// Layout hints the 2.4.3 loader kept for drawing, by owner key (`ui243::store_hint`).
+    pub(crate) xml_hints: HashMap<String, Vec<(String, String)>>,
     /// Action ids whose item template stacks past one (`IsStackableAction`).
     pub(crate) stackable_actions: std::collections::HashSet<u32>,
     /// `<ModifiedClick>` defaults by upper-cased action (`GetModifiedClick`).
@@ -1205,6 +1207,7 @@ impl Model {
             account_expansion: 0,
             secure_model_calls: Default::default(),
             stackable_actions: Default::default(),
+            xml_hints: HashMap::new(),
             modified_clicks: HashMap::new(),
             world_map_ping_host: None,
             action_sets: Vec::new(),
