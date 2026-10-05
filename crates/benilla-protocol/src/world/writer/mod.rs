@@ -8,6 +8,8 @@ use benilla_srp::vanilla_header::EncrypterHalf;
 
 use super::send_packet;
 
+pub use disposition::{form_of, refusal_on_tbc, Form, VerbForm, VerbRefused, VERBS};
+
 mod action_bar;
 mod area_trigger;
 mod attack;
@@ -18,6 +20,9 @@ mod binder;
 mod channel;
 mod chat;
 mod death;
+mod disposition;
+#[cfg(test)]
+mod disposition_tests;
 mod duel;
 mod gameobject;
 mod gm_ticket;
@@ -74,6 +79,12 @@ pub struct WorldWriter {
 impl WorldWriter {
     /// Frame, encrypt and write one packet: the sole write path every verb goes through.
     fn send(&mut self, opcode: u16, body: &[u8]) -> Result<()> {
+        // A verb with no established 2.4.3 form never puts its 1.12.1 bytes on a 2.4.3 socket.
+        if self.tbc {
+            if let Some(refused) = refusal_on_tbc(opcode) {
+                return Err(refused.into());
+            }
+        }
         let sent = send_packet(&mut self.stream, Some(&mut self.encrypter), opcode, body);
         if sent.is_ok() {
             if let Some(log) = &mut self.sent {

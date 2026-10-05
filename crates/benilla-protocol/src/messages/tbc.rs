@@ -1,7 +1,8 @@
 //! The 2.4.3 server-packet dispatch. A packet is read for 2.4.3 only when its layout there has
 //! been checked, so this is an allow-list; every other opcode is [`ServerPacket::Other`], never
 //! 1.12.1's parser (five opcode numbers changed meaning between the builds). A packet whose bytes
-//! are the same in both builds is read here by its own arm, never by delegating.
+//! are the same in both builds is read here by its own arm, or by the 1.12.1 arm that the generated
+//! `tbc_same` table names.
 
 use std::io::{self, Read};
 
@@ -247,7 +248,11 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
         }
         other => match super::tbc_movement::read_server(other, r)? {
             Some(packet) => packet,
-            None => ServerPacket::Other { opcode: other },
+            None => match super::same_reader_for(other) {
+                // Same bytes in both builds (`tbc_same`): the 1.12.1 arm reads them.
+                Some(vanilla) => super::parse::read_same_as_vanilla(vanilla, r)?,
+                None => ServerPacket::Other { opcode: other },
+            },
         },
     })
 }
