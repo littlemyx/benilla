@@ -862,6 +862,11 @@ pub(crate) enum ClientCommand {
     FarSight {
         engage: bool,
     },
+    /// `CMSG_TIME_SYNC_RESP` (2.4.3): the server's `SMSG_TIME_SYNC_REQ` counter echoed with our tick
+    /// count, answered by the write thread through the session's own `answer_movement`.
+    TimeSyncResponse {
+        counter: u32,
+    },
     /// `MSG_MOVE_TELEPORT_ACK`: unacked, the server freezes our movement.
     TeleportAck {
         guid: u64,

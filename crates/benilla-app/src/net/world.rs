@@ -8,11 +8,22 @@ use bevy::prelude::*;
 use super::NetHandlerApp;
 use crate::world_state::WorldStates;
 
-/// Registers the two handlers.
+/// Registers the handlers.
 pub(super) fn register(app: &mut App) {
     use SessionEventKind as K;
     app.net_handler(K::Weather, on_weather)
-        .net_handler(K::WorldStates, on_world_states);
+        .net_handler(K::WorldStates, on_world_states)
+        .net_handler(K::TimeSyncRequest, on_time_sync_request);
+}
+
+/// `SMSG_TIME_SYNC_REQ`: the counter goes back with our tick count (`CMSG_TIME_SYNC_RESP`); an
+/// unanswered request is how a 2.4.3 server tells a client is not keeping time.
+fn on_time_sync_request(In(ev): In<SessionEvent>, net: Res<super::NetCommands>) {
+    if let SessionEvent::TimeSyncRequest { counter } = ev {
+        let _ = net
+            .0
+            .send(super::ClientCommand::TimeSyncResponse { counter });
+    }
 }
 
 fn on_weather(In(ev): In<SessionEvent>, mut out: MessageWriter<WeatherMessage>) {
