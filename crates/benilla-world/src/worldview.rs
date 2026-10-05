@@ -322,7 +322,10 @@ fn plugin(app: &mut App) {
         ),
     );
     if std::env::var("WOW_WORLDVIEW_SHOT").is_ok() {
-        app.add_systems(Update, print_counters);
+        app.add_systems(
+            Update,
+            print_counters.in_set(crate::lighting::LightingConsumeSet),
+        );
     }
 }
 
