@@ -34,7 +34,12 @@ pub(crate) struct WdlPlugin;
 impl Plugin for WdlPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<WdlMaterial>::default())
-            .add_systems(Startup, setup_wdl.after(AssetSet::Open))
+            .add_systems(
+                Startup,
+                setup_wdl
+                    .after(AssetSet::Open)
+                    .after(crate::world_map::WorldMapLoad),
+            )
             // The ring follows the world's lifecycle: it spawns only while a world is live.
             .add_systems(Update, stream_wdl.run_if(crate::schedule::world_is_live))
             .add_systems(
@@ -77,15 +82,25 @@ fn setup_wdl(
     config: Option<Res<RenderConfig>>,
     world_assets: Option<ResMut<WorldAssets>>,
     mut materials: ResMut<Assets<WdlMaterial>>,
+    current_map: Option<Res<CurrentMap>>,
+    map_catalog: Option<Res<MapCatalogRes>>,
 ) {
     let (Some(_config), Some(world_assets)) = (config, world_assets) else {
         return; // no client data → no terrain at all, so no WDL
     };
-    // Azeroth (Eastern Kingdoms), matching `world_map`'s `DEFAULT_MAP_ID`.
-    let wdl = match WdlFile::load(&mut world_assets.chain.lock_recover(), "Azeroth") {
+    // The map the run starts on, named by `Map.dbc`; without the catalog there is no terrain either.
+    let (Some(current_map), Some(map_catalog)) = (current_map, map_catalog) else {
+        return;
+    };
+    let map_id = current_map.0;
+    let Some(dir) = map_catalog.0.directory(map_id) else {
+        warn!("WDL unavailable: Map.dbc has no row for map {map_id}");
+        return;
+    };
+    let wdl = match WdlFile::load(&mut world_assets.chain.lock_recover(), dir) {
         Ok(w) => {
             info!(
-                "WDL: Azeroth.wdl loaded ({} distant tiles)",
+                "WDL: {dir}.wdl loaded ({} distant tiles)",
                 w.present_count()
             );
             w
@@ -110,7 +125,7 @@ fn setup_wdl(
     });
     commands.insert_resource(WdlStreamer {
         wdl,
-        map_id: 0,
+        map_id,
         material,
         loaded: HashMap::new(),
     });

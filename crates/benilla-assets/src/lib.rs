@@ -15,6 +15,7 @@ use bevy::prelude::*;
 
 pub mod column_grid;
 pub mod coords;
+pub mod load_misses;
 pub mod materials;
 pub mod minimap_grid;
 mod spatial_cache;

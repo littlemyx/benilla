@@ -264,9 +264,22 @@ async fn read_layer(ctx: &mut LoadContext<'_>, key: &str) -> Option<RawLayer> {
             }
         }
     }
-    let bytes = ctx.read_asset_bytes(mpq_url(key)).await.ok()?;
-    let chain = blp_bytes_to_native_chain(&bytes).ok()?;
-    Some(RawLayer { chain, matte: true })
+    // The `_s` variant is optional; only the base texture's absence is a miss.
+    let bytes = match ctx.read_asset_bytes(mpq_url(key)).await {
+        Ok(b) => b,
+        Err(e) => {
+            let err = anyhow::anyhow!("reading texture: {e}");
+            crate::load_misses::record("terrain layer", key, &err);
+            return None;
+        }
+    };
+    match blp_bytes_to_native_chain(&bytes) {
+        Ok(chain) => Some(RawLayer { chain, matte: true }),
+        Err(e) => {
+            crate::load_misses::record("terrain layer", key, &e.context("decoding texture"));
+            None
+        }
+    }
 }
 
 /// An internal path as an `mpq://` URL.
