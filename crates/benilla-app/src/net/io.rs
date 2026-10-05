@@ -822,6 +822,7 @@ fn writer_loop(
 ) {
     let mut writer: Option<WorldWriter> = None;
     let mut warned = 0u32;
+    let mut refused_verbs = std::collections::HashSet::<&'static str>::new();
     // Armed at connect and re-armed by each send, never free-running: the reference pings when
     // `now - lastSent - 30000 >= 0` (`0x537ff0`), with `lastSent` stamped at connect (`0x537bcf`).
     let mut ping_tick = crossbeam_channel::never();
@@ -1522,7 +1523,12 @@ fn writer_loop(
                     if benilla_assets::trace::enabled() {
                         benilla_assets::trace::line("wire", &format!("SEND FAILED: {e:#}"));
                     }
-                    if warned < SEND_WARN_CAP {
+                    if let Some(refused) = e.downcast_ref::<benilla_protocol::VerbRefused>() {
+                        // A verb with no 2.4.3 form: logged once per verb, the session goes on.
+                        if refused_verbs.insert(refused.verb) {
+                            bevy::log::warn!("net: refused {refused}");
+                        }
+                    } else if warned < SEND_WARN_CAP {
                         bevy::log::warn!("net: send failed: {e:#}");
                         warned += 1;
                     }

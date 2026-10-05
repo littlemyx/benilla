@@ -10,10 +10,13 @@ use super::WorldWriter;
 impl WorldWriter {
     /// `CMSG_ITEM_QUERY_SINGLE`: an item template by entry; `guid` is 0 for a template-only ask.
     pub fn item_query(&mut self, entry: u32, guid: u64) -> Result<()> {
-        self.send(
-            opcode::CMSG_ITEM_QUERY_SINGLE,
-            &messages::item_query(entry, guid),
-        )
+        // 2.4.3 sends the entry alone; 1.12.1 appends a guid.
+        let body = if self.tbc {
+            messages::item_query_tbc(entry)
+        } else {
+            messages::item_query(entry, guid)
+        };
+        self.send(opcode::CMSG_ITEM_QUERY_SINGLE, &body)
     }
 
     /// `CMSG_USE_ITEM`: use the item at a bag position; a GameObject `target` is how a key opens a
