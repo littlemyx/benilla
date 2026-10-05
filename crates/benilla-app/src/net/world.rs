@@ -13,7 +13,20 @@ pub(super) fn register(app: &mut App) {
     use SessionEventKind as K;
     app.net_handler(K::Weather, on_weather)
         .net_handler(K::WorldStates, on_world_states)
-        .net_handler(K::TimeSyncRequest, on_time_sync_request);
+        .net_handler(K::TimeSyncRequest, on_time_sync_request)
+        .net_handler(K::Motd, on_motd);
+}
+
+/// `SMSG_MOTD` (2.4.3): each line is a system chat line, as 1.12.1's servers send the same text.
+fn on_motd(In(ev): In<SessionEvent>, mut chat: ResMut<crate::ui_chat::ChatLog>) {
+    if let SessionEvent::Motd { lines } = ev {
+        for line in lines {
+            chat.push_event(crate::ui_chat::ChatEvent::text_only(
+                crate::ui_chat::ChatEventKind::System,
+                line,
+            ));
+        }
+    }
 }
 
 /// `SMSG_TIME_SYNC_REQ`: the counter goes back with our tick count (`CMSG_TIME_SYNC_RESP`); an

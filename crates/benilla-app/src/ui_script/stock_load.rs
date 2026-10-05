@@ -301,8 +301,18 @@ fn chain_of(data: &Path) -> &'static Chain {
 /// Loads the stock interface of the install at `data` (a `Data` folder) through the production
 /// path, the layer off, and reports each `FrameXML.toc` row. The caller holds [`ENV_LOCK`].
 pub(super) fn load_stock(data: &Path, tag: &str) -> Report {
+    let (report, _script, _laid) = load_stock_with_script(data, tag);
+    report
+}
+
+/// [`load_stock`], and the VM the load left behind with the guard that keeps the chain seated on
+/// this thread, for what a test asks of the loaded interface (an on-demand addon reads the chain).
+pub(super) fn load_stock_with_script(
+    data: &Path,
+    tag: &str,
+) -> (Report, UiScript, reference_ui::fixture::ChainGuard) {
     let chain = chain_of(data);
-    let _laid = reference_ui::fixture::use_chain(chain);
+    let laid = reference_ui::fixture::use_chain(chain);
     let mut rows = Vec::new();
     let (script, failures) = production_load_observed(tag, true, "", |_| {}, &mut |file, out| {
         rows.push(Row {
@@ -349,7 +359,45 @@ pub(super) fn load_stock(data: &Path, tag: &str) -> Report {
             .collect();
         let _ = std::fs::write(dir.join(format!("{tag}.missing.txt")), blocked);
     }
-    report
+    (report, script, laid)
+}
+
+/// Loads each of the chain's Blizzard LoadOnDemand addons into `script` through the same file
+/// loader `LoadAddOn` uses, one report per addon with a row per `.toc` file, in `.toc` order. The
+/// caller holds the seated chain ([`load_stock_with_script`]'s guard).
+pub(super) fn load_blizzard_addons(
+    script: &UiScript,
+    build: Option<ClientBuild>,
+) -> Vec<(String, Report)> {
+    super::addons::chain_addons()
+        .into_iter()
+        .map(|addon| {
+            let mut rows = Vec::new();
+            let mut toc = benilla_ui::status::Status::default();
+            // A chain addon's rows are full chain paths; the manifest's are relative to its folder.
+            let base = format!("Interface/AddOns/{}/", addon.name);
+            let files: Vec<String> = addon
+                .toc
+                .files
+                .iter()
+                .map(|f| format!("{base}{f}"))
+                .collect();
+            addon.load_files_observed(script, &files, &mut toc, &mut |file, out| {
+                let file = file.strip_prefix(&base).unwrap_or(file);
+                rows.push(Row {
+                    diags: diagnose(file, &out),
+                    file: file.to_string(),
+                });
+            });
+            let report = Report {
+                build,
+                rows,
+                unattributed: Vec::new(),
+                secure_model_calls: Default::default(),
+            };
+            (addon.name, report)
+        })
+        .collect()
 }
 
 /// Everything one row said, classified.
@@ -587,4 +635,63 @@ mod tests {
         ],
         unattributed: 0,
     };
+
+    /// The ratchet's second section: each of the 2.4.3 install's sixteen Blizzard LoadOnDemand
+    /// addons, loaded after the stock core through the same file loader `LoadAddOn` uses, as
+    /// `(addon, rows, clean, classes)`; a class that grew is a regression and one that shrank is a
+    /// number to lower. What remains: `Blizzard_BattlefieldMinimap` needs the engine-made
+    /// `PlayerMiniArrowEffectFrame`; the two `other` of `Blizzard_InspectUI` are an `<Include>` of
+    /// `PVPFrameTemplates.xml`, which neither the install's FrameXML nor its addon folder holds, and
+    /// the loader's text-shaped-like-a-key warning on a literal `OK`; and the one of
+    /// `Blizzard_TimeManager` is the same warning on `TIMEMANAGER_TICKER`.
+    #[test]
+    fn the_stock_2_4_3_blizzard_addons_load_as_recorded() {
+        use Class::{NilGlobal, Other};
+        type Row = (&'static str, usize, usize, &'static [(Class, usize, usize)]);
+        let want: [Row; 16] = [
+            ("Blizzard_AuctionUI", 3, 3, &[]),
+            ("Blizzard_BattlefieldMinimap", 2, 1, &[(NilGlobal, 1, 1)]),
+            ("Blizzard_BindingUI", 2, 2, &[]),
+            ("Blizzard_CombatLog", 2, 2, &[]),
+            ("Blizzard_CombatText", 2, 2, &[]),
+            ("Blizzard_CraftUI", 2, 2, &[]),
+            ("Blizzard_GMSurveyUI", 2, 2, &[]),
+            ("Blizzard_GuildBankUI", 2, 2, &[]),
+            ("Blizzard_InspectUI", 5, 3, &[(Other, 2, 2)]),
+            ("Blizzard_ItemSocketingUI", 2, 2, &[]),
+            ("Blizzard_MacroUI", 2, 2, &[]),
+            ("Blizzard_RaidUI", 2, 2, &[]),
+            ("Blizzard_TalentUI", 2, 2, &[]),
+            ("Blizzard_TimeManager", 2, 1, &[(Other, 1, 1)]),
+            ("Blizzard_TradeSkillUI", 2, 2, &[]),
+            ("Blizzard_TrainerUI", 2, 2, &[]),
+        ];
+        let data = benilla_formats::wow_data_tbc_or_skip!();
+        let _l = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (report, script, _laid) = load_stock_with_script(&data, "blizzard-243");
+        let got = load_blizzard_addons(&script, report.build);
+        assert_eq!(
+            got.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            want.iter().map(|w| w.0).collect::<Vec<_>>(),
+            "the chain's registry rows"
+        );
+        for ((name, r), (_, rows, clean, set)) in got.iter().zip(want) {
+            let mut classes = [(0, 0); 13];
+            for (c, n, names) in set {
+                classes[Class::ALL.iter().position(|x| x == c).unwrap()] = (*n, *names);
+            }
+            assert_baseline(
+                name,
+                r,
+                &Baseline {
+                    rows,
+                    clean,
+                    classes,
+                    unattributed: 0,
+                },
+            );
+        }
+    }
 }

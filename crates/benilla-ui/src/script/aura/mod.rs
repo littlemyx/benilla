@@ -18,6 +18,9 @@ use mlua::{Lua, MultiValue, Value};
 use super::Model;
 
 mod player_buff;
+mod tbc;
+
+pub(in crate::script) use tbc::install as install_tbc;
 
 /// One aura on one unit, as the app's feed pushes it ([`crate::script::UiScript::set_unit_auras`],
 /// [`crate::script::UiScript::set_player_auras`]).

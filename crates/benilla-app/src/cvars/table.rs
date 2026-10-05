@@ -260,6 +260,14 @@ pub(crate) const REGISTERED_243: &[Registered] = &[
     same("useSimpleChat", "0"),
     // `xpBarText` register site 0x4a9f4f.
     same("xpBarText", "0"),
+    // The clock addon's five (`Blizzard_TimeManager.lua`), one run of register calls at
+    // 0x4aa603-0x4aa675, flags 5, no help: `timeMgrUseMilitaryTime`, `timeMgrUseLocalTime` and
+    // `timeMgrAlarmTime` and `timeMgrAlarmEnabled` default "0" (0x88bf68), `timeMgrAlarmMessage` "".
+    same("timeMgrAlarmEnabled", "0"),
+    same("timeMgrAlarmMessage", ""),
+    same("timeMgrAlarmTime", "0"),
+    same("timeMgrUseLocalTime", "0"),
+    same("timeMgrUseMilitaryTime", "0"),
 ];
 
 /// The CVars a build's script VM registers: the table, and 2.4.3's additions on its dialect.

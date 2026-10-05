@@ -92,6 +92,48 @@ impl super::UiScript {
         self.model_mut().mirror_timers.retain(|t| t.name != name);
     }
 
+    /// `SPELLCAST_START`: the player casts `name` for `duration_ms`, the bar reading `text`.
+    pub fn cast_start(
+        &mut self,
+        name: &str,
+        text: &str,
+        texture: Option<String>,
+        duration_ms: i64,
+    ) {
+        let start_ms = super::clock::now(self.lua()) * 1000.0;
+        self.model_mut().cast = Some(ChannelState {
+            name: name.to_owned(),
+            text: text.to_owned(),
+            texture,
+            start_ms,
+            end_ms: start_ms + duration_ms as f64,
+        });
+    }
+
+    /// `SPELLCAST_DELAYED`: the running cast ends `delay_ms` later.
+    pub fn cast_delay(&mut self, delay_ms: i64) {
+        if let Some(c) = self.model_mut().cast.as_mut() {
+            c.end_ms += delay_ms as f64;
+        }
+    }
+
+    /// `SPELLCAST_STOP`, `_FAILED` and `_INTERRUPTED`: no cast runs.
+    pub fn cast_stop(&mut self) {
+        self.model_mut().cast = None;
+    }
+
+    /// Push the dungeon difficulty the server states (0 normal, 1 heroic on the wire), which
+    /// `GetCurrentDungeonDifficulty` answers as 1 or 2.
+    pub fn set_dungeon_difficulty(&mut self, wire: u32) {
+        self.model_mut().dungeon_difficulty = wire.min(1) as u8 + 1;
+    }
+
+    /// Push whether the server allows voice chat (`SMSG_FEATURE_SYSTEM_STATUS`), which
+    /// `IsVoiceChatAllowedByServer` answers.
+    pub fn set_voice_chat_allowed(&mut self, allowed: bool) {
+        self.model_mut().voice_chat_allowed = allowed;
+    }
+
     /// `SPELLCAST_CHANNEL_START`: the player channels `name` for `duration_ms`, the bar reading
     /// `text` and `texture`.
     pub fn channel_start(
@@ -226,6 +268,106 @@ fn install_engine_state(lua: &Lua) -> mlua::Result<()> {
                 None => ("UNKNOWN".to_owned(), 0, 0, 0, 0, String::new()),
             })
         })?,
+    )?;
+    // The auction sort order per list (`"list"`, `"bidder"`, `"owner"`), as the browse, bid and
+    // auction tabs set it before a header click: `SortAuctionClearSort(type)` empties it,
+    // `SortAuctionSetSort(type, column, reverse)` appends, `GetAuctionSort(type, n)` -> column,
+    // reverse of the n-th. The order reaches the app's lists through the 1.12.1 `SortAuctionItems`
+    // feed only, so `SortAuctionApplySort` keeps the order and re-sorts nothing yet.
+    g.set(
+        "SortAuctionClearSort",
+        lua.create_function(|lua, ty: String| {
+            lua.app_data_mut::<Model>()
+                .expect("model app_data")
+                .auction_sort_order
+                .remove(&ty.to_ascii_lowercase());
+            Ok(())
+        })?,
+    )?;
+    g.set(
+        "SortAuctionSetSort",
+        lua.create_function(|lua, (ty, column, reverse): (String, String, Value)| {
+            lua.app_data_mut::<Model>()
+                .expect("model app_data")
+                .auction_sort_order
+                .entry(ty.to_ascii_lowercase())
+                .or_default()
+                .push((
+                    column,
+                    !matches!(reverse, Value::Nil | Value::Boolean(false)),
+                ));
+            Ok(())
+        })?,
+    )?;
+    g.set(
+        "SortAuctionApplySort",
+        lua.create_function(|_, _: String| Ok(()))?,
+    )?;
+    g.set(
+        "GetAuctionSort",
+        lua.create_function(|lua, (ty, n): (String, Value)| {
+            let n = number_arg(lua, n, r#"Usage: GetAuctionSort("type", index)"#)?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(
+                match usize::try_from(n)
+                    .ok()
+                    .and_then(|n| n.checked_sub(1))
+                    .and_then(|i| {
+                        model
+                            .auction_sort_order
+                            .get(&ty.to_ascii_lowercase())?
+                            .get(i)
+                    }) {
+                    Some((column, reverse)) => MultiValue::from_vec(vec![
+                        Value::String(lua.create_string(column)?),
+                        Value::Boolean(*reverse),
+                    ]),
+                    None => MultiValue::new(),
+                },
+            )
+        })?,
+    )?;
+    // `UnitCastingInfo("unit")` -> name, subtext, text, texture, startTime, endTime, isTradeSkill
+    // while the unit casts (`CastingBarFrame.lua:54`); only the player's cast is held.
+    g.set(
+        "UnitCastingInfo",
+        lua.create_function(|lua, unit: Value| {
+            let unit =
+                super::binding_abi::string_arg(lua, unit, r#"Usage: UnitCastingInfo("unit")"#)?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let cast = model
+                .cast
+                .as_ref()
+                .filter(|_| unit.eq_ignore_ascii_case("player"));
+            Ok(match cast {
+                Some(c) => MultiValue::from_vec(vec![
+                    Value::String(lua.create_string(&c.name)?),
+                    Value::String(lua.create_string("")?),
+                    Value::String(lua.create_string(&c.text)?),
+                    match &c.texture {
+                        Some(t) => Value::String(lua.create_string(t)?),
+                        None => Value::Nil,
+                    },
+                    Value::Number(c.start_ms),
+                    Value::Number(c.end_ms),
+                    Value::Boolean(false),
+                ]),
+                None => MultiValue::new(),
+            })
+        })?,
+    )?;
+    // `IsVoiceChatAllowedByServer()`: the server's voice-chat flag from its feature status.
+    g.set(
+        "IsVoiceChatAllowedByServer",
+        lua.create_function(|lua, _: MultiValue| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(model.voice_chat_allowed)
+        })?,
+    )?;
+    // `GetBuildInfo()` -> version, build, date: the 2.4.3 exe's own three strings.
+    g.set(
+        "GetBuildInfo",
+        lua.create_function(|_, ()| Ok(("2.4.3", "8606", "Jul 10 2008")))?,
     )?;
     // `UnitChannelInfo("unit")` -> name, subtext, text, texture, startTime, endTime, isTradeSkill
     // while the unit channels; only the player's channel is held, so any other unit answers nothing.
@@ -525,10 +667,13 @@ fn install_empty_state(lua: &Lua) -> mlua::Result<()> {
         "GetCurrentTitle",
         lua.create_function(|_, _: MultiValue| Ok(-1))?,
     )?;
-    // The dungeon difficulty a character that never changed it has: 1, normal (2 is heroic).
+    // The dungeon difficulty the server last stated; 1, normal, until it states one (2 is heroic).
     g.set(
         "GetCurrentDungeonDifficulty",
-        lua.create_function(|_, _: MultiValue| Ok(1))?,
+        lua.create_function(|lua, _: MultiValue| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(i64::from(model.dungeon_difficulty))
+        })?,
     )?;
     // No totems: `haveTotem` false with an empty name, icon and zero times.
     g.set(
@@ -580,6 +725,12 @@ fn install_empty_state(lua: &Lua) -> mlua::Result<()> {
         // No channel-pane rows and no titles are held.
         ("GetNumDisplayChannels", 0),
         ("GetNumTitles", 0),
+        // No guild bank is open: no tabs, no money, and nothing a member may withdraw.
+        ("GetNumGuildBankTabs", 0),
+        ("GetGuildBankMoney", 0),
+        ("GetGuildBankWithdrawMoney", 0),
+        // The first tab, the one `GetNumGuildBankTabs() + 1` offers to buy.
+        ("GetCurrentGuildBankTab", 1),
     ] {
         g.set(
             name,
@@ -600,6 +751,13 @@ fn install_empty_state(lua: &Lua) -> mlua::Result<()> {
         // Not opted out of loot; no refer-a-friend link.
         "GetOptOutOfLoot",
         "IsReferAFriendLinked",
+        // No refer-a-friend link, so no friend can be summoned; no voice session has members.
+        "CanSummonFriend",
+        "GetNumVoiceSessionMembersBySessionID",
+        // No craft slot filter is set and no guild bank is open, so none is repairable.
+        "GetCraftFilter",
+        "CanGuildBankRepair",
+        "CanWithdrawGuildBankMoney",
     ] {
         g.set(
             name,
@@ -608,6 +766,11 @@ fn install_empty_state(lua: &Lua) -> mlua::Result<()> {
     }
     for name in [
         "GetLFGTypes",
+        // No craft window is open, so no inventory slots to filter by; no guild bank tab exists.
+        "GetCraftSlots",
+        "GetGuildBankTabInfo",
+        // The guild's tabard is not held, so it names no image files.
+        "GetGuildTabardFileNames",
         "VoiceEnumerateOutputDevices",
         "VoiceEnumerateCaptureDevices",
         "Sound_GameSystem_GetOutputDriverNameByIndex",
@@ -617,6 +780,11 @@ fn install_empty_state(lua: &Lua) -> mlua::Result<()> {
             lua.create_function(|_, _: MultiValue| Ok(MultiValue::new()))?,
         )?;
     }
+    // No honor currency is read from the player's fields yet.
+    g.set(
+        "GetHonorCurrency",
+        lua.create_function(|_, _: MultiValue| Ok(0))?,
+    )?;
     g.set(
         "IsPossessBarVisible",
         lua.create_function(|_, _: MultiValue| Ok(false))?,
@@ -629,6 +797,74 @@ mod tests {
 
     fn s51() -> UiScript {
         UiScript::with_dialect(ScriptDialect::Lua51).unwrap()
+    }
+
+    #[test]
+    fn unit_casting_info_answers_the_players_running_cast_and_nothing_else() {
+        let mut s = s51();
+        assert_eq!(s.arity(r#"UnitCastingInfo("player")"#).unwrap(), 0);
+        s.cast_start(
+            "Fireball",
+            "Fireball",
+            Some("Interface\\Icons\\Spell_Fire".into()),
+            3000,
+        );
+        let (name, sub, text, tex, start, end, trade): (
+            String,
+            String,
+            String,
+            String,
+            f64,
+            f64,
+            bool,
+        ) = s.eval(r#"return UnitCastingInfo("player")"#).unwrap();
+        assert_eq!(
+            (name.as_str(), sub.as_str(), text.as_str()),
+            ("Fireball", "", "Fireball")
+        );
+        assert_eq!(tex, "Interface\\Icons\\Spell_Fire");
+        assert_eq!(end - start, 3000.0);
+        assert!(!trade);
+        s.cast_delay(500);
+        let end2: f64 = s
+            .eval(r#"return select(6, UnitCastingInfo("player"))"#)
+            .unwrap();
+        assert_eq!(end2 - end, 500.0);
+        assert_eq!(s.arity(r#"UnitCastingInfo("target")"#).unwrap(), 0);
+        s.cast_stop();
+        assert_eq!(s.arity(r#"UnitCastingInfo("player")"#).unwrap(), 0);
+    }
+
+    #[test]
+    fn the_build_voice_guild_bank_and_honor_verbs_answer_what_the_files_read() {
+        let mut s = s51();
+        assert_eq!(
+            s.eval::<(String, String, String)>("return GetBuildInfo()")
+                .unwrap(),
+            ("2.4.3".into(), "8606".into(), "Jul 10 2008".into())
+        );
+        assert!(!s
+            .eval::<bool>("return IsVoiceChatAllowedByServer()")
+            .unwrap());
+        s.set_voice_chat_allowed(true);
+        assert!(s
+            .eval::<bool>("return IsVoiceChatAllowedByServer()")
+            .unwrap());
+        assert_eq!(
+            s.eval::<(i64, i64, i64, i64)>(
+                "return GetNumGuildBankTabs(), GetGuildBankMoney(), GetGuildBankWithdrawMoney(), GetHonorCurrency()"
+            )
+            .unwrap(),
+            (0, 0, 0, 0)
+        );
+        assert!(!s
+            .eval::<bool>("return CanSummonFriend('Someone') and true or false")
+            .unwrap());
+        assert_eq!(s.arity("GetCraftSlots()").unwrap(), 0);
+        assert_eq!(
+            s.arity("GetNumVoiceSessionMembersBySessionID(1)").unwrap(),
+            1
+        );
     }
 
     #[test]

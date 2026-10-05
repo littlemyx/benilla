@@ -623,6 +623,21 @@ pub enum SessionEvent {
     /// Time left on one of our auras by `UNIT_FIELD_AURA` slot (`SMSG_UPDATE_AURA_DURATION`),
     /// never for a permanent one. It arrives before the delta naming the slot's spell.
     AuraDuration { slot: u8, remaining_ms: u32 },
+    /// One aura's timing on `guid` (2.4.3 `SMSG_INIT_EXTRA_AURA_INFO`, `SMSG_SET_EXTRA_AURA_INFO`
+    /// and its `_NEED_UPDATE` twin): the server tells the caster its aura's full and remaining time.
+    ExtraAuraInfo {
+        guid: u64,
+        aura: crate::messages::ExtraAura,
+    },
+    /// `SMSG_CLEAR_EXTRA_AURA_INFO` (2.4.3): the timing of `spell_id` on `guid` is gone.
+    ExtraAuraCleared { guid: u64, spell_id: u32 },
+    /// `SMSG_MOTD` (2.4.3): the message of the day, one string per chat line.
+    Motd { lines: Vec<String> },
+    /// `SMSG_FEATURE_SYSTEM_STATUS` (2.4.3): whether the server allows voice chat.
+    FeatureSystemStatus { voice_chat_enabled: bool },
+    /// The dungeon difficulty the server states (2.4.3 `SMSG_INSTANCE_DIFFICULTY` and
+    /// `MSG_SET_DUNGEON_DIFFICULTY`): 0 normal, 1 heroic.
+    DungeonDifficulty { difficulty: u32 },
     /// A spell-visual kit outside the cast sequence (`SMSG_PLAY_SPELL_VISUAL`), such as eat/drink.
     PlaySpellVisual { unit: u64, kit_id: u32 },
     /// Spell damage dealt (`SMSG_SPELLNONMELEEDAMAGELOG`).

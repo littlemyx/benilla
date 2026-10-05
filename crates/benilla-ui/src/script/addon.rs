@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use mlua::{Lua, MultiValue, Value};
 
-use super::addon_gate::{can_load, GateRow, Verdict};
+use super::addon_gate::{can_load_for, GateRow, Verdict};
 use super::binding_abi::flag;
 use super::Model;
 use crate::status::Status;
@@ -182,7 +182,13 @@ fn verdict(model: &Model, i: usize) -> Verdict {
     if model.addons[i].loaded {
         return Verdict::Loadable;
     }
-    can_load(&gate_rows(model), i, true, version_check(model))
+    can_load_for(
+        model.client_interface,
+        &gate_rows(model),
+        i,
+        true,
+        version_check(model),
+    )
 }
 
 fn lua_str(lua: &Lua, s: &str) -> mlua::Result<Value> {
@@ -694,6 +700,10 @@ fn log_error(lua: &Lua, msg: &str) {
 
 /// The host's side: the registry, where its files live, and what to write back.
 impl super::UiScript {
+    /// The `## Interface` number this client's version gate compares addons against.
+    pub fn client_interface(&self) -> u32 {
+        self.model_ref().client_interface
+    }
     /// Seat the reader chain-sourced addons (`AddOnInfo::chain`) are read through.
     pub fn set_addon_chain_reader(&self, reader: AddonChainReader) {
         self.model_mut().addons_chain_reader = Some(std::rc::Rc::from(reader));

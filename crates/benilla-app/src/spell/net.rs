@@ -48,6 +48,8 @@ pub(super) fn register(app: &mut App) {
         .net_handler(K::ChannelStart, on_channel)
         .net_handler(K::ChannelUpdate, on_channel)
         .net_handler(K::AuraDuration, on_aura_duration)
+        .net_handler(K::ExtraAuraInfo, on_extra_aura)
+        .net_handler(K::ExtraAuraCleared, on_extra_aura)
         .net_handler(K::SpellModifier, on_spell_modifier);
 }
 
@@ -412,6 +414,27 @@ fn on_aura_duration(In(ev): In<SessionEvent>, mut l: Lifecycle, real_clock: Res<
             &mut l.aura_durations,
             real_clock.elapsed_secs_f64(),
         );
+    }
+}
+
+/// 2.4.3 `SMSG_*_EXTRA_AURA_INFO`: the timing of an aura on the player replaces what 1.12.1's
+/// `SMSG_UPDATE_AURA_DURATION` carried; an aura on another unit has no reader yet.
+fn on_extra_aura(In(ev): In<SessionEvent>, mut l: Lifecycle, real_clock: Res<Time<Real>>) {
+    let now = real_clock.elapsed_secs_f64();
+    match ev {
+        SessionEvent::ExtraAuraInfo { guid, aura } if Some(guid) == l.self_guid.0 => {
+            l.aura_durations.set_timed(
+                aura.slot,
+                aura.spell_id,
+                aura.max_duration_ms,
+                aura.remaining_ms,
+                now,
+            )
+        }
+        SessionEvent::ExtraAuraCleared { guid, spell_id } if Some(guid) == l.self_guid.0 => {
+            l.aura_durations.clear_spell(spell_id)
+        }
+        _ => {}
     }
 }
 

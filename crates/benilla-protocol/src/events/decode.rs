@@ -1088,6 +1088,29 @@ pub fn decode(packet: ServerPacket) -> Vec<SessionEvent> {
         ServerPacket::Tbc(crate::messages::TbcPacket::TimeSyncRequest { counter }) => {
             vec![SessionEvent::TimeSyncRequest { counter }]
         }
+        ServerPacket::Tbc(crate::messages::TbcPacket::InitExtraAuraInfo { guid, auras }) => auras
+            .into_iter()
+            .map(|aura| SessionEvent::ExtraAuraInfo { guid, aura })
+            .collect(),
+        ServerPacket::Tbc(crate::messages::TbcPacket::SetExtraAuraInfo { guid, aura, .. }) => {
+            vec![SessionEvent::ExtraAuraInfo { guid, aura }]
+        }
+        ServerPacket::Tbc(crate::messages::TbcPacket::ClearExtraAuraInfo { guid, spell_id }) => {
+            vec![SessionEvent::ExtraAuraCleared { guid, spell_id }]
+        }
+        ServerPacket::Tbc(crate::messages::TbcPacket::Motd { lines }) => {
+            vec![SessionEvent::Motd { lines }]
+        }
+        ServerPacket::Tbc(crate::messages::TbcPacket::FeatureSystemStatus {
+            voice_chat_enabled,
+            ..
+        }) => vec![SessionEvent::FeatureSystemStatus { voice_chat_enabled }],
+        ServerPacket::Tbc(crate::messages::TbcPacket::InstanceDifficulty {
+            difficulty, ..
+        })
+        | ServerPacket::Tbc(crate::messages::TbcPacket::SetDungeonDifficulty {
+            difficulty, ..
+        }) => vec![SessionEvent::DungeonDifficulty { difficulty }],
         ServerPacket::Tbc(_) => Vec::new(),
         // No parse arm at all: surfaced for the app's dropped-opcode tally.
         ServerPacket::Other { opcode } => vec![SessionEvent::PacketDropped {

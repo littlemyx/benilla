@@ -431,8 +431,20 @@ pub(crate) struct Model {
     pub(crate) account_expansion: u8,
     /// The mirror timers the server has running, in start order: `GetMirrorTimerInfo`'s rows.
     pub(crate) mirror_timers: Vec<super::ui243_verbs::MirrorTimerState>,
+    /// The player's cast while one runs: `UnitCastingInfo("player")`.
+    pub(crate) cast: Option<super::ui243_verbs::ChannelState>,
+    /// The auction sort order per list, in set order: `(column, reverse)` rows.
+    pub(crate) auction_sort_order: HashMap<String, Vec<(String, bool)>>,
+    /// `GetCurrentDungeonDifficulty()`: 1 normal, 2 heroic.
+    pub(crate) dungeon_difficulty: u8,
+    /// The server's voice-chat flag (`SMSG_FEATURE_SYSTEM_STATUS`).
+    pub(crate) voice_chat_allowed: bool,
     /// The player's channelled spell while one runs: `UnitChannelInfo("player")`.
     pub(crate) channel: Option<super::ui243_verbs::ChannelState>,
+    /// The `## Interface` this client implements: the addon version gate's number (1.12.1 11200).
+    pub(crate) client_interface: u32,
+    /// The combat log's entry store, cursor and filters (`CombatLog*` verbs).
+    pub(crate) combat_log: super::ui243_combatlog::CombatLogState,
     /// What `SetAutoLootDefault` last set (the Auto Loot option's engine side).
     pub(crate) auto_loot_default: bool,
     /// Calls of the secure-execution verbs, while the taint model is pending.
@@ -1213,6 +1225,12 @@ impl Model {
             account_expansion: 0,
             mirror_timers: Vec::new(),
             channel: None,
+            cast: None,
+            voice_chat_allowed: false,
+            dungeon_difficulty: 1,
+            auction_sort_order: HashMap::new(),
+            client_interface: super::addon_gate::CLIENT_INTERFACE,
+            combat_log: Default::default(),
             auto_loot_default: false,
             secure_model_calls: Default::default(),
             stackable_actions: Default::default(),
