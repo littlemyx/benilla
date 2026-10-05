@@ -60,6 +60,7 @@ pub use tbc_chat::{
     chat_ignored_tbc, chat_type_to_tbc, join_channel_tbc, leave_channel_tbc, messagechat_tbc,
     UserListChange,
 };
+mod tbc_combat;
 mod tbc_same;
 pub use tbc_same::{same_reader_for, TBC_SAME_READERS};
 mod tbc_world;

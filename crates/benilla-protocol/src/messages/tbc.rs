@@ -217,6 +217,28 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
         }
         t::SMSG_SPELL_START => ServerPacket::SpellStart(super::spells::read_spell_start_tbc(r)?),
         t::SMSG_SPELL_GO => ServerPacket::SpellGo(super::spells::read_spell_go_tbc(r)?),
+        // --- Combat readout: values or bytes that differ from 1.12.1 (`tbc_combat`) -----------
+        t::SMSG_ATTACKERSTATEUPDATE => {
+            ServerPacket::AttackerState(super::attack::read_attacker_state_in(r, true)?)
+        }
+        t::SMSG_SPELLNONMELEEDAMAGELOG => {
+            ServerPacket::SpellDamageLog(super::combat_log::read_spell_damage_log_in(r, true)?)
+        }
+        t::SMSG_PERIODICAURALOG => {
+            ServerPacket::PeriodicAuraLog(super::combat_log::read_periodic_aura_log_in(r, true)?)
+        }
+        t::SMSG_SPELLDAMAGESHIELD => {
+            ServerPacket::DamageShield(super::tbc_combat::read_damage_shield_tbc(r)?)
+        }
+        t::SMSG_SPELLHEALLOG => {
+            ServerPacket::SpellHealLog(super::tbc_combat::read_spell_heal_log_tbc(r)?)
+        }
+        t::SMSG_SPELLINSTAKILLLOG => {
+            ServerPacket::SpellInstaKillLog(super::tbc_combat::read_spell_insta_kill_log_tbc(r)?)
+        }
+        t::SMSG_SPELLDISPELLOG => {
+            ServerPacket::SpellDispelLog(super::tbc_combat::read_spell_dispel_log_tbc(r)?)
+        }
         // --- Movement and objects -----------------------------------------------------------
         t::SMSG_MONSTER_MOVE => super::monster_move::read_monster_move_tbc(r, false)?,
         t::SMSG_MONSTER_MOVE_TRANSPORT => super::monster_move::read_monster_move_tbc(r, true)?,
