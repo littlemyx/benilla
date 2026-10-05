@@ -110,10 +110,13 @@ pub mod tbc_opcode {
     pub const SMSG_SET_PROFICIENCY: u16 = 0x0127;
     pub const SMSG_ACTION_BUTTONS: u16 = 0x0129;
     pub const SMSG_INITIAL_SPELLS: u16 = 0x012a;
+    pub const SMSG_CAST_RESULT: u16 = 0x0130;
     pub const SMSG_SPELL_START: u16 = 0x0131;
     pub const SMSG_SPELL_GO: u16 = 0x0132;
     pub const SMSG_SPELL_COOLDOWN: u16 = 0x0134;
     pub const SMSG_UPDATE_AURA_DURATION: u16 = 0x0137;
+    pub const MSG_CHANNEL_START: u16 = 0x0139;
+    pub const MSG_CHANNEL_UPDATE: u16 = 0x013a;
     pub const SMSG_ATTACKERSTATEUPDATE: u16 = 0x014a;
     pub const SMSG_CANCEL_COMBAT: u16 = 0x014e;
     pub const SMSG_SPELLBREAKLOG: u16 = 0x014f;
@@ -344,11 +347,14 @@ static NAMES: &[(u16, &str)] = &[
     (0x012a, "SMSG_INITIAL_SPELLS"),
     (0x012b, "SMSG_LEARNED_SPELL"),
     (0x012c, "SMSG_SUPERCEDED_SPELL"),
+    (0x0130, "SMSG_CAST_RESULT"),
     (0x0131, "SMSG_SPELL_START"),
     (0x0132, "SMSG_SPELL_GO"),
     (0x0134, "SMSG_SPELL_COOLDOWN"),
     (0x0135, "SMSG_COOLDOWN_EVENT"),
     (0x0137, "SMSG_UPDATE_AURA_DURATION"),
+    (0x0139, "MSG_CHANNEL_START"),
+    (0x013a, "MSG_CHANNEL_UPDATE"),
     (0x013c, "SMSG_AI_REACTION"),
     (0x0143, "SMSG_ATTACKSTART"),
     (0x0144, "SMSG_ATTACKSTOP"),

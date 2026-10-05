@@ -217,6 +217,14 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
         }
         t::SMSG_SPELL_START => ServerPacket::SpellStart(super::spells::read_spell_start_tbc(r)?),
         t::SMSG_SPELL_GO => ServerPacket::SpellGo(super::spells::read_spell_go_tbc(r)?),
+        // --- Spells: failures, cooldowns and channels (`tbc_spells`) -------------------------
+        t::SMSG_CAST_RESULT => super::tbc_spells::read_cast_failed(r)?,
+        t::SMSG_SPELL_COOLDOWN => {
+            let (caster, cooldowns) = super::tbc_spells::read_spell_cooldown(r)?;
+            ServerPacket::SpellCooldownList { caster, cooldowns }
+        }
+        t::MSG_CHANNEL_START => ServerPacket::Tbc(super::tbc_spells::read_channel_start(r)?),
+        t::MSG_CHANNEL_UPDATE => ServerPacket::Tbc(super::tbc_spells::read_channel_update(r)?),
         // --- Combat readout: values or bytes that differ from 1.12.1 (`tbc_combat`) -----------
         t::SMSG_ATTACKERSTATEUPDATE => {
             ServerPacket::AttackerState(super::attack::read_attacker_state_in(r, true)?)

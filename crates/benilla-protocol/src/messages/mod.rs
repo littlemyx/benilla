@@ -62,7 +62,9 @@ pub use tbc_chat::{
 };
 mod tbc_combat;
 mod tbc_same;
+mod tbc_spells;
 pub use tbc_same::{same_reader_for, TBC_SAME_READERS};
+pub use tbc_spells::{cast_result_from_tbc, CAST_RESULT_TBC_TO_112};
 mod tbc_world;
 pub use tbc_world::{Contact, ExtraAura, TbcPacket};
 mod trade;

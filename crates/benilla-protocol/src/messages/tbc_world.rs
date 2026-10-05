@@ -135,6 +135,23 @@ pub enum TbcPacket {
     },
     /// `SMSG_CHAT_RESTRICTED`: why the chat line was refused (a `ChatRestrictionType`).
     ChatRestricted { reason: u8 },
+    /// `SMSG_CAST_RESULT` with a result 1.12.1 has no entry for (`result` is 2.4.3's number).
+    CastFailed {
+        spell_id: u32,
+        result: u8,
+        cast_count: u8,
+        /// The area, spell focus or equipped item class word of the results that carry one.
+        arg: Option<u32>,
+    },
+    /// `MSG_CHANNEL_START`: `caster` began channelling `spell_id` for `duration_ms`. Sent to every
+    /// unit in range, so a 1.12.1 `ChannelStart` (ours alone) cannot stand for it.
+    ChannelStart {
+        caster: u64,
+        spell_id: u32,
+        duration_ms: u32,
+    },
+    /// `MSG_CHANNEL_UPDATE`: `caster`'s channel has `remaining_ms` left (0 ends it).
+    ChannelUpdate { caster: u64, remaining_ms: u32 },
 }
 
 impl TbcPacket {
@@ -193,6 +210,9 @@ impl TbcPacket {
                 super::tbc_chat::UserListChange::Remove => "SMSG_USERLIST_REMOVE",
             },
             TbcPacket::ChatRestricted { .. } => "SMSG_CHAT_RESTRICTED",
+            TbcPacket::CastFailed { .. } => "SMSG_CAST_RESULT",
+            TbcPacket::ChannelStart { .. } => "MSG_CHANNEL_START",
+            TbcPacket::ChannelUpdate { .. } => "MSG_CHANNEL_UPDATE",
         }
     }
 }
