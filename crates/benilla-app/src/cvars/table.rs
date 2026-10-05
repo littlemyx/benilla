@@ -109,6 +109,172 @@ pub(crate) fn registered_pairs() -> impl Iterator<Item = (&'static str, &'static
     REGISTERED.iter().map(|r| (r.name, r.default))
 }
 
+/// The CVars the 2.4.3 client registers that 1.12.1 has no name for, as the stock 2.4.3 interface
+/// reads them: each row is the string the 2.4.3 exe passes to its register call for the name
+/// (found statically at the cited site), so every row is `same`. The 2.4.3 build's VM takes these
+/// after [`REGISTERED`] ([`registered_pairs_for`]); 1.12.1 never sees them. Not here for want of a
+/// default the scan can read: `locale` (registered as the placeholder `****`, set from the install
+/// at boot), `rotateMinimap` and `Sound_ListenerAtCharacter` (no register call of the common shape).
+pub(crate) const REGISTERED_243: &[Registered] = &[
+    // `CombatHealing` register site 0x60d7fb, help "Toggles all healing numbers over a target".
+    same("CombatHealing", "1"),
+    // `ShowTargetCastbar` register site 0x4aa7b7, help "Show the spell your current target is casting".
+    same("ShowTargetCastbar", "0"),
+    // `ShowVKeyCastbar` register site 0x4aa7d1, help "If the V key display is up for your current target, show the enemy cast bar with teh target's health bar in the game field".
+    same("ShowVKeyCastbar", "0"),
+    // `Sound_EnableAllSound` register site 0x467e1b.
+    same("Sound_EnableAllSound", "1"),
+    // `Sound_EnableAmbience` register site 0x467db8, help "Enable Ambience".
+    same("Sound_EnableAmbience", "1"),
+    // `Sound_EnableEmoteSounds` register site 0x467ee4.
+    same("Sound_EnableEmoteSounds", "1"),
+    // `Sound_EnableErrorSpeech` register site 0x467dd6, help "error speech".
+    same("Sound_EnableErrorSpeech", "1"),
+    // `Sound_EnableHardware` register site 0x467aab, help "Enables Hardware".
+    same("Sound_EnableHardware", "0"),
+    // `Sound_EnableMusic` register site 0x467dfa, help "Enables music".
+    same("Sound_EnableMusic", "1"),
+    // `Sound_EnableReverb` register site 0x4679a6.
+    same("Sound_EnableReverb", "0"),
+    // `Sound_EnableSFX` register site 0x467d94.
+    same("Sound_EnableSFX", "1"),
+    // `Sound_OutputDriverIndex` register site 0x467a4b.
+    same("Sound_OutputDriverIndex", "0"),
+    // `Sound_VoiceChatInputDriverIndex` register site 0x4679c7.
+    same("Sound_VoiceChatInputDriverIndex", "0"),
+    // `Sound_VoiceChatOutputDriverIndex` register site 0x467a09.
+    same("Sound_VoiceChatOutputDriverIndex", "0"),
+    // `Sound_ZoneMusicNoDelay` register site 0x467f05.
+    same("Sound_ZoneMusicNoDelay", "0"),
+    // `UnitNameCompanionName` register site 0x6d555c.
+    same("UnitNameCompanionName", "1"),
+    // `UnitNameEnemyCreationName` register site 0x6d54c6.
+    same("UnitNameEnemyCreationName", "1"),
+    // `UnitNameEnemyPetName` register site 0x6d54a2.
+    same("UnitNameEnemyPetName", "1"),
+    // `UnitNameEnemyPlayerName` register site 0x6d5481.
+    same("UnitNameEnemyPlayerName", "1"),
+    // `UnitNameFriendlyCreationName` register site 0x6d5535.
+    same("UnitNameFriendlyCreationName", "1"),
+    // `UnitNameFriendlyPetName` register site 0x6d5511.
+    same("UnitNameFriendlyPetName", "1"),
+    // `UnitNameFriendlyPlayerName` register site 0x6d54ea.
+    same("UnitNameFriendlyPlayerName", "1"),
+    // `VoiceChatMode` register site 0x6dbecd, help "Push to talk(0) or voice activation(1)".
+    same("VoiceChatMode", "0"),
+    // `alwaysShowActionBars` register site 0x4aa31b.
+    same("alwaysShowActionBars", "0"),
+    // `autoDismountFlying` register site 0x60d941.
+    same("autoDismountFlying", "0"),
+    // `autoLootCorpse` register site 0x4aa1fc.
+    same("autoLootCorpse", "0"),
+    // `autoQuestWatch` register site 0x4aa28b.
+    same("autoQuestWatch", "1"),
+    // `autoRangedCombat` register site 0x4aa18f, help "Auto Attack/Auto Shot".
+    same("autoRangedCombat", "1"),
+    // `autojoinBGVoice` register site 0x4aa6ad.
+    same("autojoinBGVoice", "0"),
+    // `autojoinPartyVoice` register site 0x4aa68f.
+    same("autojoinPartyVoice", "1"),
+    // `buffDurations` register site 0x4aa252.
+    same("buffDurations", "1"),
+    // `cameraPitchSmoothSpeed` register site 0x535a87.
+    same("cameraPitchSmoothSpeed", "45.0"),
+    // `chatLocked` register site 0x4aa2e2.
+    same("chatLocked", "0"),
+    // `displayFreeBagSlots` register site 0x4a9ffe, help "Whether or not the backpack button should indicate how many inventory slots you've got free.".
+    same("displayFreeBagSlots", "0"),
+    // `displayWorldPVPObjectives` register site 0x4aa336.
+    same("displayWorldPVPObjectives", "1"),
+    // `enableCombatText` register site 0x4aa359.
+    same("enableCombatText", "0"),
+    // `fctAuras` register site 0x4aa4aa.
+    same("fctAuras", "0"),
+    // `fctCombatState` register site 0x4aa38d.
+    same("fctCombatState", "0"),
+    // `fctComboPoints` register site 0x4aa438.
+    same("fctComboPoints", "0"),
+    // `fctDamageReduction` register site 0x4aa3c6.
+    same("fctDamageReduction", "0"),
+    // `fctDodgeParryMiss` register site 0x4aa3a8.
+    same("fctDodgeParryMiss", "0"),
+    // `fctEnergyGains` register site 0x4aa471.
+    same("fctEnergyGains", "0"),
+    // `fctFriendlyHealers` register site 0x4aa41a.
+    same("fctFriendlyHealers", "0"),
+    // `fctHonorGains` register site 0x4aa48c.
+    same("fctHonorGains", "0"),
+    // `fctLowManaHealth` register site 0x4aa453.
+    same("fctLowManaHealth", "0"),
+    // `fctReactives` register site 0x4aa3ff.
+    same("fctReactives", "0"),
+    // `fctRepChanges` register site 0x4aa3e1.
+    same("fctRepChanges", "0"),
+    // `guildRecruitmentChannel` register site 0x4aa2c4.
+    same("guildRecruitmentChannel", "1"),
+    // `hidePartyInRaid` register site 0x4aa51d.
+    same("hidePartyInRaid", "0"),
+    // `lockActionBars` register site 0x4aa2fd.
+    same("lockActionBars", "0"),
+    // `lootUnderMouse` register site 0x4aa1de.
+    same("lootUnderMouse", "0"),
+    // `partyStatusText` register site 0x4a9f88.
+    same("partyStatusText", "0"),
+    // `petStatusText` register site 0x4a9fa6.
+    same("petStatusText", "0"),
+    // `playerStatusText` register site 0x4a9f6d.
+    same("playerStatusText", "0"),
+    // `questFadingDisable` register site 0x4aa275.
+    same("questFadingDisable", "0"),
+    // `removeChatDelay` register site 0x4aa2a9.
+    same("removeChatDelay", "0"),
+    // `screenEdgeFlash` register site 0x4aa5ab.
+    same("screenEdgeFlash", "1"),
+    // `scriptErrors` register site 0x4a9f16.
+    same("scriptErrors", "0"),
+    // `secureAbilityToggle` register site 0x4aa1c3.
+    same("secureAbilityToggle", "1"),
+    // `showChatIcons` register site 0x4aa4c5.
+    same("showChatIcons", "0"),
+    // `showClock` register site 0x4aa5e9.
+    same("showClock", "1"),
+    // `showNewbieTips` register site 0x4aa4e3.
+    same("showNewbieTips", "1"),
+    // `showPartyBackground` register site 0x4aa503.
+    same("showPartyBackground", "0"),
+    // `showPartyBuffs` register site 0x4aa538.
+    same("showPartyBuffs", "0"),
+    // `showPartyDebuffs` register site 0x4aa556.
+    same("showPartyDebuffs", "1"),
+    // `showPartyPets` register site 0x4aa572.
+    same("showPartyPets", "1"),
+    // `showRaidRange` register site 0x4aa590.
+    same("showRaidRange", "0"),
+    // `showTargetOfTarget` register site 0x4aa218.
+    same("showTargetOfTarget", "0"),
+    // `statusTextPercentage` register site 0x4a9fdf.
+    same("statusTextPercentage", "0"),
+    // `stopAutoAttackOnTargetChange` register site 0x4aa108.
+    same("stopAutoAttackOnTargetChange", "0"),
+    // `targetStatusText` register site 0x4a9fc6.
+    same("targetStatusText", "0"),
+    // `useSimpleChat` register site 0x4aa5c9.
+    same("useSimpleChat", "0"),
+    // `xpBarText` register site 0x4a9f4f.
+    same("xpBarText", "0"),
+];
+
+/// The CVars a build's script VM registers: the table, and 2.4.3's additions on its dialect.
+pub(crate) fn registered_pairs_for(
+    dialect: benilla_ui::script::ScriptDialect,
+) -> impl Iterator<Item = (&'static str, &'static str)> {
+    let extra: &[Registered] = match dialect {
+        benilla_ui::script::ScriptDialect::Lua51 => REGISTERED_243,
+        _ => &[],
+    };
+    REGISTERED.iter().chain(extra).map(|r| (r.name, r.default))
+}
+
 /// The host-backed CVars, one row per knob that has a reader: a host knob, or a Lua consumer
 /// such as the stock Video Options window's verbs.
 ///

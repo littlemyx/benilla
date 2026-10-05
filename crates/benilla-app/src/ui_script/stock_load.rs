@@ -60,7 +60,7 @@ pub(super) fn production_load_observed(
     s.set_screen_resolutions(vec![mode], Some(mode));
     // A reply that hid nothing, so `GetNumAddOns` counts the registry.
     s.note_addon_info_reply(&[]);
-    s.register_cvars(crate::cvars::registered_pairs());
+    s.register_cvars(crate::cvars::registered_pairs_for(s.dialect()));
     s.run(before).unwrap();
     // The layer passed in, not set through `WOW_STOCK_UI`: every test in this process reads it.
     let mut failures = Vec::new();
@@ -569,20 +569,20 @@ mod tests {
 
     const BASELINE_2_4_3: Baseline = Baseline {
         rows: 113,
-        clean: 100,
+        clean: 107,
         classes: [
             (0, 0),
             (0, 0),
             (0, 0),
             (0, 0),
             (0, 0),
-            (2, 2),
+            (0, 0),
             (0, 0),
             (0, 0),
             (0, 0),
             (0, 0),
             (44, 1),
-            (76, 76),
+            (3, 3),
             (3, 3),
         ],
         unattributed: 0,
