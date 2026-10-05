@@ -12,7 +12,7 @@ use crate::wire::{
 };
 
 use super::parse::read_addon_info;
-use super::{opcode, tbc_opcode, tbc_world, update_object, Character, ServerPacket};
+use super::{opcode, tbc_opcode, tbc_world, update_object, Character, ServerPacket, TbcPacket};
 
 /// The billing group of an `AUTH_OK`: `u32` time remaining, `u8` plan flags, `u32` time rested.
 const BILLING_GROUP: usize = 9;
@@ -116,6 +116,10 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
             ServerPacket::Tbc(tbc_world::read_set_dungeon_difficulty(r)?)
         }
         t::SMSG_SET_REST_START => ServerPacket::Tbc(tbc_world::read_set_rest_start(r)?),
+        // --- Death and release ---------------------------------------------------------------
+        t::SMSG_DEATH_RELEASE_LOC => ServerPacket::Tbc(tbc_world::read_death_release_loc(r)?),
+        // Empty; wow_messages only (cmangos-tbc names the opcode and never builds it).
+        t::SMSG_FORCED_DEATH_UPDATE => ServerPacket::Tbc(TbcPacket::ForcedDeathUpdate),
         // 2.4.3 meaning of 0x33A; 1.12.1 carries it at 0x33B.
         t::SMSG_DEFENSE_MESSAGE => {
             let (zone_id, text) = super::broadcast::read_defense_message(r)?;

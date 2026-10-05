@@ -487,6 +487,9 @@ pub fn decode(packet: ServerPacket) -> Vec<SessionEvent> {
             vec![SessionEvent::CorpseReclaimDelay { delay_ms }]
         }
         ServerPacket::DurabilityDamageDeath => vec![SessionEvent::DurabilityDamageDeath],
+        ServerPacket::Tbc(crate::messages::TbcPacket::DeathReleaseLoc { map, position }) => {
+            vec![SessionEvent::DeathReleaseLoc { map, position }]
+        }
         ServerPacket::ResurrectRequest(r) => vec![SessionEvent::ResurrectRequest {
             caster: r.caster,
             name: r.name,

@@ -859,6 +859,12 @@ pub enum SessionEvent {
     },
     /// Corpse reclaim delay (`SMSG_CORPSE_RECLAIM_DELAY`): 30 s, 60 or 120 s on repeated deaths.
     CorpseReclaimDelay { delay_ms: u32 },
+    /// Where the spirit healer stands (2.4.3 `SMSG_DEATH_RELEASE_LOC`), `map: None` once the marker
+    /// is removed on a resurrection.
+    DeathReleaseLoc {
+        map: Option<u32>,
+        position: [f32; 3],
+    },
     /// The 10% death durability loss (`SMSG_DURABILITY_DAMAGE_DEATH`, empty body): the red line.
     DurabilityDamageDeath,
     /// A resurrect offer (`SMSG_RESURRECT_REQUEST`), answered by `CMSG_RESURRECT_RESPONSE`.

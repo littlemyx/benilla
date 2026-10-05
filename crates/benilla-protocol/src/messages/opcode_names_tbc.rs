@@ -218,6 +218,8 @@ pub mod tbc_opcode {
     pub const MSG_MOVE_START_ASCEND: u16 = 0x0359;
     pub const MSG_MOVE_STOP_ASCEND: u16 = 0x035a;
     pub const SMSG_LFG_UPDATE: u16 = 0x036c;
+    pub const SMSG_DEATH_RELEASE_LOC: u16 = 0x0378;
+    pub const SMSG_FORCED_DEATH_UPDATE: u16 = 0x037a;
     pub const MSG_MOVE_SET_FLIGHT_SPEED: u16 = 0x037e;
     pub const MSG_MOVE_SET_FLIGHT_BACK_SPEED: u16 = 0x0380;
     pub const SMSG_FORCE_FLIGHT_SPEED_CHANGE: u16 = 0x0381;
@@ -585,6 +587,8 @@ static NAMES: &[(u16, &str)] = &[
     (0x036c, "SMSG_LFG_UPDATE"),
     (0x036d, "SMSG_LFG_UPDATE_LFM"),
     (0x036e, "SMSG_LFG_UPDATE_LFG"),
+    (0x0378, "SMSG_DEATH_RELEASE_LOC"),
+    (0x037a, "SMSG_FORCED_DEATH_UPDATE"),
     (0x037e, "MSG_MOVE_SET_FLIGHT_SPEED"),
     (0x0380, "MSG_MOVE_SET_FLIGHT_BACK_SPEED"),
     (0x0381, "SMSG_FORCE_FLIGHT_SPEED_CHANGE"),

@@ -10,8 +10,13 @@ use super::WorldWriter;
 impl WorldWriter {
     /// Release the spirit while dead and unreleased; the server answers with ghost aura 8326, the
     /// corpse, `SMSG_CORPSE_RECLAIM_DELAY` and the graveyard teleport.
+    ///
+    /// 2.4.3 sends one `u8` (0) after the opcode, which cmangos-tbc's handler reads and skips; a
+    /// short body throws and nothing is released. Single-source: wow_messages' 2.4.3 message is empty
+    /// and cmangos-classic does not read it, so the byte is cmangos-tbc's alone.
     pub fn repop_request(&mut self) -> Result<()> {
-        self.send(opcode::CMSG_REPOP_REQUEST, &[])
+        let body: &[u8] = if self.tbc { &[0] } else { &[] };
+        self.send(opcode::CMSG_REPOP_REQUEST, body)
     }
 
     /// Ask where our corpse is (`MSG_CORPSE_QUERY`, empty body), answered on the same opcode.

@@ -717,6 +717,11 @@ fn feed_world_map(
         Vec::new()
     };
 
+    script.set_death_release_uv(
+        death_net
+            .release_loc
+            .and_then(|(map, pos)| project(map, pos[0], pos[1])),
+    );
     script.set_world_map_feed(
         player_sel.zone,
         uv,

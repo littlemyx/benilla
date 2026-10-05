@@ -216,6 +216,16 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
 /// one), a channel's icon is not resolved, and `SetAutoLootDefault` keeps its value for no reader yet.
 fn install_engine_state(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
+    // GetDeathReleasePosition() -> map x, y of the spirit healer's graveyard marker, or (0, 0),
+    // which `WorldMapFrame.lua` hides (the marker is fed by `SMSG_DEATH_RELEASE_LOC`).
+    g.set(
+        "GetDeathReleasePosition",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let (x, y) = model.worldmap.death_release_uv.unwrap_or((0.0, 0.0));
+            Ok((f64::from(x), f64::from(y)))
+        })?,
+    )?;
     // `GetContainerNumFreeSlots(bag)` -> free slots, bag family (0 = a general bag, the only kind
     // held); nothing for a bag that is not equipped. The stock backpack count sums the family-0 bags.
     g.set(

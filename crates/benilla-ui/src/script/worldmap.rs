@@ -180,6 +180,8 @@ pub struct WorldMapState {
     pub player_facing: f32,
     /// `GetCorpseMapPosition()` on the displayed map; `None` is no corpse or off the map.
     pub corpse_uv: Option<(f32, f32)>,
+    /// `GetDeathReleasePosition()` on the displayed map (2.4.3); `None` is no marker or off the map.
+    pub death_release_uv: Option<(f32, f32)>,
     /// `PLAYER_EXPLORED_ZONES_1`, 64 words, bit n being `AreaTable.dbc` exploreFlag n.
     pub explored: Vec<u32>,
     pub landmarks: Vec<WorldMapLandmarkView>,
@@ -408,6 +410,11 @@ impl super::UiScript {
         model.worldmap.corpse_uv = corpse_uv;
         model.worldmap.party_uv = party_uv;
         model.worldmap.raid_uv = raid_uv;
+    }
+
+    /// The 2.4.3 death-release marker's map position, which `GetDeathReleasePosition` answers.
+    pub fn set_death_release_uv(&mut self, uv: Option<(f32, f32)>) {
+        self.model_mut().worldmap.death_release_uv = uv;
     }
 
     /// The selection's three cells, which the app reads each frame to project the feed: continent,

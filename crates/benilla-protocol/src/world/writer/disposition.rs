@@ -1080,7 +1080,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "repop_request",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_REPOP_REQUEST],
     },
     VerbForm {
