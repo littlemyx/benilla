@@ -959,12 +959,16 @@ impl WorldSession {
             .try_clone()
             .context("cloning world socket for split")?;
         let (encrypter, decrypter) = self.crypto.split();
+        let gossip_menu = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         Ok((
             WorldReader {
                 stream: read_stream,
                 decrypter,
                 build: self.build,
                 fields: self.fields,
+                gossip_menu: gossip_menu.clone(),
+                keep_body: false,
+                last_body: Vec::new(),
             },
             WorldWriter {
                 stream: self.stream,
@@ -972,6 +976,11 @@ impl WorldSession {
                 chat_language: self.chat_language,
                 sent: None,
                 tbc: matches!(self.build.expansion, benilla_build::Expansion::Tbc),
+                tbc_state: super::writer::TbcSendState {
+                    cast_count: 0,
+                    gossip_menu,
+                    bodies: None,
+                },
             },
         ))
     }

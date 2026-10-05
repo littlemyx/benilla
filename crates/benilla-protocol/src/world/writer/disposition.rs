@@ -290,32 +290,32 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "cast_spell",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_CAST_SPELL],
     },
     VerbForm {
         verb: "cast_spell_at_dest",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_CAST_SPELL],
     },
     VerbForm {
         verb: "cast_spell_at_source",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_CAST_SPELL],
     },
     VerbForm {
         verb: "cast_spell_corpse",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_CAST_SPELL],
     },
     VerbForm {
         verb: "cast_spell_gameobject",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_CAST_SPELL],
     },
     VerbForm {
         verb: "cast_spell_item",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_CAST_SPELL],
     },
     VerbForm {
@@ -505,7 +505,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "gossip_select_option",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_GOSSIP_SELECT_OPTION],
     },
     VerbForm {
@@ -1345,7 +1345,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "use_item",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_USE_ITEM],
     },
     VerbForm {

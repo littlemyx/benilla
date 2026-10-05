@@ -20,6 +20,7 @@ fn writer(tbc: bool) -> (WorldWriter, TcpStream) {
         sent: Some(Vec::new()),
         chat_language: 0,
         tbc,
+        tbc_state: Default::default(),
     };
     (w, peer)
 }

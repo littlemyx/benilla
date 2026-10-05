@@ -166,6 +166,7 @@ impl CastLadder<'_, '_> {
                 bag_index,
                 slot,
                 spell_index,
+                item_guid: crate::ui_items::wire_item_guid(&self.objects, bag_index, slot),
                 target: match bound {
                     TargetedBind::Dest(dest) => UseItemTarget::Dest(dest),
                     TargetedBind::Source(src) => UseItemTarget::Source(src),
@@ -718,6 +719,7 @@ fn send_spell_cast(
             bag_index,
             slot,
             spell_index,
+            item_guid: crate::ui_items::wire_item_guid(objects, bag_index, slot),
             target: match (on_object, item_target, target) {
                 (Some(go), _, _) => UseItemTarget::Object(go),
                 (None, Some(item), _) => UseItemTarget::Item(item),
@@ -1444,7 +1446,8 @@ mod tests {
                 bag_index: 255,
                 slot: 24,
                 spell_index: 0,
-                target: UseItemTarget::SelfImplicit
+                target: UseItemTarget::SelfImplicit,
+                ..
             })
         ));
 

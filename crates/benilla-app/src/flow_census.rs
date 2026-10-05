@@ -12,6 +12,15 @@ use benilla_build::{ClientBuild, Expansion};
 use benilla_protocol::{SessionEvent, SessionEventKind};
 use bevy::prelude::*;
 
+/// A census line to stdout and into the session record.
+macro_rules! say {
+    ($($arg:tt)*) => {{
+        let line = format!($($arg)*);
+        println!("{line}");
+        crate::session_record::line("census", line.strip_prefix("census: ").unwrap_or(&line));
+    }};
+}
+
 /// Process-relative zero for every stamp.
 static T0: OnceLock<Instant> = OnceLock::new();
 static CENSUS: Mutex<Census> = Mutex::new(Census::new());
@@ -82,6 +91,7 @@ pub(crate) fn stage(name: &str, detail: &str) {
     });
     if fresh {
         println!("census: stage {name} t={t}ms {detail}");
+        crate::session_record::line("stage", &format!("{name} {detail}"));
     }
 }
 
@@ -204,7 +214,7 @@ pub(crate) fn print_summary() {
             }
             .unwrap_or("?")
         };
-        println!(
+        say!(
             "census: build {}",
             c.build.map_or("none".into(), |b| format!(
                 "{} ({})",
@@ -213,7 +223,7 @@ pub(crate) fn print_summary() {
             ))
         );
         for (n, t, d) in &c.stages {
-            println!("census: stage-reached {n} t={t}ms {d}");
+            say!("census: stage-reached {n} t={t}ms {d}");
         }
         // Lua errors across every VM sampled.
         let (mut errors, mut loads, mut warns) = (0u64, 0u64, 0u64);
@@ -235,22 +245,22 @@ pub(crate) fn print_summary() {
                 }
             }
         }
-        println!(
+        say!(
             "census: lua-errors total={errors} distinct={} load-failures={loads} warnings={warns}",
             distinct.len()
         );
         for (msg, n) in top(distinct, 10) {
-            println!("census: lua-error x{n} {}", msg.replace('\n', " | "));
+            say!("census: lua-error x{n} {}", msg.replace('\n', " | "));
         }
-        println!(
+        say!(
             "census: missing-verbs-at-run-time distinct={}",
             missing.len()
         );
         for (v, n) in top(missing, 15) {
-            println!("census: missing-verb x{n} {v}");
+            say!("census: missing-verb x{n} {v}");
         }
         for vm in c.vms.values().filter(|v| !v.ui.is_empty()) {
-            println!("census: ui-state {}", vm.ui);
+            say!("census: ui-state {}", vm.ui);
         }
         // Events: registered by the stock files vs fired by the engine.
         let mut registered: BTreeMap<String, u64> = BTreeMap::new();
@@ -268,7 +278,7 @@ pub(crate) fn print_summary() {
             .filter(|(k, _)| !fired.contains_key(*k))
             .map(|(k, v)| (k.clone(), *v))
             .collect();
-        println!(
+        say!(
             "census: ui-events registered-distinct={} registrations={} fired-distinct={} fired-total={} registered-never-fired={}",
             registered.len(),
             registered.values().sum::<u64>(),
@@ -277,10 +287,10 @@ pub(crate) fn print_summary() {
             never.len()
         );
         for (k, v) in top(never, 10) {
-            println!("census: never-fired x{v} registrations {k}");
+            say!("census: never-fired x{v} registrations {k}");
         }
         for (k, v) in top(fired, 12) {
-            println!("census: fired x{v} {k}");
+            say!("census: fired x{v} {k}");
         }
         // Packets.
         let (mut consumed, mut ignored, mut other, mut bad) = (0u64, 0u64, 0u64, 0u64);
@@ -290,13 +300,13 @@ pub(crate) fn print_summary() {
             other += t.other;
             bad += t.unparseable;
         }
-        println!(
+        say!(
             "census: fonts loaded-ok={} failed={} glyph-cells-rasterized={}",
             FONTS_OK.load(Ordering::Relaxed),
             FONTS_FAILED.load(Ordering::Relaxed),
             GLYPH_CELLS.load(Ordering::Relaxed)
         );
-        println!(
+        say!(
             "census: packets opcodes={} consumed={consumed} parsed-no-event={ignored} other={other} unparseable={bad}",
             c.packets.len()
         );
@@ -308,7 +318,7 @@ pub(crate) fn print_summary() {
             .collect();
         ign.sort_by_key(|(_, t)| std::cmp::Reverse(t.ignored));
         for (op, t) in ign {
-            println!(
+            say!(
                 "census: packet-no-event x{} {op:#06x} {}",
                 t.ignored,
                 name(op)
@@ -322,7 +332,7 @@ pub(crate) fn print_summary() {
             .collect();
         oth.sort_by_key(|(_, t)| std::cmp::Reverse(t.other + t.unparseable));
         for (op, t) in oth {
-            println!(
+            say!(
                 "census: packet-other x{} unparseable x{} {op:#06x} {}",
                 t.other,
                 t.unparseable,
@@ -341,9 +351,9 @@ pub(crate) fn print_summary() {
             .take(15)
             .map(|(o, n)| format!("{}x{n}", name(*o)))
             .collect();
-        println!("census: packets-consumed-top {}", list.join(" "));
+        say!("census: packets-consumed-top {}", list.join(" "));
         let evs: Vec<String> = c.events.iter().map(|(k, n)| format!("{k}x{n}")).collect();
-        println!("census: session-events {}", evs.join(" "));
+        say!("census: session-events {}", evs.join(" "));
     });
 }
 
@@ -423,9 +433,35 @@ fn heartbeat() {
 
 /// Replaces one VM's earlier sample.
 pub(crate) fn record_vm(session: u64, snap: VmSnap) {
+    if crate::session_record::enabled() {
+        note_diagnostics(session, &snap.diagnostics);
+    }
     with(|c| {
         c.vms.insert(session, snap);
     });
+}
+
+/// What each VM's diagnostics said when last sampled, so the record carries only what is new.
+static SEEN_DIAGNOSTICS: Mutex<BTreeMap<(u64, String), u32>> = Mutex::new(BTreeMap::new());
+
+/// Puts a VM's new or repeated diagnostics (and the verbs they find missing) into the session record.
+fn note_diagnostics(session: u64, rows: &[(&'static str, String, u32)]) {
+    let Ok(mut seen) = SEEN_DIAGNOSTICS.lock() else {
+        return;
+    };
+    for (kind, msg, n) in rows {
+        let key = (session, format!("{kind} {msg}"));
+        let before = seen.insert(key, *n).unwrap_or(0);
+        if *n == before {
+            continue;
+        }
+        crate::session_record::line("lua", &format!("{kind} x{n} {msg}"));
+        if *kind == "error" && before == 0 {
+            if let Some(v) = missing_verb(msg) {
+                crate::session_record::line("missing-verb", &v);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

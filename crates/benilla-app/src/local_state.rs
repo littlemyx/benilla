@@ -246,6 +246,10 @@ pub(crate) fn shots_path() -> Option<PathBuf> {
 /// Deviation: the reference writes `Screenshots\\` inside the install, which benilla never writes
 /// to; the folder keeps the reference's name.
 pub(crate) fn screenshots_dir() -> Option<PathBuf> {
+    // A recorded session keeps its screenshots beside the record (dev builds, `WOW_SESSION_RECORD`).
+    if let Some(dir) = crate::session_record::dir() {
+        return Some(dir.to_path_buf());
+    }
     home().map(|h| h.join("Screenshots"))
 }
 

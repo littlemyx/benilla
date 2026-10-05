@@ -168,6 +168,33 @@ pub(crate) fn slot_guid(
     }
 }
 
+/// The item guid at a wire position `(bag_index, slot)` of our own player, 0 where the slot is
+/// empty or unknown: what 2.4.3's `CMSG_USE_ITEM` names beside the position (1.12.1 sends none).
+pub(crate) fn wire_item_guid(objects: &Objects, bag_index: u8, slot: u8) -> u64 {
+    let Some(player) = objects.own() else {
+        return 0;
+    };
+    let (bag, slot0) = if bag_index == BAG_PLAYER_INVENTORY {
+        match slot {
+            0..=22 | 63..=68 => (EQUIPMENT_BAG, slot),
+            23..=38 => (0, slot - SLOT_PACK_FIRST),
+            BANK_SLOT_FIRST..=62 => (BANK_CONTAINER, slot - BANK_SLOT_FIRST),
+            KEYRING_SLOT_FIRST..=96 => (KEYRING_CONTAINER, slot - KEYRING_SLOT_FIRST),
+            _ => return 0,
+        }
+    } else if (BAG_SLOT_FIRST..BAG_SLOT_FIRST + BAGS).contains(&bag_index) {
+        (i64::from(bag_index - BAG_SLOT_FIRST) + 1, slot)
+    } else if (BANK_BAG_SLOT_FIRST..BANK_BAG_SLOT_FIRST + BANK_BAGS).contains(&bag_index) {
+        (
+            BANK_BAG_ID_FIRST + i64::from(bag_index - BANK_BAG_SLOT_FIRST),
+            slot,
+        )
+    } else {
+        return 0;
+    };
+    slot_guid(player, bag, slot0, objects).unwrap_or(0)
+}
+
 /// `(item guid, stack count)` at a Lua-space `(bag, 1-based slot)`, `(0, 0)` when empty:
 /// [`PendingItemOps`]'s baseline, since a partial split or destroy changes only the count.
 pub(crate) fn slot_guid_count(

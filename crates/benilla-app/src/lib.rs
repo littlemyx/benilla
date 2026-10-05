@@ -94,6 +94,7 @@ mod screen_fade;
 mod screenshot;
 mod script_calls;
 mod session_build;
+mod session_record;
 mod shaders;
 
 mod game_tip;

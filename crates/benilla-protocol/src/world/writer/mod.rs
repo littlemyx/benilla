@@ -2,6 +2,8 @@
 //! Each family module mirrors its namesake in `crate::messages`, which builds the bodies.
 
 use std::net::TcpStream;
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
 
 use anyhow::Result;
 use benilla_srp::vanilla_header::EncrypterHalf;
@@ -78,6 +80,18 @@ pub struct WorldWriter {
     pub(super) chat_language: u32,
     /// Whether the session is on 2.4.3, which picks the layout of the movement bodies.
     pub(super) tbc: bool,
+    /// What a 2.4.3 send carries that only the session knows.
+    pub(super) tbc_state: TbcSendState,
+}
+
+/// The per-session values 2.4.3 bodies carry: the cast counter and the menu id of the gossip window
+/// on screen, which the reader records off `SMSG_GOSSIP_MESSAGE`; and the sent bodies, kept for the
+/// session record once [`WorldWriter::watch_bodies`] asks.
+#[derive(Default)]
+pub(super) struct TbcSendState {
+    pub(super) cast_count: u8,
+    pub(super) gossip_menu: Arc<AtomicU32>,
+    pub(super) bodies: Option<Vec<(u16, Vec<u8>)>>,
 }
 
 impl WorldWriter {
@@ -93,6 +107,9 @@ impl WorldWriter {
         if sent.is_ok() {
             if let Some(log) = &mut self.sent {
                 log.push((opcode, body.len()));
+            }
+            if let Some(bodies) = &mut self.tbc_state.bodies {
+                bodies.push((opcode, body.to_vec()));
             }
         }
         sent
@@ -111,6 +128,20 @@ impl WorldWriter {
     /// Start recording what reaches the socket; a second call keeps what is not yet drained.
     pub fn watch_sends(&mut self) {
         self.sent.get_or_insert_with(Vec::new);
+    }
+
+    /// Start keeping the body of every packet that reaches the socket, for the session record.
+    pub fn watch_bodies(&mut self) {
+        self.tbc_state.bodies.get_or_insert_with(Vec::new);
+    }
+
+    /// Hand over and clear the kept `(opcode, body)` pairs, in send order.
+    pub fn drain_bodies(&mut self, mut each: impl FnMut(u16, &[u8])) {
+        if let Some(log) = &mut self.tbc_state.bodies {
+            for (opcode, body) in log.drain(..) {
+                each(opcode, &body);
+            }
+        }
     }
 
     /// Hand over and clear the recorded `(opcode, body length)` pairs, in send order.

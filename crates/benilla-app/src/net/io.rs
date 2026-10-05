@@ -667,6 +667,9 @@ fn run_with(
             ),
         }
         let (mut reader, writer) = session.into_split()?;
+        if crate::session_record::enabled() {
+            reader.keep_bodies();
+        }
         if events_tx
             .send(SessionEvent::Connected {
                 self_guid: guid,
@@ -698,6 +701,22 @@ fn run_with(
                 } => {
                     skip_run = 0;
                     crate::flow_census::note_packet(opcode, &events);
+                    if matches!(build.expansion, benilla_build::Expansion::Tbc)
+                        && crate::session_record::parse_outcome(&events) == "other"
+                    {
+                        crate::session_record::note_unread(crate::session_record::in_name(
+                            build, opcode,
+                        ));
+                    }
+                    if crate::session_record::enabled() {
+                        crate::session_record::packet_in(
+                            opcode,
+                            crate::session_record::in_name(build, opcode),
+                            &crate::session_record::parse_outcome(&events),
+                            tail,
+                            reader.last_body(),
+                        );
+                    }
                     // A body is length-framed, so a decoder shorter than the server's layout
                     // succeeds silently; report it once per opcode, and never skip the packet.
                     if tail > 0 && tails_announced.insert(opcode) {
@@ -748,6 +767,15 @@ fn run_with(
                 Poll::Skipped { opcode, reason } => {
                     skip_run += 1;
                     crate::flow_census::note_unparseable(opcode);
+                    if crate::session_record::enabled() {
+                        crate::session_record::packet_in(
+                            opcode,
+                            crate::session_record::in_name(build, opcode),
+                            &format!("error:{reason}"),
+                            0,
+                            reader.last_body(),
+                        );
+                    }
                     // Every skip, uncapped, into the trace (tag `skip`): otherwise a packet that
                     // failed to parse looks like one that never arrived.
                     if benilla_assets::trace::enabled() {
@@ -802,6 +830,10 @@ fn refuse_once(guid: u64) -> u64 {
 /// Drains the writer's sent-packet log into the trace as `out` lines, one per packet that reached
 /// the socket; a no-op unless the `out` tag armed it.
 fn trace_sends(w: &mut WorldWriter) {
+    // The session record keeps the bytes of what went out (dev builds, `WOW_SESSION_RECORD`).
+    w.drain_bodies(|opcode, body| {
+        crate::session_record::packet_out(opcode, crate::session_record::out_name(opcode), body);
+    });
     w.drain_sent(|opcode, len| {
         benilla_assets::trace::line(
             "out",
@@ -833,6 +865,9 @@ fn writer_loop(
                     // Arm the outbound opcode trace (tag `out`); a fresh socket starts a fresh log.
                     if benilla_assets::trace::enabled_for("out") {
                         w.watch_sends();
+                    }
+                    if crate::session_record::enabled() {
+                        w.watch_bodies();
                     }
                     writer = Some(w);
                     warned = 0;
@@ -889,6 +924,8 @@ fn writer_loop(
                     }
                     continue;
                 };
+                let cmd_name =
+                    crate::session_record::enabled().then(|| crate::session_record::command_name(&cmd));
                 let result = match cmd {
                     ClientCommand::Move {
                         kind,
@@ -1026,7 +1063,8 @@ fn writer_loop(
                         slot,
                         spell_index,
                         target,
-                    } => w.use_item(bag_index, slot, spell_index, target),
+                        item_guid,
+                    } => w.use_item(bag_index, slot, spell_index, target, item_guid),
                     ClientCommand::OpenItem { bag_index, slot } => w.open_item(bag_index, slot),
                     ClientCommand::WrapItem {
                         gift_bag,
@@ -1519,14 +1557,26 @@ fn writer_loop(
                 };
                 // Send failures (tag `wire`): the controller's `snd` line records a decision, not a
                 // transmission, so a silent `wire` log beside a busy `snd` log means all went out.
+                if let Some(name) = &cmd_name {
+                    let outcome = match &result {
+                        Ok(()) => "sent".to_string(),
+                        Err(e) => match e.downcast_ref::<benilla_protocol::VerbRefused>() {
+                            Some(refused) => format!("refused:{}", refused.verb),
+                            None => format!("failed:{e:#}"),
+                        },
+                    };
+                    crate::session_record::verb(name, &outcome);
+                }
                 if let Err(e) = result {
                     if benilla_assets::trace::enabled() {
                         benilla_assets::trace::line("wire", &format!("SEND FAILED: {e:#}"));
                     }
                     if let Some(refused) = e.downcast_ref::<benilla_protocol::VerbRefused>() {
-                        // A verb with no 2.4.3 form: logged once per verb, the session goes on.
+                        // A verb with no 2.4.3 form: logged once per verb, the session goes on, and
+                        // a dev build says so in the chat frame.
                         if refused_verbs.insert(refused.verb) {
                             bevy::log::warn!("net: refused {refused}");
+                            crate::session_record::note_refused(refused.verb);
                         }
                     } else if warned < SEND_WARN_CAP {
                         bevy::log::warn!("net: send failed: {e:#}");

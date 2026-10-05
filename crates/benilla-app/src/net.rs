@@ -482,6 +482,12 @@ impl Objects<'_, '_> {
         self.me.single().ok()
     }
 
+    /// Our own player's descriptor fields, once in the world.
+    pub(crate) fn own(&self) -> Option<&ObjectFields> {
+        let me = self.me.single().ok()?;
+        self.stores.get(me).ok().map(|s| &s.0)
+    }
+
     /// An item object's countdown cells.
     pub(crate) fn countdowns(&self, guid: u64) -> Option<&crate::items::Countdowns> {
         self.index
@@ -921,6 +927,8 @@ pub(crate) enum ClientCommand {
         slot: u8,
         spell_index: u8,
         target: benilla_protocol::messages::UseItemTarget,
+        /// The item's guid, 0 when unknown; 2.4.3 names it beside the slot, 1.12.1 does not.
+        item_guid: u64,
     },
     /// `CMSG_OPEN_ITEM`: the server answers `SMSG_LOOT_RESPONSE` on the item's own guid; a wrapped
     /// gift instead changes entry in place with no window.

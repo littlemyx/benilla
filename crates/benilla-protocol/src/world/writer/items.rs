@@ -20,17 +20,30 @@ impl WorldWriter {
     }
 
     /// `CMSG_USE_ITEM`: use the item at a bag position; a GameObject `target` is how a key opens a
-    /// locked door. Refused with `SMSG_CAST_RESULT`.
+    /// locked door. Refused with `SMSG_CAST_RESULT`. `item_guid` is the item's guid, which 2.4.3
+    /// sends and checks against the slot (single-source, cmangos-tbc) and 1.12.1 never sends.
     pub fn use_item(
         &mut self,
         bag_index: u8,
         slot: u8,
         spell_slot: u8,
         target: messages::UseItemTarget,
+        item_guid: u64,
     ) -> Result<()> {
+        let body = messages::use_item(bag_index, slot, spell_slot, target);
+        if !self.tbc {
+            return self.send(opcode::CMSG_USE_ITEM, &body);
+        }
+        let slot = if bag_index == messages::BAG_PLAYER_INVENTORY {
+            self.slot(slot)?
+        } else {
+            slot
+        };
+        let body = messages::use_item(bag_index, slot, spell_slot, target);
+        let count = messages::next_cast_count(&mut self.tbc_state.cast_count);
         self.send(
             opcode::CMSG_USE_ITEM,
-            &messages::use_item(bag_index, slot, spell_slot, target),
+            &messages::use_item_tbc(&body, count, item_guid),
         )
     }
 
