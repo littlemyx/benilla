@@ -77,9 +77,10 @@ impl Loader<'_> {
         onload
     }
 
-    /// Compile a handler body as the chunk itself, as the reference loads it (`0x704c70`): it takes
-    /// no arguments and reads its frame from `this`, so a `self` in it is an ordinary global. The
-    /// loader reads no other attribute of the element (no `function=`).
+    /// Compile a handler body as the chunk itself, as 1.12.1 loads it (`0x704c70`): it takes no
+    /// arguments and reads its frame from `this`, so a `self` in it is an ordinary global. 2.4.3
+    /// wraps it in a function of the handler's parameters instead. The loader reads no other
+    /// attribute of the element (no `function=`).
     pub(super) fn compile_handler(
         &mut self,
         handler: &Element,
@@ -92,13 +93,27 @@ impl Loader<'_> {
         if body.is_empty() {
             return None;
         }
-        match self
-            .lua()
-            .load(body)
-            .set_name(format!("{owner}:{name}"))
-            .set_mode(mlua::ChunkMode::Text)
-            .into_function()
-        {
+        let compiled = match crate::script::ScriptDialect::of(self.lua()) {
+            crate::script::ScriptDialect::Lua50 => self
+                .lua()
+                .load(body)
+                .set_name(format!("{owner}:{name}"))
+                .set_mode(mlua::ChunkMode::Text)
+                .into_function(),
+            // 2.4.3 compiles `return function(self,<params>) <body> end` and calls it for the
+            // handler, so the body reads `self` and its arguments as parameters.
+            crate::script::ScriptDialect::Lua51 => {
+                let params = crate::script::ScriptDialect::handler_params(name);
+                let sep = if params.is_empty() { "" } else { "," };
+                self.lua()
+                    .load(format!("return function(self{sep}{params}) {body} end"))
+                    .set_name(format!("{owner}:{name}"))
+                    .set_mode(mlua::ChunkMode::Text)
+                    .into_function()
+                    .and_then(|wrapper| wrapper.call::<Function>(()))
+            }
+        };
+        match compiled {
             Ok(f) => Some(f),
             Err(e) => {
                 self.report

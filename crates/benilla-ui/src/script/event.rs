@@ -1,7 +1,7 @@
 //! Handler firing: the FrameScript calling convention for events, ticks and show/hide. The
 //! reference sets `this` (`0x872e64`), `event` (`0x84b648`) and `arg1..argN` (`0x8722dc`) around
-//! the call, restoring each after, and `pcall`s with no arguments; the handler here also gets the
-//! same values as `(self, event, ...)` arguments, which 1.12 does not pass.
+//! the call, restoring each after, and `pcall`s with no arguments. The 2.4.3 dialect
+//! ([`super::ScriptDialect::Lua51`]) keeps the globals and also passes `(self, event, ...)`.
 //! Handler errors return to the caller, which records them in [`super::Model::errors`].
 
 use std::borrow::Cow;
@@ -257,8 +257,20 @@ pub(crate) fn invoke_with_globals(
         g.set(arg_name(i + 1).as_ref(), v.clone())?;
     }
 
-    // A protected call; the globals are restored before its outcome returns.
-    let outcome = func.call::<()>(());
+    // A protected call; the globals are restored before its outcome returns. 2.4.3 also passes the
+    // frame, the event name and the arguments as parameters, 1.12.1 none.
+    let outcome = match super::ScriptDialect::of(lua) {
+        super::ScriptDialect::Lua50 => func.call::<()>(()),
+        super::ScriptDialect::Lua51 => {
+            let mut args: Vec<Value> = Vec::with_capacity(n + 2);
+            args.push(Value::Table(wrapper));
+            if let Some(ev) = event_name {
+                args.push(Value::String(lua.create_string(ev)?));
+            }
+            args.extend(extra);
+            func.call::<()>(mlua::Variadic::from_iter(args))
+        }
+    };
 
     g.set("this", saved_this)?;
     g.set("event", saved_event)?;
