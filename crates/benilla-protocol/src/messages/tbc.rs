@@ -249,6 +249,30 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
             ServerPacket::VendorList { vendor, items }
         }
         t::SMSG_QUESTGIVER_STATUS => super::tbc_npc::read_questgiver_status(r)?,
+        // The trainer window: the 1.12.1 rows (38 bytes: cmangos-tbc `SendTrainerSpellHelper` =
+        // cmangos-classic; only `Skill.dbc` gained ids, and the skill is a raw id here).
+        t::SMSG_TRAINER_LIST => {
+            let (trainer, trainer_type, services, title) = super::trainer::read_trainer_list(r)?;
+            ServerPacket::TrainerList {
+                trainer,
+                trainer_type,
+                services,
+                title,
+            }
+        }
+        t::SMSG_TRAINER_BUY_SUCCEEDED => {
+            let (trainer, spell_id) = super::trainer::read_trainer_buy_succeeded(r)?;
+            ServerPacket::TrainerBuySucceeded { trainer, spell_id }
+        }
+        // wow_messages only (neither cmangos tree builds it): trainer, spell, error.
+        t::SMSG_TRAINER_BUY_FAILED => {
+            let (trainer, spell_id, error) = super::trainer::read_trainer_buy_failed(r)?;
+            ServerPacket::TrainerBuyFailed {
+                trainer,
+                spell_id,
+                error,
+            }
+        }
         // --- Quest panels and the query reply (`tbc_quest`) ----------------------------------
         t::SMSG_QUESTGIVER_QUEST_DETAILS => {
             ServerPacket::QuestGiverDetails(super::tbc_quest::read_quest_details(r)?)

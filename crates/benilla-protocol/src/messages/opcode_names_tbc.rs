@@ -139,6 +139,9 @@ pub mod tbc_opcode {
     pub const SMSG_QUESTGIVER_QUEST_FAILED: u16 = 0x0192;
     pub const SMSG_QUESTUPDATE_FAILED: u16 = 0x0196;
     pub const SMSG_LIST_INVENTORY: u16 = 0x019f;
+    pub const SMSG_TRAINER_LIST: u16 = 0x01b1;
+    pub const SMSG_TRAINER_BUY_SUCCEEDED: u16 = 0x01b3;
+    pub const SMSG_TRAINER_BUY_FAILED: u16 = 0x01b4;
     pub const SMSG_NOTIFICATION: u16 = 0x01cb;
     pub const CMSG_QUERY_TIME: u16 = 0x01ce;
     pub const SMSG_QUERY_TIME_RESPONSE: u16 = 0x01cf;
@@ -434,6 +437,9 @@ static NAMES: &[(u16, &str)] = &[
     (0x01ab, "SMSG_TAXINODE_STATUS"),
     (0x01ae, "SMSG_ACTIVATETAXIREPLY"),
     (0x01af, "SMSG_NEW_TAXI_PATH"),
+    (0x01b1, "SMSG_TRAINER_LIST"),
+    (0x01b3, "SMSG_TRAINER_BUY_SUCCEEDED"),
+    (0x01b4, "SMSG_TRAINER_BUY_FAILED"),
     (0x01b8, "SMSG_SHOW_BANK"),
     (0x01ba, "SMSG_BUY_BANK_SLOT_RESULT"),
     (0x01bf, "SMSG_PETITION_SHOW_SIGNATURES"),
