@@ -449,7 +449,7 @@ static void recfield (LexState *ls, struct ConsControl *cc) {
   if (ls->t.token == TK_NAME) {
     luaY_checklimit(fs, cc->nh, MAX_INT, "items in a constructor");
     if (luai_dialect50(ls->L))
-      cc->nh++;  /* benilla: 5.0's placement -- `[expr] = v` credits NEITHER size hint */
+      cc->nh++;  /* benilla: 5.0's placement -- `[expr] = v` credits NEITHER size hint */  /* 5.1 counts both forms, below */
     checkname(ls, &key);
   }
   else  /* ls->t.token == '[' */
@@ -512,9 +512,18 @@ static void constructor (LexState *ls, expdesc *t) {
   checknext(ls, '{');
   do {
     lua_assert(cc.v.k == VVOID || cc.tostore > 0);
-    /* BENILLA: Lua 5.0's constructor compat-semicolon (see third_party/lua-src/BENILLA.md):
-    ** 5.0 opened this loop by skipping one `;', so a doubled separator is accepted there and a
-    ** parse error in 5.1. */
+    /* BENILLA: Lua 5.0's constructor compat-semicolon, restored (see
+    ** third_party/lua-src/BENILLA.md). 5.0 opened this loop with exactly the
+    ** line below, a Lua 4.0 leftover; 5.1 deleted it, so one extra `;' after a
+    ** field separator (`Back_Title = AL["Factions"];;', which AtlasLoot writes)
+    ** raised "unexpected symbol near ';'" while the 1.12.1 client accepts it.
+    ** Statement-level `;;' stays rejected by both. Byte-read in the client:
+    ** constructor is 0x6fd430, and its loop head 0x6fd4a0 calls testnext(ls,';')
+    ** without testing EAX (a skip, not a separator check), while the loop's
+    ** continuation at 0x6fd4f5/0x6fd505 does test it; of testnext 0x6fccf0's 16
+    ** call sites, the only other `;' consumer is chunk 0x6fcccc, at statement
+    ** level, with no such head skip. 
+    ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm. */
     if (luai_dialect50(ls->L))
       testnext(ls, ';');  /* compatibility only */
     if (ls->t.token == '}') break;
@@ -757,11 +766,35 @@ static void simpleexp (LexState *ls, expdesc *v) {
       init_exp(v, VFALSE, 0);
       break;
     }
+    /* BENILLA: 5.1's vararg EXPRESSION arm, deleted (see
+    ** third_party/lua-src/BENILLA.md). Lua 5.0 has no grammar for `...' as a
+    ** value: a vararg function reads its extra arguments out of the implicit
+    ** `arg' table. `...' as an expression is how the Ace2 corpus asks which
+    ** interpreter it is on:
+    **
+    **     local lua51 = loadstring("return function(...) return ... end") and true or false
+    **
+    ** and 92 library files in 24 folders branch on the answer, taking a
+    ** client-2.0 path on a 1.12 client when it is wrong.
+    **
+    ** Byte-read in the client: simpleexp is 0x6fd240; it switches on
+    ** `token - 0x7B' bounded at 0xA3, indexes the byte table at 0x6fd338 and
+    ** jumps through the 8-entry table at 0x6fd318. TK_DOTS is 0x118, so its
+    ** index byte is 0x9D, whose value is 7: the DEFAULT arm, 0x6fd30a, which
+    ** tail-jumps to primaryexp 0x6fdb00. The seven real arms are `{', TK_FALSE,
+    ** TK_FUNCTION, TK_NIL, TK_TRUE, TK_NUMBER and TK_STRING: stock Lua 5.0's
+    ** simpleexp exactly, with no vararg case. So `...' as a value reaches
+    ** prefixexp 0x6fde40, whose head accepts only `(' or TK_NAME and otherwise
+    ** raises "unexpected symbol" (0x871e80); deleting the arm reproduces that
+    ** error here, verbatim.
+    **
+    ** It also restores 5.0's `arg' rule: the deleted line cleared
+    ** VARARG_NEEDSARG for any function that mentioned `...', so with the arm
+    ** gone every vararg function gets its `arg' table, which is what 5.0 does
+    ** and what the shipped 1.12 FrameXML reads. 
+    ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm. */
     case TK_DOTS: {  /* vararg */
       FuncState *fs = ls->fs;
-      /* BENILLA: 1.12's Lua 5.0 has no grammar for `...' as a value (a vararg function reads
-      ** its extra arguments out of the implicit `arg' table): the token falls to primaryexp,
-      ** which raises "unexpected symbol" (see third_party/lua-src/BENILLA.md). */
       if (luai_dialect50(ls->L)) {
         primaryexp(ls, v);
         return;
@@ -794,8 +827,15 @@ static UnOpr getunopr (LexState *ls, int op) {
   switch (op) {
     case TK_NOT: return OPR_NOT;
     case '-': return OPR_MINUS;
-    /* BENILLA: 1.12's Lua 5.0 has no length operator (see third_party/lua-src/BENILLA.md):
-    ** `#' is no unary operator there and reaches simpleexp's "unexpected symbol". */
+    /* BENILLA: 5.1's `#' length operator, deleted. 5.0 asks a table for its
+    ** size with table.getn and a string with string.len; the operator does not
+    ** exist and neither does its __len metamethod. Byte-read in the client:
+    ** getunopr is 0x6fe0a0, a leaf with exactly two token tests, `cmp ecx,0x2D'
+    ** (`-') then `cmp ecx,0x10E' (TK_NOT), so its OPR_NOUNOPR is 2: a
+    ** three-member enum, not 5.1's four. The metamethod-name pool at 0x871896
+    ** has no __len. A `#' therefore reaches simpleexp's default arm and raises
+    ** "unexpected symbol near `#'". 
+    ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm. */
     case '#': return luai_dialect50(ls->L) ? OPR_NOUNOPR : OPR_LEN;
     default: return OPR_NOUNOPR;
   }
@@ -808,8 +848,16 @@ static BinOpr getbinopr (LexState *ls, int op) {
     case '-': return OPR_SUB;
     case '*': return OPR_MUL;
     case '/': return OPR_DIV;
-    /* BENILLA: 1.12's Lua 5.0 has no modulo operator (see third_party/lua-src/BENILLA.md):
-    ** `%' is no binary operator there; 5.0 spells it math.mod. */
+    /* BENILLA: 5.1's `%' modulo operator, deleted. 5.0 spells it math.mod
+    ** (and the bare global `mod'), which this VM publishes. Byte-read in the
+    ** client: getbinopr is 0x6fe0c0 and its switch is based at `ecx-0x2A' (`*',
+    ** the lowest token it handles). `%' is 0x25, below the base, so it is
+    ** outside the range test (`cmp eax,0xF2; ja') and falls to the default,
+    ** 0x6fe129, `mov eax,0xE' = OPR_NOBINOPR 14: a 15-member BinOpr, 5.0's, not
+    ** 5.1's 16-member one with OPR_MOD. The metamethod pool has no __mod either.
+    ** priority[] is indexed by the BinOpr enum, which is untouched; only the
+    ** token that reaches OPR_MOD is gone. 
+    ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm. */
     case '%': return luai_dialect50(ls->L) ? OPR_NOBINOPR : OPR_MOD;
     case '^': return OPR_POW;
     case TK_CONCAT: return OPR_CONCAT;

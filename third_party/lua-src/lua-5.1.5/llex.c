@@ -224,6 +224,7 @@ static int skip_sep (LexState *ls) {
 
 static void read_long_string (LexState *ls, SemInfo *seminfo, int sep) {
   int cont = 0;
+  (void)(cont);  /* avoid warnings when `cont' is not used */
   save_and_next(ls);  /* skip 2nd `[' */
   if (currIsNewline(ls))  /* string starts with a newline? */
     inclinenumber(ls);  /* skip it */
@@ -233,11 +234,15 @@ static void read_long_string (LexState *ls, SemInfo *seminfo, int sep) {
         luaX_lexerror(ls, (seminfo) ? "unfinished long string" :
                                    "unfinished long comment", TK_EOS);
         break;  /* to avoid warnings */
+      /* BENILLA: 2, the 5.0 behaviour. 1.12.1 ships Lua 5.0, where `[[ ... [[ ... ]] ... ]]`
+      ** nests; 5.1 kept the machinery and put an advisory error in front of it, on which two
+      ** corpus addons stop loading ("nesting of [[...]] is deprecated").
+      ** Now a per-state switch (formerly LUA_COMPAT_LSTR 2 in luaconf.h): the 5.0 dialect nests,
+      ** the 5.1 dialect takes LUA_COMPAT_LSTR 1's arm. */
       case '[': {
         if (skip_sep(ls) == sep) {
           save_and_next(ls);  /* skip 2nd `[' */
           cont++;
-          /* BENILLA: 1.12's Lua 5.0 nests `[[...]]'; 5.1 raises the advisory error */
           if (!luai_dialect50(ls->L) && sep == 0)
             luaX_lexerror(ls, "nesting of [[...]] is deprecated", '[');
         }

@@ -79,6 +79,41 @@ comment- and string-stripping scan of the 1.12 FrameXML (177 files), GlueXML, Bl
 corpus finds zero sites of all three. No chunk of benilla's own Lua may use a construct the 1.12.1
 client's parser rejects; benilla's own chunks are compiled before the switch to the 5.1 dialect.
 
+### The 5.0 dialect's evidence, as recorded before the switch
+
+Each hunk below is now taken only by the 5.0 dialect (table above); the reasons and the byte-read
+facts are unchanged.
+
+These were the fork's hunks before the dialect switch (eight, in three files). `src/lib.rs` additionally differs by having Lua 5.2/5.3/5.4/5.5 stripped
+from the `Version` enum (with their source trees deleted): benilla builds 5.1 and only 5.1, and a
+fork that still offered the other four would answer a request for one with a missing directory at
+build time instead of a compile error.
+
+Five hunks restore what 5.1 changed or removed:
+
+| file | hunk | why |
+|---|---|---|
+| `lvm.c` | 5.0's `OP_TFORPREP` table-to-`next` substitution, folded into the top of `OP_TFORLOOP` | `for k, v in someTable do` raised "attempt to call a table value" |
+| `luaconf.h` | `LUA_COMPAT_LSTR` `1` to `2` | 5.1 kept 5.0's `[[...]]` nesting machinery and put an advisory error in front of it; two corpus addons died on "nesting of `[[...]]` is deprecated" |
+| `luaconf.h` | `LUA_QL(x)` back to 5.0's `` `x' `` from 5.1's `'x'` | every Lua error message quotes a program element, and `WoW.exe`'s own `.rdata` carries all five formats in the 5.0 spelling |
+| `lparser.c` | 5.0's compat-semicolon skip restored at the top of `constructor()`'s field loop, 5.0's own line verbatim | one extra `;` after a field separator inside a table constructor (`Back_Title = AL["Factions"];;`, which AtlasLoot writes) is accepted by the client and was a parse error here |
+| `lparser.c` | `recfield`'s `cc->nh++` moved back inside its `TK_NAME` arm, 5.0's own placement | a `[expr] = value` constructor field credits neither `OP_NEWTABLE` size hint in 5.0, so the table is born on the dummy node |
+
+Three delete what 5.1 added, all in `lparser.c`, all byte-read out of the client's own parser
+(`simpleexp 0x6fd240`, `getunopr 0x6fe0a0`, `getbinopr 0x6fe0c0`), all landing on 5.0's own
+`unexpected symbol` at `prefixexp 0x6fde40`:
+
+| hunk | why |
+|---|---|
+| `simpleexp`'s `case TK_DOTS` deleted: `...` is not an expression | the Ace2 corpus asks which interpreter it is on by compiling `return function(...) return ... end`; 170 `loadstring` sites in the corpus are that question, and 92 library files in 24 folders branch on the answer |
+| `getunopr`'s `case '#'` deleted: no length operator | the client's `getunopr` tests exactly two tokens (`-`, `not`) and its `OPR_NOUNOPR` is 2, a three-member enum; 5.0 asks a table with `table.getn` and a string with `string.len` |
+| `getbinopr`'s `case '%'` deleted: no modulo operator | the client's `getbinopr` switch is based at `'*'` (0x2A), so `%` (0x25) is below its range and reaches `OPR_NOBINOPR` = 14, a fifteen-member `BinOpr`; 5.0 spells it `math.mod` |
+
+The deletions are safe because nothing the reference runs uses those constructs: a comment- and
+string-stripping scan of the 1.12 FrameXML (177 files), GlueXML, Blizzard's own addons and the
+corpus finds zero sites of all three. No chunk of benilla's own Lua may use a construct the client's
+parser rejects.
+
 To verify the Lua sources against upstream at any time:
 
 ```sh
