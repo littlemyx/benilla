@@ -197,6 +197,8 @@ pub struct Frame {
     /// `resizable` `0x200`, all set by `0x76a3c0`). It raises nothing; `CSimpleTop::Raise`
     /// (`0x7650f0`) raises the nearest toplevel self-or-ancestor of a clicked or shown frame.
     pub toplevel: bool,
+    /// `protected="true"` (2.4.3): the flag `IsProtected` answers. Nothing enforces it yet.
+    pub protected: bool,
     /// This frame's own scale (`ownScale +0xb8`, default 1.0).
     pub scale: f32,
     /// `layoutScale` = `parentEffective * ownScale`, ε-gated (`0x76ac90`).
@@ -446,6 +448,7 @@ impl WidgetArena {
             scale,
             effective_scale: parent_scale * scale,
             ignore_parent_scale: false,
+            protected: false,
             wow_id: 0,
             insertion_seq,
             kind_state: match kind {

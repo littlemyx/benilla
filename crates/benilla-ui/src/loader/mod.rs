@@ -346,7 +346,10 @@ impl Loader<'_> {
     pub(super) fn load_doc(&mut self, doc: &ParsedDocument) {
         for item in &doc.items {
             if let TopLevel::Template(el) | TopLevel::Instance(el) | TopLevel::Font(el) = item {
-                let mut audit = known::Audit::default();
+                let mut audit = known::Audit {
+                    tbc: self.listed_inherits(),
+                    ..known::Audit::default()
+                };
                 audit.top_level(el, &|tag| {
                     crate::script::object::registered_frame_kind(self.lua, tag).is_some()
                 });
@@ -471,7 +474,7 @@ impl Loader<'_> {
     }
 
     /// Whether this build's `inherits=` is a comma list: 2.4.3's is, 1.12.1's one name.
-    fn listed_inherits(&self) -> bool {
+    pub(super) fn listed_inherits(&self) -> bool {
         crate::script::ScriptDialect::of(self.lua) == crate::script::ScriptDialect::Lua51
     }
 
@@ -714,6 +717,8 @@ impl Loader<'_> {
         self.apply_simplehtml(el, wrapper, dbg_name);
         self.apply_minimap(el, wrapper, dbg_name);
         self.apply_cooldown(el, wrapper, dbg_name);
+        // 5c · 2.4.3's `protected` flag and `<Attributes>`, before the handlers exist.
+        self.apply_attributes(el, wrapper, dbg_name);
         // 6 · <Scripts> handlers (`0x769ef0`); OnLoad is captured to fire bottom-up below.
         let onload = self.apply_scripts(el, wrapper, dbg_name);
 

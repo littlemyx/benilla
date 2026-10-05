@@ -6,7 +6,7 @@ use mlua::{Function, Lua, MultiValue, Table, Value};
 
 use crate::script::binding_abi::optional_string;
 use crate::script::region::region_wrapper;
-use crate::script::{Model, RegionData, REG_SCRIPTS, SCRIPT_KINDS};
+use crate::script::{Model, RegionData, REG_SCRIPTS};
 use crate::widget::RegionKind;
 
 use super::{decode_id, draw_layer_from_str, frame_handle_of, publish_global};
@@ -90,9 +90,9 @@ pub(super) fn install(lua: &Lua, m: &Table) -> mlua::Result<()> {
     // reference's tables are per widget type (base `0x76a0d0`; a plain Frame has no `OnClick`).
     m.set(
         "HasScript",
-        lua.create_function(|_, (_this, name): (Table, String)| {
+        lua.create_function(|lua, (_this, name): (Table, String)| {
             Ok(crate::script::binding_abi::flag(
-                SCRIPT_KINDS.iter().any(|k| k.eq_ignore_ascii_case(&name)),
+                crate::script::script_kind(lua, &name).is_some(),
             ))
         })?,
     )?;
@@ -215,10 +215,7 @@ pub(super) fn install(lua: &Lua, m: &Table) -> mlua::Result<()> {
 /// `OnMessageScrollChanged`, `OnInputLanguageChanged`, the movie frame's), because an accepted
 /// handler that never runs fails silently. `OnAttributeChanged` is 2.0's, with no 1.12 slot.
 fn set_script(lua: &Lua, this: &Table, name: &str, func: Option<Function>) -> mlua::Result<()> {
-    let kind = SCRIPT_KINDS
-        .iter()
-        .copied()
-        .find(|&k| k.eq_ignore_ascii_case(name))
+    let kind = crate::script::script_kind(lua, name)
         .ok_or_else(|| mlua::Error::runtime(format!("SetScript: unsupported script '{name}'")))?;
     let h = frame_handle_of(lua, this)?;
     let id = lua.app_data_mut::<Model>().expect("model").frame_id(h);
@@ -268,11 +265,7 @@ fn set_script(lua: &Lua, this: &Table, name: &str, func: Option<Function>) -> ml
 }
 
 fn get_script(lua: &Lua, this: &Table, name: &str) -> mlua::Result<Value> {
-    let kind = match SCRIPT_KINDS
-        .iter()
-        .copied()
-        .find(|&k| k.eq_ignore_ascii_case(name))
-    {
+    let kind = match crate::script::script_kind(lua, name) {
         Some(k) => k,
         None => return Ok(Value::Nil),
     };

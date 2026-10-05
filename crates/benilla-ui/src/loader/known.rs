@@ -65,7 +65,6 @@ const ATTRS: &[(&str, &[&str])] = &[
         &["alphamode", "file", "justifyh", "justifyv", "setallpoints"],
     ),
     ("color", &["a", "b", "g", "r"]),
-    ("cooldown", &["drawedge", "reverse"]),
     ("colorselect", &["drawlayer", "scale"]),
     (
         "colorvaluetexture",
@@ -360,25 +359,41 @@ const CHILDREN: &[(&str, &[&str])] = &[
     ("titleregion", &["anchors", "size"]),
 ];
 
+/// What only the 5.1 dialect's loader reads (2.4.3's frame attributes, `<Attributes>` and `<Cooldown>`):
+/// on 1.12.1 these are as unknown as any other.
+const FRAME_ATTRS_243: &[&str] = &["protected"];
+const FRAME_CHILDREN_243: &[&str] = &["attributes"];
+const ATTRS_243: &[(&str, &[&str])] = &[
+    ("attribute", &["name", "type", "value"]),
+    ("cooldown", &["drawedge", "reverse"]),
+];
+const CHILDREN_243: &[(&str, &[&str])] = &[("attributes", &["attribute"])];
+
 fn listed(table: &[(&str, &[&str])], tag: &str, name: &str) -> bool {
     table
         .iter()
         .any(|(t, names)| *t == tag && names.contains(&name))
 }
 
-fn attr_known(tag: &str, frame: bool, attr: &str) -> bool {
+fn attr_known(tag: &str, frame: bool, tbc: bool, attr: &str) -> bool {
     GENERIC_ATTRS.contains(&attr)
         || (frame && FRAME_ATTRS.contains(&attr))
         || listed(ATTRS, tag, attr)
+        || (tbc && ((frame && FRAME_ATTRS_243.contains(&attr)) || listed(ATTRS_243, tag, attr)))
 }
 
-fn child_known(tag: &str, frame: bool, child: &str) -> bool {
-    (frame && FRAME_CHILDREN.contains(&child)) || listed(CHILDREN, tag, child)
+fn child_known(tag: &str, frame: bool, tbc: bool, child: &str) -> bool {
+    (frame && FRAME_CHILDREN.contains(&child))
+        || listed(CHILDREN, tag, child)
+        || (tbc
+            && ((frame && FRAME_CHILDREN_243.contains(&child)) || listed(CHILDREN_243, tag, child)))
 }
 
 /// What a document's elements hold that the loader never reads, each pair once.
 #[derive(Default)]
 pub(super) struct Audit {
+    /// Whether the loader is the 5.1 dialect's, which reads the [`FRAME_ATTRS_243`] family too.
+    pub(super) tbc: bool,
     pub(super) elements: Vec<String>,
     pub(super) attributes: Vec<String>,
 }
@@ -403,7 +418,7 @@ impl Audit {
         let tag = el.tag.to_ascii_lowercase();
         let frame = is_frame(&el.tag);
         for (name, _) in el.attrs() {
-            if !attr_known(&tag, frame, &name.to_ascii_lowercase()) {
+            if !attr_known(&tag, frame, self.tbc, &name.to_ascii_lowercase()) {
                 Self::note(&mut self.attributes, format!("<{} {}>", el.tag, name));
             }
         }
@@ -422,7 +437,7 @@ impl Audit {
                         Self::note(&mut self.attributes, format!("<{} {}>", child.tag, name));
                     }
                 }
-                _ if child_known(&tag, frame, &ctag) => self.walk(child, is_frame),
+                _ if child_known(&tag, frame, self.tbc, &ctag) => self.walk(child, is_frame),
                 _ => Self::note(&mut self.elements, format!("<{}><{}>", el.tag, child.tag)),
             }
         }
@@ -507,7 +522,17 @@ mod tests {
                 missing.push(*n);
             }
         }
-        for (_, names) in ATTRS.iter().chain(CHILDREN) {
+        for n in FRAME_ATTRS_243.iter().chain(FRAME_CHILDREN_243) {
+            if !literal(n) {
+                missing.push(*n);
+            }
+        }
+        for (_, names) in ATTRS
+            .iter()
+            .chain(CHILDREN)
+            .chain(ATTRS_243)
+            .chain(CHILDREN_243)
+        {
             for n in *names {
                 if !literal(n) {
                     missing.push(*n);

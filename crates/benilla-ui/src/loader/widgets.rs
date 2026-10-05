@@ -1,4 +1,4 @@
-use mlua::{ObjectLike, Table};
+use mlua::{ObjectLike, Table, Value};
 
 use crate::framexml::{self, Element};
 use crate::script::LabelFont;
@@ -300,6 +300,69 @@ impl Loader<'_> {
 
     /// `<Minimap>` (`0x4ee2b0`): the two model files for the ctor's nine `Model` children, each
     /// the stock model when the attribute is absent, as the reference reads a default string.
+    /// 2.4.3's `protected="true"` and `<Attributes>` (`CSimpleFrame::LoadXML`: an `<Attribute>` with
+    /// no name or no value, or any other child, is reported and skipped; `type` is `number`,
+    /// `boolean` or `nil`, anything else a string). Each becomes a `SetAttribute`.
+    pub(super) fn apply_attributes(&mut self, el: &Element, wrapper: &Table, dbg: &str) {
+        if !self.listed_inherits() {
+            return;
+        }
+        if el.attr_bool("protected") {
+            let done = crate::script::ui243::set_protected(self.lua, wrapper, true);
+            if let Err(e) = done {
+                self.report.errors.push(format!("{dbg}: protected: {e}"));
+            }
+        }
+        for attributes in children_named(el, "Attributes") {
+            for a in &attributes.children {
+                if !a.tag.eq_ignore_ascii_case("Attribute") {
+                    self.report
+                        .warnings
+                        .push(format!("{dbg}: Unknown attributes element {}", a.tag));
+                    continue;
+                }
+                let Some(name) = a.attr("name") else {
+                    self.report
+                        .warnings
+                        .push(format!("{dbg}: unnamed attribute element"));
+                    continue;
+                };
+                let kind = a.attr("type").unwrap_or("").to_ascii_lowercase();
+                let raw = a.attr("value");
+                if raw.is_none() && kind != "nil" {
+                    self.report.warnings.push(format!(
+                        "{dbg}: attribute element named {name} missing value"
+                    ));
+                    continue;
+                }
+                let raw = raw.unwrap_or("");
+                let value = match kind.as_str() {
+                    "nil" => Value::Nil,
+                    "boolean" => Value::Boolean(raw.eq_ignore_ascii_case("true")),
+                    "number" => match raw.trim().parse::<f64>() {
+                        Ok(n) => Value::Number(n),
+                        Err(_) => {
+                            self.report.warnings.push(format!(
+                                "{dbg}: attribute element named {name}: \"{raw}\" is not a number"
+                            ));
+                            continue;
+                        }
+                    },
+                    _ => match self.lua.create_string(raw) {
+                        Ok(s) => Value::String(s),
+                        Err(_) => continue,
+                    },
+                };
+                let done = crate::script::ui243::set_attribute(self.lua, wrapper, name, value);
+                if let Err(e) = done {
+                    self.report
+                        .errors
+                        .push(format!("{dbg}: attribute {name}: {e}"));
+                }
+            }
+        }
+    }
+
     /// `<Cooldown>` (2.4.3): `reverse` and `drawEdge`, the two flags its XML reader takes.
     pub(super) fn apply_cooldown(&mut self, el: &Element, wrapper: &Table, dbg: &str) {
         if !el.tag.eq_ignore_ascii_case("Cooldown") {
