@@ -552,3 +552,40 @@ fn a_truncated_camera_record_is_dropped_not_half_read() {
     set_arr(&mut b, OFS_CAMERAS, 2, rec);
     assert_eq!(parse_cameras(&b).len(), 1);
 }
+
+/// A bone record of `size` bytes with its parent at `+8` and pivot at `pivot_ofs`.
+fn sized_bone(size: usize, parent: i16, pivot_ofs: usize, pivot: [f32; 3]) -> Vec<u8> {
+    let mut b = vec![0u8; size];
+    b[8..10].copy_from_slice(&parent.to_le_bytes());
+    for (i, v) in pivot.iter().enumerate() {
+        b[pivot_ofs + 4 * i..pivot_ofs + 4 * i + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    b
+}
+
+/// Bone records are 108 bytes before v260 and 112 from it (a `boneNameCRC` after `submesh`, pivot
+/// at 100), measured on 2.4.3 models: read at 108, the second record lands mid-record.
+#[test]
+fn bone_records_are_108_bytes_before_v260_and_112_from_it() {
+    for (version, size, pivot_ofs) in [
+        (256u32, 108usize, 96usize),
+        (260, 112, 100),
+        (263, 112, 100),
+    ] {
+        let mut b = header();
+        b[4..8].copy_from_slice(&version.to_le_bytes());
+        let ofs = b.len() as u32;
+        b.extend(sized_bone(size, -1, pivot_ofs, [1.0, 2.0, 3.0]));
+        b.extend(sized_bone(size, 0, pivot_ofs, [4.0, 5.0, 6.0]));
+        set_arr(&mut b, OFS_BONES, 2, ofs);
+        let fmt = parse(&b).expect("two bones parse");
+        let bones = &fmt.model().bones;
+        assert_eq!(bones.len(), 2, "v{version}");
+        assert_eq!(bones[1].parent, 0, "v{version}");
+        assert_eq!(
+            [bones[1].pivot.x, bones[1].pivot.y, bones[1].pivot.z],
+            [4.0, 5.0, 6.0],
+            "v{version}"
+        );
+    }
+}
