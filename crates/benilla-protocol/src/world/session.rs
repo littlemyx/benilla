@@ -6,7 +6,10 @@ use benilla_srp::{NormalizedString, SESSION_KEY_LENGTH};
 
 use crate::messages::{self, opcode, Character, FieldTable, MoveMode, ServerPacket};
 
-use super::movement::{client_uptime_ms, movement_info, MOVEMENT_FLAG_FORWARD};
+use super::movement::{
+    client_uptime_ms, force_speed_ack_body, full_info, move_flag_ack_body, movement_body,
+    movement_info, spline_done_body, MOVEMENT_FLAG_FORWARD,
+};
 use super::reader::WorldReader;
 use super::writer::WorldWriter;
 use super::{recv_packet, recv_packet_raw, send_packet};
@@ -389,28 +392,51 @@ impl WorldSession {
         self.send(opcode::CMSG_COMPLETE_CINEMATIC, &[])
     }
 
+    /// Whether this session speaks 2.4.3, which picks the layout of the movement bodies.
+    fn is_tbc(&self) -> bool {
+        matches!(self.build.expansion, benilla_build::Expansion::Tbc)
+    }
+
+    /// One `MSG_MOVE_*` packet, as [`WorldWriter::send_movement`]: on 2.4.3 `flags` are that
+    /// build's bits (`messages::tbc_flag`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_movement(
+        &mut self,
+        opcode: u16,
+        flags: u32,
+        pos: [f32; 3],
+        orientation: f32,
+        pitch: f32,
+        fall_time: u32,
+        jump: Option<messages::JumpInfo>,
+        transport: Option<messages::TransportPose>,
+    ) -> Result<()> {
+        let info = full_info(pos, orientation, flags, pitch, fall_time, jump, transport);
+        self.send(opcode, &movement_body(self.is_tbc(), &info))
+    }
+
     /// Start walking forward (`MSG_MOVE_START_FORWARD`).
     pub fn start_forward(&mut self, pos: [f32; 3], orientation: f32) -> Result<()> {
+        let info = movement_info(pos, orientation, MOVEMENT_FLAG_FORWARD);
         self.send(
             opcode::MSG_MOVE_START_FORWARD,
-            &messages::movement(&movement_info(pos, orientation, MOVEMENT_FLAG_FORWARD)),
+            &movement_body(self.is_tbc(), &info),
         )
     }
 
     /// Continue moving (`MSG_MOVE_HEARTBEAT`).
     pub fn heartbeat(&mut self, pos: [f32; 3], orientation: f32) -> Result<()> {
+        let info = movement_info(pos, orientation, MOVEMENT_FLAG_FORWARD);
         self.send(
             opcode::MSG_MOVE_HEARTBEAT,
-            &messages::movement(&movement_info(pos, orientation, MOVEMENT_FLAG_FORWARD)),
+            &movement_body(self.is_tbc(), &info),
         )
     }
 
     /// Stop (`MSG_MOVE_STOP`, no movement flags).
     pub fn stop(&mut self, pos: [f32; 3], orientation: f32) -> Result<()> {
-        self.send(
-            opcode::MSG_MOVE_STOP,
-            &messages::movement(&movement_info(pos, orientation, 0)),
-        )
+        let info = movement_info(pos, orientation, 0);
+        self.send(opcode::MSG_MOVE_STOP, &movement_body(self.is_tbc(), &info))
     }
 
     /// Ack a `SMSG_FORCE_*_SPEED_CHANGE` at rest with the full guid, counter and exact speed.
@@ -423,9 +449,10 @@ impl WorldSession {
         pos: [f32; 3],
         orientation: f32,
     ) -> Result<()> {
+        let info = movement_info(pos, orientation, 0);
         self.send(
             kind.ack_opcode(),
-            &messages::force_speed_ack(guid, counter, &movement_info(pos, orientation, 0), speed),
+            &force_speed_ack_body(self.is_tbc(), guid, counter, &info, speed),
         )
     }
 
@@ -436,9 +463,10 @@ impl WorldSession {
         orientation: f32,
         spline_id: u32,
     ) -> Result<()> {
+        let info = movement_info(pos, orientation, 0);
         self.send(
             opcode::CMSG_MOVE_SPLINE_DONE,
-            &messages::move_spline_done(&movement_info(pos, orientation, 0), spline_id),
+            &spline_done_body(self.is_tbc(), &info, spline_id),
         )
     }
 
@@ -791,7 +819,41 @@ impl WorldSession {
         let trailing = mode.ack_carries_apply().then_some(apply);
         self.send(
             mode.ack_opcode(apply),
-            &messages::move_flag_ack(guid, counter, &info, trailing),
+            &move_flag_ack_body(self.is_tbc(), guid, counter, &info, trailing),
+        )
+    }
+
+    /// Ack a 2.4.3 `SMSG_FORCE_{FLIGHT,FLIGHT_BACK}_SPEED_CHANGE` with the counter and exact speed.
+    pub fn force_flight_speed_ack(
+        &mut self,
+        kind: messages::FlightSpeed,
+        guid: u64,
+        counter: u32,
+        speed: f32,
+        pos: [f32; 3],
+        orientation: f32,
+        flags: u32,
+    ) -> Result<()> {
+        let info = movement_info(pos, orientation, flags);
+        self.send(
+            kind.ack_opcode(),
+            &force_speed_ack_body(self.is_tbc(), guid, counter, &info, speed),
+        )
+    }
+
+    /// Ack a 2.4.3 `SMSG_MOVE_SET_CAN_FLY` / `UNSET_CAN_FLY` with the counter and the applied word.
+    pub fn can_fly_ack(
+        &mut self,
+        guid: u64,
+        counter: u32,
+        apply: bool,
+        flags: u32,
+        pose: ([f32; 3], f32),
+    ) -> Result<()> {
+        let info = movement_info(pose.0, pose.1, flags);
+        self.send(
+            messages::tbc_opcode::CMSG_MOVE_SET_CAN_FLY_ACK,
+            &move_flag_ack_body(self.is_tbc(), guid, counter, &info, Some(apply)),
         )
     }
 
@@ -887,6 +949,7 @@ impl WorldSession {
                 encrypter,
                 chat_language: self.chat_language,
                 sent: None,
+                tbc: matches!(self.build.expansion, benilla_build::Expansion::Tbc),
             },
         ))
     }

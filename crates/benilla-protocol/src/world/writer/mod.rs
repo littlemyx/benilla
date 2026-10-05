@@ -67,6 +67,8 @@ pub struct WorldWriter {
     /// language carries. vmangos drops the whole message, dot-commands included, when the
     /// character does not know the language.
     pub(super) chat_language: u32,
+    /// Whether the session is on 2.4.3, which picks the layout of the movement bodies.
+    pub(super) tbc: bool,
 }
 
 impl WorldWriter {

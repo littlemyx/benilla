@@ -4,15 +4,21 @@
 
 use anyhow::Result;
 
-use crate::messages::{self, opcode, JumpInfo, MoveMode, TransportPose};
-use crate::world::movement::{client_uptime_ms, movement_info};
+use crate::messages::tbc_movement::FlightSpeed;
+use crate::messages::{self, opcode, tbc_opcode, JumpInfo, MoveMode, TransportPose};
+use crate::world::movement::{
+    client_uptime_ms, force_speed_ack_body, full_info, move_flag_ack_body, movement_body,
+    movement_info, not_active_mover_body, spline_done_body,
+};
 
 use super::WorldWriter;
 
 impl WorldWriter {
     /// One `MSG_MOVE_*` packet, its opcode picked per movement transition as the reference does.
     /// `flags` may set only bits with a serialized tail: directional, turn and walk bits, and
-    /// `JUMPING`, `SWIMMING` and `ON_TRANSPORT` with `jump`, `pitch` and `transport`.
+    /// `JUMPING`, `SWIMMING` and `ON_TRANSPORT` with `jump`, `pitch` and `transport`. On 2.4.3 the
+    /// bits are that build's (`messages::tbc_flag`: the jump block rides `FALLING`, flying carries
+    /// the pitch too) and a transport block goes out with a zero clock stamp.
     pub fn send_movement(
         &mut self,
         opcode: u16,
@@ -24,13 +30,8 @@ impl WorldWriter {
         jump: Option<JumpInfo>,
         transport: Option<TransportPose>,
     ) -> Result<()> {
-        let mut info = movement_info(pos, orientation, flags);
-        // The serializer writes each tail only when its flag is set, so flag and value must agree.
-        info.pitch = pitch;
-        info.fall_time = fall_time;
-        info.jump = jump;
-        info.transport = transport;
-        self.send(opcode, &messages::movement(&info))
+        let info = full_info(pos, orientation, flags, pitch, fall_time, jump, transport);
+        self.send(opcode, &movement_body(self.tbc, &info))
     }
 
     /// `CMSG_SET_ACTIVE_MOVER`, full guid: the client's claim after `SMSG_CLIENT_CONTROL_UPDATE`.
@@ -59,8 +60,7 @@ impl WorldWriter {
     ) -> Result<()> {
         let mut info = movement_info(pos, orientation, flags);
         info.fall_time = fall_time;
-        let mut body = messages::full_guid(guid);
-        body.extend_from_slice(&messages::movement(&info));
+        let body = not_active_mover_body(self.tbc, guid, &info);
         self.send(opcode::CMSG_MOVE_NOT_ACTIVE_MOVER, &body)
     }
 
@@ -75,6 +75,7 @@ impl WorldWriter {
 
     /// `CMSG_MOVE_SPLINE_DONE`: owed, at rest, when an `SMSG_MONSTER_MOVE` on our own guid ends.
     /// The server checks `spline_id` against its newest, then relocates us and tells observers.
+    /// The 2.4.3 body ends in the counter, without 1.12.1's trailing float.
     pub fn move_spline_done(
         &mut self,
         flags: u32,
@@ -85,7 +86,7 @@ impl WorldWriter {
         let info = movement_info(pos, orientation, flags);
         self.send(
             opcode::CMSG_MOVE_SPLINE_DONE,
-            &messages::move_spline_done(&info, spline_id),
+            &spline_done_body(self.tbc, &info, spline_id),
         )
     }
 
@@ -110,14 +111,10 @@ impl WorldWriter {
         jump: Option<JumpInfo>,
         transport: Option<TransportPose>,
     ) -> Result<()> {
-        let mut info = movement_info(pos, orientation, flags);
-        info.pitch = pitch;
-        info.fall_time = fall_time;
-        info.jump = jump;
-        info.transport = transport;
+        let info = full_info(pos, orientation, flags, pitch, fall_time, jump, transport);
         self.send(
             kind.ack_opcode(),
-            &messages::force_speed_ack(guid, counter, &info, speed),
+            &force_speed_ack_body(self.tbc, guid, counter, &info, speed),
         )
     }
 
@@ -147,7 +144,7 @@ impl WorldWriter {
         let trailing = mode.ack_carries_apply().then_some(apply);
         self.send(
             mode.ack_opcode(apply),
-            &messages::move_flag_ack(guid, counter, &info, trailing),
+            &move_flag_ack_body(self.tbc, guid, counter, &info, trailing),
         )
     }
 
@@ -169,7 +166,42 @@ impl WorldWriter {
         info.transport = transport;
         self.send(
             opcode::CMSG_MOVE_KNOCK_BACK_ACK,
-            &messages::knock_back_ack(guid, counter, &info),
+            &move_flag_ack_body(self.tbc, guid, counter, &info, None),
+        )
+    }
+
+    /// `CMSG_FORCE_{FLIGHT,FLIGHT_BACK}_SPEED_CHANGE_ACK`, 2.4.3 only: the counter and exact `speed`
+    /// echoed with our live pose, as for the six speeds of [`Self::force_speed_ack`].
+    pub fn force_flight_speed_ack(
+        &mut self,
+        kind: FlightSpeed,
+        guid: u64,
+        counter: u32,
+        speed: f32,
+        flags: u32,
+        pose: ([f32; 3], f32),
+    ) -> Result<()> {
+        let info = movement_info(pose.0, pose.1, flags);
+        self.send(
+            kind.ack_opcode(),
+            &force_speed_ack_body(self.tbc, guid, counter, &info, speed),
+        )
+    }
+
+    /// `CMSG_MOVE_SET_CAN_FLY_ACK`, 2.4.3 only: the counter, our pose (`flags` carrying
+    /// `tbc_flag::CAN_FLY` when it applies) and the applied word.
+    pub fn can_fly_ack(
+        &mut self,
+        guid: u64,
+        counter: u32,
+        apply: bool,
+        flags: u32,
+        pose: ([f32; 3], f32),
+    ) -> Result<()> {
+        let info = movement_info(pose.0, pose.1, flags);
+        self.send(
+            tbc_opcode::CMSG_MOVE_SET_CAN_FLY_ACK,
+            &move_flag_ack_body(self.tbc, guid, counter, &info, Some(apply)),
         )
     }
 }
