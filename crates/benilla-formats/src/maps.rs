@@ -4,16 +4,13 @@
 
 use std::collections::HashMap;
 
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, str_at, u32_at};
+use crate::dbc::{f32_at, parse, slots, str_at, u32_at, unread};
 
 const MAP: &str = "DBFilesClient\\Map.dbc";
-
-/// Field index of `LoadingScreenID`, a `LoadingScreens.dbc` id; 0 on the dev and test maps.
-const LOADING_SCREEN_FIELD: usize = 38;
 
 /// `Map.dbc`'s per-map data, keyed by map id.
 pub struct MapCatalog {
@@ -111,45 +108,32 @@ impl MapCatalog {
     }
 }
 
-const MAP_NAME_FIELD: usize = 4;
-
-const INSTANCE_TYPE_FIELD: usize = 2;
-
-const MIN_LEVEL_FIELD: usize = 13;
-const MAX_LEVEL_FIELD: usize = 14;
-const MAX_PLAYERS_FIELD: usize = 15;
-const FIELD_16: usize = 16;
-const FIELD_17: usize = 17;
-const FIELD_18: usize = 18;
-const DESCRIPTION_0_FIELD: usize = 20;
-const DESCRIPTION_1_FIELD: usize = 29;
-const BRACKET_SPAN_FIELD: usize = 39;
-const GROUP_QUEUE_FIELD: usize = 40;
-const MINIMAP_ICON_SCALE_FIELD: usize = 41;
-
-/// The unread fields are `u32` placeholders: only the 42 × 4 = 168-byte record has to add up.
-pub(crate) fn map_schema() -> Schema {
-    let mut s = Schema::new("Map");
+/// `Map.dbc`: 42 fields in 1.12.1, 125 in 2.4.3. Every column read keeps its order; 2.4.3 widens
+/// the three localized strings to 17 slots and appends 59 columns (three more localized strings
+/// and eight words) that are not read. Each read column's 2.4.3 slot is measured against the 44
+/// shared 1.12.1 rows and agrees with the emulator's format or the definitions project's column
+/// list. `LoadingScreenID` is a `LoadingScreens.dbc` id, 0 on the dev and test maps.
+pub(crate) fn map_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("Map");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("Directory", FieldType::String));
-    for i in 2..42 {
-        match i {
-            INSTANCE_TYPE_FIELD => s.add_field(SchemaField::new("InstanceType", FieldType::UInt32)),
-            MAP_NAME_FIELD => s.add_field(SchemaField::new("MapName", FieldType::String)),
-            DESCRIPTION_0_FIELD => {
-                s.add_field(SchemaField::new("MapDescription0", FieldType::String))
-            }
-            DESCRIPTION_1_FIELD => {
-                s.add_field(SchemaField::new("MapDescription1", FieldType::String))
-            }
-            FIELD_17 | FIELD_18 | MINIMAP_ICON_SCALE_FIELD => {
-                s.add_field(SchemaField::new(format!("_f{i}"), FieldType::Float32))
-            }
-            LOADING_SCREEN_FIELD => {
-                s.add_field(SchemaField::new("LoadingScreenID", FieldType::UInt32))
-            }
-            _ => s.add_field(SchemaField::new(format!("_pad{i}"), FieldType::UInt32)),
-        }
+    s.add_field(SchemaField::new("InstanceType", FieldType::UInt32));
+    unread(&mut s, "MapType", 1);
+    s.add_field(SchemaField::new("MapName", FieldType::LocString));
+    for name in ["MinLevel", "MaxLevel", "MaxPlayers", "Field16"] {
+        s.add_field(SchemaField::new(name, FieldType::UInt32));
+    }
+    s.add_field(SchemaField::new("Field17", FieldType::Float32));
+    s.add_field(SchemaField::new("Field18", FieldType::Float32));
+    unread(&mut s, "ParentMapID", 1);
+    s.add_field(SchemaField::new("MapDescription0", FieldType::LocString));
+    s.add_field(SchemaField::new("MapDescription1", FieldType::LocString));
+    s.add_field(SchemaField::new("LoadingScreenID", FieldType::UInt32));
+    s.add_field(SchemaField::new("BracketSpan", FieldType::UInt32));
+    s.add_field(SchemaField::new("GroupQueue", FieldType::UInt32));
+    s.add_field(SchemaField::new("MinimapIconScale", FieldType::Float32));
+    if layout.is_tbc() {
+        unread(&mut s, "Appended", 59);
     }
     s
 }
@@ -159,7 +143,28 @@ pub fn load_map_catalog(chain: &mut Chain) -> Result<MapCatalog> {
     let bytes = chain
         .read_file(MAP)
         .with_context(|| format!("reading {MAP}"))?;
-    let rs = parse(&bytes, map_schema(), "Map")?;
+    let schema = map_schema(chain.dbc_layout());
+    let [instance_slot, name_slot, min_slot, max_slot, players_slot, f16_slot, f17_slot, f18_slot, desc0_slot, desc1_slot, loading_slot, span_slot, queue_slot, scale_slot] =
+        slots(
+            &schema,
+            [
+                "InstanceType",
+                "MapName",
+                "MinLevel",
+                "MaxLevel",
+                "MaxPlayers",
+                "Field16",
+                "Field17",
+                "Field18",
+                "MapDescription0",
+                "MapDescription1",
+                "LoadingScreenID",
+                "BracketSpan",
+                "GroupQueue",
+                "MinimapIconScale",
+            ],
+        )?;
+    let rs = parse(&bytes, schema, "Map")?;
     let mut dirs = HashMap::with_capacity(rs.records().len());
     let mut names = HashMap::with_capacity(rs.records().len());
     let mut loading_screens = HashMap::new();
@@ -170,32 +175,32 @@ pub fn load_map_catalog(chain: &mut Chain) -> Result<MapCatalog> {
         battleground.insert(
             id,
             MapBattlegroundColumns {
-                min_level: u32_at(r, MIN_LEVEL_FIELD).unwrap_or(0),
-                max_level: u32_at(r, MAX_LEVEL_FIELD).unwrap_or(0),
-                max_players: u32_at(r, MAX_PLAYERS_FIELD).unwrap_or(0),
-                field_16: u32_at(r, FIELD_16).unwrap_or(0) as i32,
-                field_17: f32_at(r, FIELD_17).unwrap_or(0.0),
-                field_18: f32_at(r, FIELD_18).unwrap_or(0.0),
+                min_level: u32_at(r, min_slot).unwrap_or(0),
+                max_level: u32_at(r, max_slot).unwrap_or(0),
+                max_players: u32_at(r, players_slot).unwrap_or(0),
+                field_16: u32_at(r, f16_slot).unwrap_or(0) as i32,
+                field_17: f32_at(r, f17_slot).unwrap_or(0.0),
+                field_18: f32_at(r, f18_slot).unwrap_or(0.0),
                 descriptions: [
-                    str_at(&rs, r, DESCRIPTION_0_FIELD).unwrap_or_default(),
-                    str_at(&rs, r, DESCRIPTION_1_FIELD).unwrap_or_default(),
+                    str_at(&rs, r, desc0_slot).unwrap_or_default(),
+                    str_at(&rs, r, desc1_slot).unwrap_or_default(),
                 ],
-                bracket_span: u32_at(r, BRACKET_SPAN_FIELD).unwrap_or(0),
-                group_queue: u32_at(r, GROUP_QUEUE_FIELD).unwrap_or(0),
-                minimap_icon_scale: f32_at(r, MINIMAP_ICON_SCALE_FIELD).unwrap_or(1.0),
+                bracket_span: u32_at(r, span_slot).unwrap_or(0),
+                group_queue: u32_at(r, queue_slot).unwrap_or(0),
+                minimap_icon_scale: f32_at(r, scale_slot).unwrap_or(1.0),
             },
         );
         if let Some(dir) = str_at(&rs, r, 1) {
             dirs.insert(id, dir);
         }
-        if let Some(name) = str_at(&rs, r, MAP_NAME_FIELD).filter(|n| !n.is_empty()) {
+        if let Some(name) = str_at(&rs, r, name_slot).filter(|n| !n.is_empty()) {
             names.insert(id, name);
         }
         // Type 0 is recorded too, so `None` means only that no such map exists.
-        if let Some(ty) = u32_at(r, INSTANCE_TYPE_FIELD) {
+        if let Some(ty) = u32_at(r, instance_slot) {
             instance_types.insert(id, ty);
         }
-        if let Some(ls) = u32_at(r, LOADING_SCREEN_FIELD).filter(|&v| v != 0) {
+        if let Some(ls) = u32_at(r, loading_slot).filter(|&v| v != 0) {
             loading_screens.insert(id, ls);
         }
     }
@@ -253,5 +258,40 @@ mod tests {
             catalog.battleground(0).is_some(),
             "every row carries the columns — the client resolves map 0's when nothing was listed"
         );
+    }
+
+    /// 2.4.3's Map.dbc: Outland, its battleground rows through the wider strings, and the Eye of
+    /// the Storm, new in 2.x.
+    #[test]
+    fn the_2_4_3_map_table_reads_outland_and_the_battlegrounds() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_map_catalog(&mut chain).expect("load Map");
+        assert_eq!(cat.len(), 83, "2.4.3 ships 83 maps");
+        assert_eq!(cat.directory(530), Some("Expansion01"));
+        assert_eq!(cat.name(530), Some("Outland"));
+        assert_eq!(cat.loading_screen_id(530), Some(198));
+        assert_eq!(cat.directory(0), Some("Azeroth"));
+        assert_eq!(cat.name(0), Some("Eastern Kingdoms"));
+        assert_eq!(cat.instance_type(566), Some(3));
+        assert_eq!(cat.name(566), Some("Eye of the Storm"));
+
+        let eots = cat.battleground(566).expect("Eye of the Storm");
+        assert_eq!(
+            (eots.min_level, eots.max_level, eots.max_players),
+            (61, 70, 15)
+        );
+        assert_eq!((eots.bracket_span, eots.group_queue), (10, 1));
+        assert!(eots.descriptions[0].starts_with("Hovering high above"));
+        let wsg = cat.battleground(489).expect("Warsong Gulch");
+        assert_eq!(
+            (wsg.min_level, wsg.max_level, wsg.max_players),
+            (10, 70, 10),
+            "60 in 5875"
+        );
+        assert_eq!(wsg.field_16, -1);
+        assert!(wsg.descriptions[1].starts_with("A valley bordering Ashenvale Forest"));
+        let basin = cat.battleground(529).expect("Arathi Basin");
+        assert_eq!(basin.minimap_icon_scale, 1.25);
     }
 }

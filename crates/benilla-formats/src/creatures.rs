@@ -4,11 +4,11 @@
 
 use std::collections::HashMap;
 
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, str_at, u32_at};
+use crate::dbc::{f32_at, parse, slots, str_at, u32_at, unread};
 
 const CREATURE_MODEL_DATA: &str = "DBFilesClient\\CreatureModelData.dbc";
 const CREATURE_DISPLAY_INFO: &str = "DBFilesClient\\CreatureDisplayInfo.dbc";
@@ -272,9 +272,11 @@ impl CreatureCatalog {
     }
 }
 
-/// CreatureModelData.dbc: 16 fields in build 5875 (no `mountHeight`).
-pub(crate) fn creature_model_data_schema() -> Schema {
-    let mut s = Schema::new("CreatureModelData");
+/// CreatureModelData.dbc: 16 fields in build 5875, 24 in 2.4.3, which appends eight columns after
+/// the collision height (the read ones keep their slots: measured against the 424 shared rows and
+/// the emulator's format).
+pub(crate) fn creature_model_data_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("CreatureModelData");
     for (name, ty) in [
         ("ID", FieldType::UInt32),
         ("Flags", FieldType::UInt32),
@@ -295,12 +297,17 @@ pub(crate) fn creature_model_data_schema() -> Schema {
     ] {
         s.add_field(SchemaField::new(name, ty));
     }
+    if layout.is_tbc() {
+        unread(&mut s, "Appended", 8);
+    }
     s
 }
 
-/// CreatureDisplayInfo.dbc: 12 fields in build 5875.
-pub(crate) fn creature_display_info_schema() -> Schema {
-    let mut s = Schema::new("CreatureDisplayInfo");
+/// CreatureDisplayInfo.dbc: 12 fields in build 5875, 14 in 2.4.3, which inserts a portrait
+/// texture name before the size class and appends a particle colour (measured: the size class,
+/// blood level and NPC sound id each move up one slot).
+pub(crate) fn creature_display_info_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("CreatureDisplayInfo");
     for (name, ty) in [
         ("ID", FieldType::UInt32),
         ("ModelID", FieldType::UInt32),
@@ -311,8 +318,14 @@ pub(crate) fn creature_display_info_schema() -> Schema {
         ("TextureVariation0", FieldType::String),
         ("TextureVariation1", FieldType::String),
         ("TextureVariation2", FieldType::String),
-        // Not `PortraitTextureName` (absent in 5875): a signed size class, tested for -1 at
-        // `0x625509`.
+    ] {
+        s.add_field(SchemaField::new(name, ty));
+    }
+    if layout.is_tbc() {
+        s.add_field(SchemaField::new("PortraitTexture", FieldType::String));
+    }
+    for (name, ty) in [
+        // A signed size class, tested for -1 at `0x625509`.
         ("SizeClass", FieldType::UInt32),
         ("BloodLevel", FieldType::UInt32),
         // Some maps label this BloodID, but its 5875 values (33..188) are NPC sound ids.
@@ -320,12 +333,17 @@ pub(crate) fn creature_display_info_schema() -> Schema {
     ] {
         s.add_field(SchemaField::new(name, ty));
     }
+    if layout.is_tbc() {
+        unread(&mut s, "ParticleColor", 1);
+    }
     s
 }
 
-/// CreatureDisplayInfoExtra.dbc: 19 fields, 76-byte records in 5875 (vmangos `DBCStructure.h`).
-pub(crate) fn creature_display_info_extra_schema() -> Schema {
-    let mut s = Schema::new("CreatureDisplayInfoExtra");
+/// CreatureDisplayInfoExtra.dbc: 19 fields, 76-byte records in 5875 (vmangos `DBCStructure.h`); 21
+/// in 2.4.3, which adds an eleventh equipment slot and a flag word before the bake name (measured:
+/// the ten equipment slots keep their places, the bake name moves from slot 18 to 20).
+pub(crate) fn creature_display_info_extra_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("CreatureDisplayInfoExtra");
     for (name, ty) in [
         ("ID", FieldType::UInt32),
         ("Race", FieldType::UInt32),
@@ -341,6 +359,9 @@ pub(crate) fn creature_display_info_extra_schema() -> Schema {
     for i in 0..10 {
         s.add_field(SchemaField::new(format!("Equipment{i}"), FieldType::UInt32));
     }
+    if layout.is_tbc() {
+        unread(&mut s, "ExtraEquipmentAndFlags", 2);
+    }
     s.add_field(SchemaField::new("BakeName", FieldType::String));
     s
 }
@@ -351,7 +372,11 @@ pub fn load_creature_catalog(chain: &mut Chain) -> Result<CreatureCatalog> {
         let bytes = chain
             .read_file(CREATURE_MODEL_DATA)
             .with_context(|| format!("reading {CREATURE_MODEL_DATA}"))?;
-        let rs = parse(&bytes, creature_model_data_schema(), "CreatureModelData")?;
+        let rs = parse(
+            &bytes,
+            creature_model_data_schema(chain.dbc_layout()),
+            "CreatureModelData",
+        )?;
         let mut m = HashMap::with_capacity(rs.records().len());
         for r in rs.records() {
             if let (Some(id), Some(name)) = (u32_at(r, 0), str_at(&rs, r, 2)) {
@@ -381,11 +406,9 @@ pub fn load_creature_catalog(chain: &mut Chain) -> Result<CreatureCatalog> {
         let bytes = chain
             .read_file(CREATURE_DISPLAY_INFO)
             .with_context(|| format!("reading {CREATURE_DISPLAY_INFO}"))?;
-        let rs = parse(
-            &bytes,
-            creature_display_info_schema(),
-            "CreatureDisplayInfo",
-        )?;
+        let schema = creature_display_info_schema(chain.dbc_layout());
+        let [size_slot, blood_slot] = slots(&schema, ["SizeClass", "BloodLevel"])?;
+        let rs = parse(&bytes, schema, "CreatureDisplayInfo")?;
         let mut d = HashMap::with_capacity(rs.records().len());
         for r in rs.records() {
             if let (Some(id), Some(model_id)) = (u32_at(r, 0), u32_at(r, 1)) {
@@ -396,8 +419,8 @@ pub fn load_creature_catalog(chain: &mut Chain) -> Result<CreatureCatalog> {
                         extended_id: u32_at(r, 3).unwrap_or(0),
                         scale: f32_at(r, 4).unwrap_or(1.0),
                         textures: [str_at(&rs, r, 6), str_at(&rs, r, 7), str_at(&rs, r, 8)],
-                        blood_level: u32_at(r, 10).unwrap_or(0),
-                        size_class: u32_at(r, 9).map_or(-1, |v| v as i32),
+                        blood_level: u32_at(r, blood_slot).unwrap_or(0),
+                        size_class: u32_at(r, size_slot).map_or(-1, |v| v as i32),
                         model_alpha: u32_at(r, 5).unwrap_or(255),
                     },
                 );
@@ -421,11 +444,9 @@ fn load_creature_display_info_extra(chain: &mut Chain) -> Result<HashMap<u32, Np
     let bytes = chain
         .read_file(CREATURE_DISPLAY_INFO_EXTRA)
         .with_context(|| format!("reading {CREATURE_DISPLAY_INFO_EXTRA}"))?;
-    let rs = parse(
-        &bytes,
-        creature_display_info_extra_schema(),
-        "CreatureDisplayInfoExtra",
-    )?;
+    let schema = creature_display_info_extra_schema(chain.dbc_layout());
+    let [bake_slot] = slots(&schema, ["BakeName"])?;
+    let rs = parse(&bytes, schema, "CreatureDisplayInfoExtra")?;
     let mut e = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         if let Some(id) = u32_at(r, 0) {
@@ -440,7 +461,7 @@ fn load_creature_display_info_extra(chain: &mut Chain) -> Result<HashMap<u32, Np
                     hair_color: u32_at(r, 6).unwrap_or(0) as u8,
                     facial_hair: u32_at(r, 7).unwrap_or(0) as u8,
                     equipment: std::array::from_fn(|i| u32_at(r, 8 + i).unwrap_or(0)),
-                    bake_name: str_at(&rs, r, 18),
+                    bake_name: str_at(&rs, r, bake_slot),
                 },
             );
         }
@@ -997,6 +1018,68 @@ mod tests {
             column * scale_x,
             column * scale_x.max(display_scale),
             "the floor is inert on this row — the height was not the bug"
+        );
+    }
+
+    /// 2.4.3's display tables: the Blood Elf and Draenei body displays through the shifted size,
+    /// blood and sound columns, the extra table's equipment and bake name at their new slot.
+    #[test]
+    fn the_2_4_3_creature_tables_read_the_new_races_and_the_shifted_columns() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_creature_catalog(&mut chain).expect("load creature tables");
+        assert_eq!(cat.len(), 17001, "CreatureDisplayInfo rows");
+        assert_eq!(cat.extra_len(), 11281, "CreatureDisplayInfoExtra rows");
+
+        let belf = cat.model(15476).expect("Blood Elf male display");
+        assert_eq!(
+            belf.model_path,
+            "Character\\BloodElf\\Male\\BloodElfMale.mdx"
+        );
+        assert_eq!(belf.blood_model, 1);
+        assert!((belf.collision_height - 2.031).abs() < 1e-3);
+        let draenei = cat.model(16125).expect("Draenei male display");
+        assert_eq!(
+            draenei.model_path,
+            "Character\\Draenei\\Male\\DraeneiMale.mdx"
+        );
+        assert_eq!(draenei.blood_model, 4);
+        let fp = cat.footprint(16125).expect("Draenei prints");
+        assert_eq!(fp.texture_id, 3);
+        assert!((fp.length - 22.0 / 36.0).abs() < 1e-6);
+
+        // The size class and blood level sit one slot later than in 1.12.1.
+        assert_eq!(cat.size_class(793), Some(1));
+        assert_eq!(
+            cat.size_class(17001),
+            Some(1),
+            "-1 defers to the model's size"
+        );
+        assert_eq!(cat.model(864).expect("display 864").blood_display, 2);
+        assert_eq!(cat.model(892).expect("display 892").blood_display, 1);
+
+        let snake = cat.model(17000).expect("snake display");
+        assert_eq!(snake.textures[0].as_deref(), Some("SnakeSkinBlue"));
+        assert_eq!(snake.scale, 3.0);
+        assert_eq!(cat.display_base_alpha(17000), Some(128.0 / 255.0));
+
+        // A 2.4.3 character-model NPC: the bake name is at slot 20, ten equipment slots from 8.
+        assert_eq!(cat.display_race_sex(15001), Some((8, 1)));
+        let npc = cat
+            .model(15001)
+            .and_then(|m| m.npc_appearance)
+            .expect("display 15001 is a character-model NPC");
+        assert_eq!(
+            (npc.skin, npc.hair_style, npc.hair_color, npc.facial_hair),
+            (11, 2, 9, 5)
+        );
+        assert_eq!(
+            npc.equipment,
+            [0, 32052, 27932, 32053, 26879, 27937, 32054, 27933, 27934, 0]
+        );
+        assert_eq!(
+            npc.bake_name.as_deref(),
+            Some("84128339185f780bccbc4cca70c2ebdf.blp")
         );
     }
 }

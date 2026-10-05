@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, u32_at};
-use crate::Chain;
+use crate::dbc::{parse, u32_at, unread};
+use crate::{Chain, DbcLayout};
 
 /// `Material.dbc` keyed by id.
 pub struct MaterialCatalog {
@@ -59,10 +59,15 @@ impl MaterialCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("Material");
+/// 2.4.3 appends a sheathe and an unsheathe sound after the foley sound (measured: the three read
+/// columns keep their slots on all eight rows; the emulator and the definitions project agree).
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("Material");
     for name in ["ID", "Flags", "FoleySoundID"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
+    }
+    if layout.is_tbc() {
+        unread(&mut s, "SheatheSounds", 2);
     }
     s
 }
@@ -72,7 +77,7 @@ pub fn load_material_catalog(chain: &mut Chain) -> Result<MaterialCatalog> {
     let bytes = chain
         .read_file("DBFilesClient\\Material.dbc")
         .context("reading Material.dbc")?;
-    let rs = parse(&bytes, schema(), "Material")?;
+    let rs = parse(&bytes, schema(chain.dbc_layout()), "Material")?;
     let mut foley = HashMap::with_capacity(rs.records().len());
     let mut flags = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
@@ -134,5 +139,18 @@ mod tests {
         for flesh in [0, 1, 2, 3, 4, 7, 8, 99] {
             assert_eq!(cat.armor_impact_slot(flesh), 0, "material {flesh}");
         }
+    }
+
+    /// 2.4.3's table, two sheathe sounds appended: the read columns are the same eight rows.
+    #[test]
+    fn the_2_4_3_materials_keep_their_foley_kits() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_material_catalog(&mut chain).expect("load materials");
+        assert_eq!(cat.len(), 8);
+        assert_eq!(cat.foley_kit(5), Some(1005), "chain");
+        assert_eq!(cat.foley_kit(6), Some(1004), "plate");
+        assert_eq!(cat.foley_kit(8), Some(1003), "leather");
+        assert_eq!(cat.foley_kit(7), None, "cloth has none");
     }
 }

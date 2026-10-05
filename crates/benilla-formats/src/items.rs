@@ -7,11 +7,11 @@
 
 use std::collections::HashMap;
 
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, RecordSet, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, str_at, u32_at, unread};
 use crate::models::model_path;
 
 const ITEM_DISPLAY_INFO: &str = "DBFilesClient\\ItemDisplayInfo.dbc";
@@ -99,9 +99,19 @@ impl ItemDisplayCatalog {
     }
 }
 
-/// All 23 columns, the unread ones included, so the field-count check against the header is exact.
+/// The 1.12.1 table (the synthetic-record tests'): 23 columns, the unread ones included, so the field-count check against the
+/// header is exact.
+#[cfg(test)]
 pub(crate) fn item_display_info_schema() -> Schema {
-    let mut s = Schema::new("ItemDisplayInfo");
+    item_display_info_schema_for(DbcLayout::VANILLA_1_12_1)
+}
+
+/// The columns for a layout: 2.4.3 has 25, inserting a second inventory icon after the first and
+/// appending a particle colour, so every column from the geoset groups on sits one slot later
+/// (measured: all 21 read columns match their shifted slot on the 29604 shared rows; the
+/// definitions project's column list agrees).
+pub(crate) fn item_display_info_schema_for(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ItemDisplayInfo");
     for (name, ty) in [
         ("ID", FieldType::UInt32),
         ("ModelNameLeft", FieldType::String),
@@ -109,6 +119,13 @@ pub(crate) fn item_display_info_schema() -> Schema {
         ("ModelTextureLeft", FieldType::String),
         ("ModelTextureRight", FieldType::String),
         ("Icon", FieldType::String),
+    ] {
+        s.add_field(SchemaField::new(name, ty));
+    }
+    if layout.is_tbc() {
+        s.add_field(SchemaField::new("IconSecond", FieldType::String));
+    }
+    for (name, ty) in [
         ("GeosetGroup0", FieldType::UInt32),
         ("GeosetGroup1", FieldType::UInt32),
         ("GeosetGroup2", FieldType::UInt32),
@@ -137,11 +154,34 @@ pub(crate) fn item_display_info_schema() -> Schema {
         s.add_field(SchemaField::new(name, FieldType::String));
     }
     s.add_field(SchemaField::new("ItemVisualID", FieldType::UInt32));
+    if layout.is_tbc() {
+        unread(&mut s, "ParticleColor", 1);
+    }
     s
 }
 
 /// The catalog from a parsed record set, testable without a chain.
+#[cfg(test)]
 fn catalog_from_records(rs: RecordSet) -> ItemDisplayCatalog {
+    catalog_from_records_in(rs, &item_display_info_schema())
+}
+
+/// The catalog from a record set parsed under `schema`, each column read at its slot there.
+fn catalog_from_records_in(rs: RecordSet, schema: &Schema) -> ItemDisplayCatalog {
+    let at = |name: &str| {
+        schema
+            .slot_of(name)
+            .unwrap_or_else(|| panic!("ItemDisplayInfo schema has no column {name}"))
+    };
+    let (geoset, flags_slot, visual_slot, sounds_slot, helm_slot, region_slot, item_visual_slot) = (
+        at("GeosetGroup0"),
+        at("Flags"),
+        at("SpellVisualID"),
+        at("ItemGroupSoundsID"),
+        at("HelmVisMale"),
+        at("ArmUpperTexture"),
+        at("ItemVisualID"),
+    );
     let mut displays = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -151,17 +191,20 @@ fn catalog_from_records(rs: RecordSet) -> ItemDisplayCatalog {
         ];
         let model_texture = [str_at(&rs, r, 3), str_at(&rs, r, 4)];
         let geoset_groups = [
-            u32_at(r, 6).unwrap_or(0),
-            u32_at(r, 7).unwrap_or(0),
-            u32_at(r, 8).unwrap_or(0),
+            u32_at(r, geoset).unwrap_or(0),
+            u32_at(r, geoset + 1).unwrap_or(0),
+            u32_at(r, geoset + 2).unwrap_or(0),
         ];
-        let region_textures = std::array::from_fn(|i| str_at(&rs, r, 14 + i));
-        let helmet_vis = [u32_at(r, 12).unwrap_or(0), u32_at(r, 13).unwrap_or(0)];
+        let region_textures = std::array::from_fn(|i| str_at(&rs, r, region_slot + i));
+        let helmet_vis = [
+            u32_at(r, helm_slot).unwrap_or(0),
+            u32_at(r, helm_slot + 1).unwrap_or(0),
+        ];
         let icon = str_at(&rs, r, 5).map(|i| format!("Interface\\Icons\\{i}"));
-        let group_sounds = u32_at(r, 11).unwrap_or(0);
-        let spell_visual = u32_at(r, 10).unwrap_or(0);
-        let flags = u32_at(r, 9).unwrap_or(0);
-        let item_visual = u32_at(r, 22).unwrap_or(0) as i32;
+        let group_sounds = u32_at(r, sounds_slot).unwrap_or(0);
+        let spell_visual = u32_at(r, visual_slot).unwrap_or(0);
+        let flags = u32_at(r, flags_slot).unwrap_or(0);
+        let item_visual = u32_at(r, item_visual_slot).unwrap_or(0) as i32;
         displays.insert(
             id,
             ItemDisplay {
@@ -186,8 +229,9 @@ pub fn load_item_display_catalog(chain: &mut Chain) -> Result<ItemDisplayCatalog
     let bytes = chain
         .read_file(ITEM_DISPLAY_INFO)
         .with_context(|| format!("reading {ITEM_DISPLAY_INFO}"))?;
-    let rs = parse(&bytes, item_display_info_schema(), "ItemDisplayInfo")?;
-    Ok(catalog_from_records(rs))
+    let schema = item_display_info_schema_for(chain.dbc_layout());
+    let rs = parse(&bytes, schema.clone(), "ItemDisplayInfo")?;
+    Ok(catalog_from_records_in(rs, &schema))
 }
 
 #[cfg(test)]
@@ -333,5 +377,52 @@ mod tests {
         let catalog = catalog_from_records(rs);
         assert_eq!(catalog.len(), 1);
         assert!(catalog.get(999).is_none());
+    }
+
+    /// 2.4.3's ItemDisplayInfo, a second icon column inserted: every read column on rows the build
+    /// added and on rows both builds ship.
+    #[test]
+    fn real_2_4_3_item_displays_read_through_the_shifted_columns() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_item_display_catalog(&mut chain).expect("load ItemDisplayInfo");
+        assert_eq!(cat.len(), 42208);
+
+        // The buckler of the 1.12.1 test: the same row through the shifted columns.
+        let buckler = cat.get(18730).expect("display 18730");
+        assert_eq!(buckler.model[0].as_deref(), Some("shield_round_a_01.m2"));
+        assert_eq!(
+            buckler.model_texture[0].as_deref(),
+            Some("Buckler_Damaged_A_01Purple")
+        );
+        assert_eq!(
+            buckler.icon.as_deref(),
+            Some("Interface\\Icons\\INV_Shield_09")
+        );
+        assert_eq!(buckler.group_sounds, 9);
+        // A helm: the hide-mask pair, the sound group.
+        let helm = cat.get(20255).expect("display 20255");
+        assert_eq!(helm.helmet_vis, [248, 306]);
+        assert_eq!(helm.worn_helm_vis(), Some([248, 306]));
+        assert_eq!(helm.group_sounds, 10);
+        // A rifle names a spell visual; a cloak a geoset group and an item visual; a tabard the
+        // emblem flag; a bow its glow; one weapon the "none" glow -1.
+        assert_eq!(cat.get(20504).expect("rifle").spell_visual, 224);
+        let cloak = cat.get(23942).expect("cloak");
+        assert_eq!((cloak.geoset_groups, cloak.item_visual), ([1, 0, 0], 42));
+        assert!(cat.get(20621).expect("tabard").takes_guild_emblem());
+        assert_eq!(cat.get(24929).expect("bow").item_visual, 104);
+        assert_eq!(cat.get(20031).expect("horde sword").item_visual, -1);
+        // A 2.x row: an Outland mail glove painted on the second region texture.
+        let glove = cat.get(45000).expect("display 45000");
+        assert_eq!(
+            glove.region_textures[1].as_deref(),
+            Some("Mail_RaidShaman_B_01OutlandGreen_Glove_AL")
+        );
+        assert!(glove.region_textures[0].is_none());
+        assert_eq!(
+            cat.get(1542).expect("shortsword").icon.as_deref(),
+            Some("Interface\\Icons\\INV_Sword_04")
+        );
     }
 }

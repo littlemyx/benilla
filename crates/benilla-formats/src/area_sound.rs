@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use crate::Chain;
+use crate::DbcLayout;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
@@ -142,32 +143,9 @@ impl AreaSoundCatalog {
     }
 }
 
-pub(crate) fn area_schema() -> Schema {
-    let mut s = Schema::new("AreaTable");
-    for (i, name) in [
-        "ID",
-        "ContinentID",
-        "ParentAreaID",
-        "AreaBit",
-        "Flags",
-        "SoundProviderPref",
-        "SoundProviderPrefUnderwater",
-        "AmbienceID",
-        "ZoneMusic",
-        "IntroSound",
-        "ExplorationLevel",
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        debug_assert!(i < 11);
-        s.add_field(SchemaField::new(name, FieldType::UInt32));
-    }
-    s.add_field(SchemaField::new("AreaName", FieldType::String));
-    for i in 12..25 {
-        s.add_field(SchemaField::new(format!("_pad{i}"), FieldType::UInt32));
-    }
-    s
+/// The same table `AreaTable.dbc` as [`crate::area_table::schema`], read here for its audio ids.
+pub(crate) fn area_schema(layout: DbcLayout) -> Schema {
+    crate::area_table::schema(layout)
 }
 
 pub(crate) fn zone_music_schema() -> Schema {
@@ -214,12 +192,21 @@ pub fn load_area_sound_catalog(chain: &mut Chain) -> Result<AreaSoundCatalog> {
         parse(&bytes, schema, what)
     };
 
-    let rs = read(
-        chain,
-        "DBFilesClient\\AreaTable.dbc",
-        area_schema(),
-        "AreaTable",
-    )?;
+    let area = area_schema(chain.dbc_layout());
+    let [parent_slot, provider_slot, underwater_slot, ambience_slot, music_slot, intro_slot, name_slot] =
+        crate::dbc::slots(
+            &area,
+            [
+                "ParentAreaID",
+                "SoundProviderPref",
+                "SoundProviderPrefUnderwater",
+                "AmbienceID",
+                "ZoneMusic",
+                "IntroSound",
+                "AreaName",
+            ],
+        )?;
+    let rs = read(chain, "DBFilesClient\\AreaTable.dbc", area, "AreaTable")?;
     let mut areas = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -227,13 +214,13 @@ pub fn load_area_sound_catalog(chain: &mut Chain) -> Result<AreaSoundCatalog> {
             id,
             AreaEntry {
                 id,
-                parent: u32_at(r, 2).unwrap_or(0),
-                ambience: u32_at(r, 7).unwrap_or(0),
-                zone_music: u32_at(r, 8).unwrap_or(0),
-                intro_sound: u32_at(r, 9).unwrap_or(0),
-                sound_provider: u32_at(r, 5).unwrap_or(0),
-                sound_provider_underwater: u32_at(r, 6).unwrap_or(0),
-                name: str_at(&rs, r, 11).unwrap_or_default(),
+                parent: u32_at(r, parent_slot).unwrap_or(0),
+                ambience: u32_at(r, ambience_slot).unwrap_or(0),
+                zone_music: u32_at(r, music_slot).unwrap_or(0),
+                intro_sound: u32_at(r, intro_slot).unwrap_or(0),
+                sound_provider: u32_at(r, provider_slot).unwrap_or(0),
+                sound_provider_underwater: u32_at(r, underwater_slot).unwrap_or(0),
+                name: str_at(&rs, r, name_slot).unwrap_or_default(),
             },
         );
     }
@@ -349,5 +336,26 @@ mod tests {
             sub.id,
             sub.name
         );
+    }
+
+    /// 2.4.3's audio ids on the same table: Hellfire Peninsula's ambience and music.
+    #[test]
+    fn real_2_4_3_area_audio_ids_read() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_area_sound_catalog(&mut chain).expect("load area audio");
+        let hellfire = cat.area(3483).expect("Hellfire Peninsula");
+        assert_eq!(hellfire.name, "Hellfire Peninsula");
+        assert_eq!((hellfire.ambience, hellfire.zone_music), (370, 277));
+        let elwynn = cat.area(12).expect("Elwynn Forest");
+        assert_eq!(
+            (
+                elwynn.ambience,
+                elwynn.zone_music,
+                elwynn.sound_provider_underwater
+            ),
+            (35, 1, 11)
+        );
+        assert_eq!(cat.area(9).expect("Northshire").parent, 12);
     }
 }

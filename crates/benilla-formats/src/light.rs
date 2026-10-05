@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{f32_at, parse, str_at, u32_at, unread};
+use crate::{Chain, DbcLayout};
 
 mod atmosphere;
 mod tables;
@@ -197,10 +197,15 @@ pub(crate) fn light_schema() -> Schema {
 
 /// `LightParams.dbc`: 9 fields, 36-byte records, types per the client's reader `0x589030`.
 /// `cloudTypeID` (+0x0C) is 0 in every 5875 record; the glow is +0x10.
-pub(crate) fn light_skybox_schema() -> Schema {
-    let mut schema = Schema::new("LightSkybox");
+pub(crate) fn light_skybox_schema(layout: DbcLayout) -> Schema {
+    let mut schema = layout.schema("LightSkybox");
     schema.add_field(SchemaField::new("ID", FieldType::UInt32));
     schema.add_field(SchemaField::new("Name", FieldType::String));
+    if layout.is_tbc() {
+        // A flag word follows the name in 2.4.3 (measured: the name keeps its slot on all six
+        // shared rows).
+        unread(&mut schema, "Flags", 1);
+    }
     schema
 }
 
@@ -332,7 +337,11 @@ impl LightCatalog {
             let bytes = chain
                 .read_file(LIGHT_SKYBOX)
                 .with_context(|| format!("reading {LIGHT_SKYBOX}"))?;
-            let rs = parse(&bytes, light_skybox_schema(), "LightSkybox")?;
+            let rs = parse(
+                &bytes,
+                light_skybox_schema(chain.dbc_layout()),
+                "LightSkybox",
+            )?;
             let mut m = HashMap::with_capacity(rs.records().len());
             for r in rs.records() {
                 if let (Some(id), Some(path)) = (u32_at(r, 0), str_at(&rs, r, 1)) {
@@ -883,5 +892,17 @@ mod tests {
         let q = |g: f32| (g * 255.0).floor() / 255.0;
         assert!((q(0.65) - 165.0 / 255.0).abs() < 1e-6);
         assert!((q(0.50) - 127.0 / 255.0).abs() < 1e-6); // Duskwood → 0.498
+    }
+
+    /// 2.4.3's skybox table, a flag word after the name: the catalog loads whole and the ghost sky
+    /// still resolves to its model.
+    #[test]
+    fn the_2_4_3_light_catalog_loads_with_its_skyboxes() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = LightCatalog::load(&mut chain).expect("load the light tables");
+        assert_eq!(cat.skyboxes.len(), 15);
+        assert_eq!(cat.skyboxes[&4], "environments\\stars\\stars.m2");
+        assert_eq!(cat.skyboxes[&1], "environments\\stars\\stratholmeskybox.m2");
     }
 }

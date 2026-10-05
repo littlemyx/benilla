@@ -47,18 +47,10 @@ pub(crate) fn languages_schema(layout: DbcLayout) -> Schema {
     s
 }
 
-/// `ChrRaces.dbc`, 29 fields in 5875, all read as dwords: only the count must match the header,
-/// and only field 8 is used.
-pub(crate) fn chr_races_schema() -> Schema {
-    let mut s = Schema::new("ChrRaces");
-    for i in 0..29 {
-        s.add_field(SchemaField::new(format!("f{i}"), FieldType::UInt32));
-    }
-    s
+/// `ChrRaces.dbc`, of which only `BaseLanguage`, which the binding reads at `record + 0x20`, is used.
+pub(crate) fn chr_races_schema(layout: DbcLayout) -> Schema {
+    crate::factions::chr_races_schema(layout)
 }
-
-/// `BaseLanguage`, which the binding reads at `record + 0x20`.
-const CHR_RACES_BASE_LANGUAGE: usize = 8;
 
 /// `Languages.dbc` in row order, the order `GetNumLanguages` and `GetLanguageByIndex` count in
 /// (`0x49fb30`, `0x49fbe0`).
@@ -135,10 +127,12 @@ pub fn load_default_languages(chain: &mut Chain) -> Result<DefaultLanguages> {
     let race_bytes = chain
         .read_file(CHR_RACES)
         .with_context(|| format!("reading {CHR_RACES}"))?;
-    let races = parse(&race_bytes, chr_races_schema(), "ChrRaces.dbc")?;
+    let race_schema = chr_races_schema(chain.dbc_layout());
+    let [language_slot] = slots(&race_schema, ["BaseLanguage"])?;
+    let races = parse(&race_bytes, race_schema, "ChrRaces.dbc")?;
     let mut out = HashMap::new();
     for r in races.records() {
-        let (Some(race), Some(lang)) = (u32_at(r, 0), u32_at(r, CHR_RACES_BASE_LANGUAGE)) else {
+        let (Some(race), Some(lang)) = (u32_at(r, 0), u32_at(r, language_slot)) else {
             continue;
         };
         if let Some(names) = by_id.get(&lang) {
@@ -322,7 +316,6 @@ mod tests {
     }
 
     /// 2.4.3's table: 17 languages, the new Draenei, Zombie and the two binary tongues included.
-    /// (The race-to-language join also reads ChrRaces, which is not converted yet.)
     #[test]
     fn the_2_4_3_table_adds_draenei() {
         let data = crate::wow_data_tbc_or_skip!();
@@ -336,5 +329,18 @@ mod tests {
         assert!(names.contains(&(36, "Zombie")));
         assert!(names.contains(&(37, "Gnomish Binary")));
         assert!(names.contains(&(38, "Goblin Binary")));
+    }
+
+    /// The race-to-language join whole on 2.4.3: sixteen races, the Blood Elf speaking Orcish.
+    #[test]
+    fn the_2_4_3_default_languages_join_the_new_races() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let langs = load_default_languages(&mut chain).expect("join");
+        assert_eq!(langs.len(), 16, "every ChrRaces row names a language");
+        assert_eq!(langs.name(1, 0), Some("Common"), "Human");
+        assert_eq!(langs.name(2, 0), Some("Orcish"), "Orc");
+        assert_eq!(langs.name(10, 0), Some("Orcish"), "Blood Elf");
+        assert_eq!(langs.name(11, 0), Some("Common"), "Draenei");
     }
 }

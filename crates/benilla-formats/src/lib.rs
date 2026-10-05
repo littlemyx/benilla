@@ -598,10 +598,11 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
     let base = dbc_name.rsplit(['/', '\\']).next().unwrap_or(dbc_name);
 
     // A table with a typed loader reuses its schema, so a dump reads what the loader reads.
+    // The ones that take a layout dump as 1.12.1 lays them out.
     for (name, ctor) in [
         (
             "CreatureDisplayInfo.dbc",
-            creatures::creature_display_info_schema as fn() -> Schema,
+            creatures::creature_display_info_schema as fn(DbcLayout) -> Schema,
         ),
         (
             "CreatureDisplayInfoExtra.dbc",
@@ -611,22 +612,31 @@ fn schema_for(dbc_name: &str) -> Option<Schema> {
             "CreatureModelData.dbc",
             creatures::creature_model_data_schema,
         ),
-        ("CharHairGeosets.dbc", characters::char_hair_geosets_schema),
         (
             "CharacterFacialHairStyles.dbc",
             characters::char_facial_hair_schema,
         ),
         ("HelmetGeosetVisData.dbc", characters::helmet_vis_schema),
+        ("ItemDisplayInfo.dbc", items::item_display_info_schema_for),
+        (
+            "SpellItemEnchantment.dbc",
+            item_visuals::spell_item_enchantment_schema,
+        ),
+    ] {
+        if base.eq_ignore_ascii_case(name) {
+            return Some(ctor(DbcLayout::VANILLA_1_12_1));
+        }
+    }
+    for (name, ctor) in [
+        (
+            "CharHairGeosets.dbc",
+            characters::char_hair_geosets_schema as fn() -> Schema,
+        ),
         ("CharSections.dbc", characters::char_sections_schema),
-        ("ItemDisplayInfo.dbc", items::item_display_info_schema),
         ("ItemVisuals.dbc", item_visuals::item_visuals_schema),
         (
             "ItemVisualEffects.dbc",
             item_visuals::item_visual_effects_schema,
-        ),
-        (
-            "SpellItemEnchantment.dbc",
-            item_visuals::spell_item_enchantment_schema,
         ),
         ("AreaTrigger.dbc", area_trigger::area_trigger_schema),
     ] {
@@ -884,35 +894,14 @@ mod tests {
         }
     }
 
-    /// The tables whose schema does not fit their 2.4.3 file yet: 25 that grew by more than
-    /// localized-string widening (new columns). An entry
-    /// leaves this list when its table is converted, and a table that fits while listed fails.
+    /// The tables whose schema does not fit their 2.4.3 file yet: those that grew by more than
+    /// localized-string widening (new columns). An entry leaves this list when its table is
+    /// converted, and a table that fits while listed fails.
     const NOT_YET_2_4_3: &[&str] = &[
-        "AreaTable",
+        // Open column: Region (1.12.1 slot 1, the realm list's filter). No 2.4.3 slot matches it:
+        // the ids are renumbered, slot 1 is a locale mask and the name moved to slot 4 (measured on
+        // 4 shared ids, no match; definitions project only).
         "Cfg_Categories",
-        "CharacterFacialHairStyles",
-        "ChatProfanity",
-        "ChrClasses",
-        "ChrRaces",
-        "CreatureDisplayInfo",
-        "CreatureDisplayInfoExtra",
-        "CreatureModelData",
-        "CreatureSoundData",
-        "GameObjectDisplayInfo",
-        "HelmetGeosetVisData",
-        "ItemDisplayInfo",
-        "LightSkybox",
-        "Map",
-        "Material",
-        "Spell",
-        "SpellChainEffects",
-        "SpellDispelType",
-        "SpellItemEnchantment",
-        "SpellShapeshiftForm",
-        "SpellVisual",
-        "SpellVisualKit",
-        "TaxiPathNode",
-        "WorldMapArea",
     ];
 
     /// The registered tables whose file header disagrees with the schema (or hand-parsed shape)
@@ -937,6 +926,10 @@ mod tests {
                     field_count,
                     record_size,
                 } => header.field_count == *field_count && header.record_size == *record_size,
+                schemas::Shape::HandByBuild(shape) => {
+                    let (field_count, record_size) = shape(layout);
+                    header.field_count == field_count && header.record_size == record_size
+                }
             };
             if !fits {
                 misfits.insert(table.name);

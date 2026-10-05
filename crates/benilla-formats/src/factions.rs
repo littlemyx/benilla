@@ -368,16 +368,40 @@ pub(crate) fn faction_group_schema(layout: DbcLayout) -> Schema {
     s
 }
 
-/// `ChrRaces.dbc`: 29 fields in build 5875. Only the id and `FactionID` (column 2) are read; the
-/// string columns are declared so the field count matches.
-pub(crate) fn chr_races_schema() -> Schema {
-    let mut s = Schema::new("ChrRaces");
-    for i in 0..29 {
-        let ty = match i {
-            15 | 26 | 27 | 28 => FieldType::String,
-            _ => FieldType::UInt32,
-        };
-        s.add_field(SchemaField::new(format!("f{i}"), ty));
+/// `ChrRaces.dbc` (29 fields in 1.12.1, 69 in 2.4.3): the columns the loaders read keep their names
+/// in both lists, the rest are gaps. 2.4.3 drops five spell/taxi columns before the file string,
+/// widens the name and adds a female and a male name and an expansion word (column positions
+/// measured against the 1.12.1 table and read off the emulator's and the definitions project's
+/// column lists).
+pub(crate) fn chr_races_schema(layout: DbcLayout) -> Schema {
+    use crate::dbc::unread;
+    let mut s = layout.schema("ChrRaces");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    unread(&mut s, "Flags", 1);
+    s.add_field(SchemaField::new("Faction", FieldType::UInt32));
+    s.add_field(SchemaField::new("ExploreSound", FieldType::UInt32));
+    s.add_field(SchemaField::new("MaleDisplay", FieldType::UInt32));
+    s.add_field(SchemaField::new("FemaleDisplay", FieldType::UInt32));
+    unread(&mut s, "PrefixAndScale", 2);
+    s.add_field(SchemaField::new("BaseLanguage", FieldType::UInt32));
+    s.add_field(SchemaField::new("CreatureType", FieldType::UInt32));
+    if layout.is_tbc() {
+        unread(&mut s, "SpellsAndSplash", 2);
+        s.add_field(SchemaField::new("FileString", FieldType::String));
+        unread(&mut s, "Cinematic", 1);
+        s.add_field(SchemaField::new("Name", FieldType::LocString));
+        s.add_field(SchemaField::new("NameFemale", FieldType::LocString));
+        s.add_field(SchemaField::new("NameMale", FieldType::LocString));
+    } else {
+        unread(&mut s, "SpellsAndTaxi", 5);
+        s.add_field(SchemaField::new("FileString", FieldType::String));
+        unread(&mut s, "Cinematic", 1);
+        s.add_field(SchemaField::new("Name", FieldType::LocString));
+    }
+    s.add_field(SchemaField::new_array("FacialHair", FieldType::String, 2));
+    s.add_field(SchemaField::new("Hair", FieldType::String));
+    if layout.is_tbc() {
+        unread(&mut s, "RequiredExpansion", 1);
     }
     s
 }
@@ -507,11 +531,13 @@ pub fn load_faction_catalog(chain: &mut Chain) -> Result<FactionCatalog> {
     let bytes = chain
         .read_file(CHR_RACES)
         .with_context(|| format!("reading {CHR_RACES}"))?;
-    let rs = parse(&bytes, chr_races_schema(), "ChrRaces")?;
+    let schema = chr_races_schema(chain.dbc_layout());
+    let [faction_slot] = slots(&schema, ["Faction"])?;
+    let rs = parse(&bytes, schema, "ChrRaces")?;
     let race_templates = rs
         .records()
         .iter()
-        .filter_map(|r| Some((u8::try_from(u32_at(r, 0)?).ok()?, u32_at(r, 2)?)))
+        .filter_map(|r| Some((u8::try_from(u32_at(r, 0)?).ok()?, u32_at(r, faction_slot)?)))
         .collect();
 
     Ok(FactionCatalog {
@@ -793,8 +819,7 @@ mod tests {
     }
 
     /// 2.4.3's Faction and FactionGroup: the new Cenarion Expedition and Silvermoon City rows,
-    /// Stormwind's race masks widened to the new races, the two group names. (The catalog's own
-    /// load also reads ChrRaces, which is not converted yet.)
+    /// Stormwind's race masks widened to the new races, the two group names.
     #[test]
     fn the_2_4_3_faction_tables_read_through_the_wide_strings() {
         let data = crate::wow_data_tbc_or_skip!();
@@ -831,5 +856,27 @@ mod tests {
             t.group_internal_names.get(&2).map(String::as_str),
             Some("Alliance")
         );
+    }
+
+    /// The whole catalog on 2.4.3, ChrRaces joined: the two new races carry their teams' faction
+    /// templates, and the PvP team digit follows the group mask (Blood Elf Horde, Draenei Alliance).
+    #[test]
+    fn the_2_4_3_catalog_loads_whole_and_joins_the_new_races() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_faction_catalog(&mut chain).expect("load faction catalog");
+        assert_eq!(cat.race_templates().count(), 16, "ChrRaces ships 16 rows");
+        let races: HashMap<u8, u32> = cat.race_templates().collect();
+        assert_eq!(races[&1], 1, "Human");
+        assert_eq!(races[&7], 115, "Gnome");
+        assert_eq!(races[&10], 1610, "Blood Elf");
+        assert_eq!(races[&11], 1629, "Draenei");
+        assert_eq!(cat.race_template(10).map(|t| t.faction), Some(914));
+        assert_eq!(cat.race_template(10).map(|t| t.group_mask), Some(5));
+        assert_eq!(cat.race_template(11).map(|t| t.faction), Some(927));
+        assert_eq!(cat.race_template(11).map(|t| t.group_mask), Some(3));
+        assert_eq!(cat.faction_name(942), Some("Cenarion Expedition"));
+        let teams = crate::load_race_pvp_teams(&mut chain).expect("PvP teams");
+        assert_eq!((teams[&10], teams[&11]), (0, 1));
     }
 }

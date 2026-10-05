@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at, unread};
+use crate::DbcLayout;
 
 const AREA_TABLE: &str = "DBFilesClient\\AreaTable.dbc";
 
@@ -111,13 +112,32 @@ impl AreaTableCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("AreaTable");
-    for i in 0..25 {
-        match i {
-            11 => s.add_field(SchemaField::new("AreaName", FieldType::String)),
-            _ => s.add_field(SchemaField::new(format!("c{i}"), FieldType::UInt32)),
-        }
+/// `AreaTable.dbc`: 25 fields in 1.12.1, 35 in 2.4.3, where the name is 17 slots wide (the other
+/// slots up to `FactionGroupMask` and the four liquid ids keep their order) and two float
+/// columns follow the liquids, not read here. Every read column is measured to sit at its named
+/// slot (match 0.97 to 1.0 on the 1081 shared ids) and agrees with the emulator's format.
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("AreaTable");
+    for name in [
+        "ID",
+        "ContinentID",
+        "ParentAreaID",
+        "AreaBit",
+        "Flags",
+        "SoundProviderPref",
+        "SoundProviderPrefUnderwater",
+        "AmbienceID",
+        "ZoneMusic",
+        "IntroSound",
+        "ExplorationLevel",
+    ] {
+        s.add_field(SchemaField::new(name, FieldType::UInt32));
+    }
+    s.add_field(SchemaField::new("AreaName", FieldType::LocString));
+    s.add_field(SchemaField::new("FactionGroupMask", FieldType::UInt32));
+    unread(&mut s, "LiquidTypeID", 4);
+    if layout.is_tbc() {
+        unread(&mut s, "ElevationAndAmbience", 2);
     }
     s
 }
@@ -127,22 +147,35 @@ pub fn load_area_table_catalog(chain: &mut Chain) -> Result<AreaTableCatalog> {
     let bytes = chain
         .read_file(AREA_TABLE)
         .context("reading AreaTable.dbc")?;
-    let rs = parse(&bytes, schema(), "AreaTable")?;
+    let schema = schema(chain.dbc_layout());
+    let [map_slot, zone_slot, bit_slot, flags_slot, level_slot, name_slot, mask_slot] = slots(
+        &schema,
+        [
+            "ContinentID",
+            "ParentAreaID",
+            "AreaBit",
+            "Flags",
+            "ExplorationLevel",
+            "AreaName",
+            "FactionGroupMask",
+        ],
+    )?;
+    let rs = parse(&bytes, schema, "AreaTable")?;
     let mut by_id = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let (Some(id), Some(map_id), Some(zone_id), Some(explore_flag), Some(flags), Some(name)) = (
             u32_at(r, 0),
-            u32_at(r, 1),
-            u32_at(r, 2),
-            u32_at(r, 3),
-            u32_at(r, 4),
-            str_at(&rs, r, 11),
+            u32_at(r, map_slot),
+            u32_at(r, zone_slot),
+            u32_at(r, bit_slot),
+            u32_at(r, flags_slot),
+            str_at(&rs, r, name_slot),
         ) else {
             continue;
         };
-        let faction_group_mask = u32_at(r, 20).unwrap_or(0);
+        let faction_group_mask = u32_at(r, mask_slot).unwrap_or(0);
         // Signed; an absent column reads as `-1`, no exploration gate.
-        let exploration_level = u32_at(r, 10).map_or(-1, |v| v as i32);
+        let exploration_level = u32_at(r, level_slot).map_or(-1, |v| v as i32);
         by_id.insert(
             id,
             AreaTableRow {
@@ -237,5 +270,36 @@ mod tests {
             assert!(!cat.is_cold(id), "{label} is not cold");
         }
         assert!(!cat.is_cold(0), "an unknown area is not cold");
+    }
+
+    /// 2.4.3: Outland's zones sit on map 530 and the Blood Elf and Draenei starts carry their
+    /// faction masks; the Eastern Kingdoms rows read as before.
+    #[test]
+    fn real_2_4_3_area_table_reaches_outland() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_area_table_catalog(&mut chain).expect("load AreaTable");
+        assert_eq!(cat.len(), 1643, "2.4.3 ships 1643 areas");
+
+        let hellfire = cat.get(3483).expect("Hellfire Peninsula");
+        assert_eq!(hellfire.name, "Hellfire Peninsula");
+        assert_eq!((hellfire.map_id, hellfire.zone_id), (530, 0));
+        assert_eq!((hellfire.explore_flag, hellfire.flags), (1108, 0x4440));
+        assert_eq!(hellfire.faction_group_mask, 0);
+        let silvermoon = cat.get(3487).expect("Silvermoon City");
+        assert_eq!(silvermoon.faction_group_mask, 4);
+        assert_eq!(silvermoon.exploration_level, 10);
+        assert_eq!(silvermoon.flags, 0x138, "capitals carry 0x138");
+        assert_eq!(cat.get(3703).expect("Shattrath").faction_group_mask, 6);
+        assert_eq!(cat.get(3525).expect("Bloodmyst Isle").faction_group_mask, 2);
+
+        // A row both builds ship, read through the wider name.
+        let northshire = cat.get(9).expect("Northshire Valley");
+        assert_eq!(
+            (northshire.zone_id, northshire.name.as_str()),
+            (12, "Northshire Valley")
+        );
+        assert_eq!(cat.top_zone(9), Some(12));
+        assert_eq!(cat.get(12).expect("Elwynn").faction_group_mask, 2);
     }
 }

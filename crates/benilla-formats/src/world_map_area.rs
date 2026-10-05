@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{f32_at, parse, str_at, u32_at};
-use crate::Chain;
+use crate::dbc::{f32_at, parse, str_at, u32_at, unread};
+use crate::{Chain, DbcLayout};
 
 const WORLD_MAP_AREA: &str = "DBFilesClient\\WorldMapArea.dbc";
 
@@ -68,14 +68,19 @@ impl WorldMapAreaCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("WorldMapArea");
+/// 8 fields in 1.12.1; 2.4.3 appends a display map id (measured: the seven read columns keep their
+/// slots on the 51 shared rows, the corners at 0.98; the emulator's format agrees).
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("WorldMapArea");
     for name in ["ID", "MapID", "AreaID"] {
         s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
     s.add_field(SchemaField::new("AreaName", FieldType::String));
     for name in ["LocLeft", "LocRight", "LocTop", "LocBottom"] {
         s.add_field(SchemaField::new(name, FieldType::Float32));
+    }
+    if layout.is_tbc() {
+        unread(&mut s, "DisplayMapID", 1);
     }
     s
 }
@@ -85,7 +90,7 @@ pub fn load_world_map_area_catalog(chain: &mut Chain) -> Result<WorldMapAreaCata
     let bytes = chain
         .read_file(WORLD_MAP_AREA)
         .context("reading WorldMapArea.dbc")?;
-    let rs = parse(&bytes, schema(), "WorldMapArea")?;
+    let rs = parse(&bytes, schema(chain.dbc_layout()), "WorldMapArea")?;
     let mut by_id = HashMap::with_capacity(rs.records().len());
     let mut file_order = Vec::with_capacity(rs.records().len());
     for r in rs.records() {
@@ -165,5 +170,27 @@ mod tests {
             chain.contains(&art),
             "Durotar's WorldMapArea name resolves to its own art folder: {art}"
         );
+    }
+
+    /// 2.4.3: Outland's continent and zone rects, read with the display map id appended.
+    #[test]
+    fn the_2_4_3_world_map_reaches_outland() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_world_map_area_catalog(&mut chain).expect("load WorldMapArea");
+        assert_eq!(cat.len(), 68);
+        let hellfire = cat.get(465).expect("Hellfire Peninsula");
+        assert_eq!(
+            (hellfire.map_id, hellfire.area_id, hellfire.name.as_str()),
+            (530, 3483, "Hellfire")
+        );
+        assert_eq!(hellfire.loc_left.round(), 5540.0);
+        assert!((hellfire.loc_bottom + 1962.5).abs() < 0.1);
+        let (id, outland) = cat.continent(530).expect("the Outland continent row");
+        assert_eq!((id, outland.name.as_str()), (466, "Expansion01"));
+        // A row both builds ship: Elwynn, whose display map id (-1) is read past.
+        let elwynn = cat.get(30).expect("Elwynn");
+        assert_eq!((elwynn.area_id, elwynn.name.as_str()), (12, "Elwynn"));
+        assert_eq!(elwynn.loc_left.round(), 1535.0);
     }
 }

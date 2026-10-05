@@ -5,11 +5,11 @@
 
 use std::collections::HashMap;
 
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, u32_at};
+use crate::dbc::{parse, slots, u32_at, unread};
 
 /// One `CreatureSoundData` row; every field is a `SoundEntries` kit id (0 for none) unless noted.
 pub struct CreatureVoice {
@@ -79,26 +79,41 @@ impl CreatureVoiceCatalog {
     }
 }
 
-pub(crate) fn csd_schema() -> Schema {
-    let mut s = Schema::new("CreatureSoundData");
-    for i in 0..30 {
-        s.add_field(SchemaField::new(format!("f{i}"), FieldType::UInt32));
+/// `CreatureSoundData.dbc`: 30 fields in 1.12.1, 37 in 2.4.3, which inserts a fifth fidget kit
+/// after the four and appends six columns (a fidget delay pair, birth, directed-cast and two
+/// submerge sounds). Everything from the custom attacks on sits one slot later (measured against
+/// the 402 shared rows: each moved column matches at 0.985 to 1.0 on its non-zero rows; columns
+/// that are zero on every row, 5, 22, 25 and 26 of 1.12.1, sit by the same shift, as the
+/// definitions project's column list has them). A few kits were retuned, which the lower matches show.
+pub(crate) fn csd_schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("CreatureSoundData");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    s.add_field(SchemaField::new_array("Exertion", FieldType::UInt32, 2));
+    s.add_field(SchemaField::new_array("Injury", FieldType::UInt32, 3));
+    for name in [
+        "Death",
+        "Stun",
+        "Stand",
+        "Footstep",
+        "Aggro",
+        "WingFlap",
+        "WingGlide",
+        "Alert",
+    ] {
+        s.add_field(SchemaField::new(name, FieldType::UInt32));
     }
-    s
-}
-
-fn cdi_schema() -> Schema {
-    let mut s = Schema::new("CreatureDisplayInfo");
-    for i in 0..12 {
-        s.add_field(SchemaField::new(format!("f{i}"), FieldType::UInt32));
+    s.add_field(SchemaField::new_array("Fidget", FieldType::UInt32, 4));
+    if layout.is_tbc() {
+        unread(&mut s, "FifthFidget", 1);
     }
-    s
-}
-
-fn cmd_schema() -> Schema {
-    let mut s = Schema::new("CreatureModelData");
-    for i in 0..16 {
-        s.add_field(SchemaField::new(format!("f{i}"), FieldType::UInt32));
+    s.add_field(SchemaField::new_array("CustomAttack", FieldType::UInt32, 4));
+    unread(&mut s, "NpcSound", 1);
+    for name in ["LoopSound", "ImpactType", "JumpStart", "JumpEnd"] {
+        s.add_field(SchemaField::new(name, FieldType::UInt32));
+    }
+    s.add_field(SchemaField::new_array("Pet", FieldType::UInt32, 3));
+    if layout.is_tbc() {
+        unread(&mut s, "Appended", 6);
     }
     s
 }
@@ -108,7 +123,21 @@ pub fn load_creature_voice_catalog(chain: &mut Chain) -> Result<CreatureVoiceCat
     let bytes = chain
         .read_file("DBFilesClient\\CreatureSoundData.dbc")
         .context("reading CreatureSoundData.dbc")?;
-    let rs = parse(&bytes, csd_schema(), "CreatureSoundData")?;
+    let schema = csd_schema(chain.dbc_layout());
+    let [exertion, injury, death, fidget, custom, loop_sound, jump, pet] = slots(
+        &schema,
+        [
+            "Exertion",
+            "Injury",
+            "Death",
+            "Fidget",
+            "CustomAttack",
+            "LoopSound",
+            "JumpStart",
+            "Pet",
+        ],
+    )?;
+    let rs = parse(&bytes, schema, "CreatureSoundData")?;
     let mut rows = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -116,25 +145,25 @@ pub fn load_creature_voice_catalog(chain: &mut Chain) -> Result<CreatureVoiceCat
         rows.insert(
             id,
             CreatureVoice {
-                exertion: [g(1), g(2)],
-                injury: [g(3), g(4), g(5)],
-                death: g(6),
-                stun: g(7),
-                stand: g(8),
-                footstep_class: g(9),
-                aggro: g(10),
-                wing_flap: g(11),
-                wing_glide: g(12),
-                alert: g(13),
-                fidget: [g(14), g(15), g(16), g(17)],
-                custom_attack: [g(18), g(19), g(20), g(21)],
-                loop_sound: g(23),
-                impact_type: g(24),
-                jump_start: g(25),
-                jump_end: g(26),
-                pet_attack: g(27),
-                pet_order: g(28),
-                pet_dismiss: g(29),
+                exertion: [g(exertion), g(exertion + 1)],
+                injury: [g(injury), g(injury + 1), g(injury + 2)],
+                death: g(death),
+                stun: g(death + 1),
+                stand: g(death + 2),
+                footstep_class: g(death + 3),
+                aggro: g(death + 4),
+                wing_flap: g(death + 5),
+                wing_glide: g(death + 6),
+                alert: g(death + 7),
+                fidget: [g(fidget), g(fidget + 1), g(fidget + 2), g(fidget + 3)],
+                custom_attack: [g(custom), g(custom + 1), g(custom + 2), g(custom + 3)],
+                loop_sound: g(loop_sound),
+                impact_type: g(loop_sound + 1),
+                jump_start: g(jump),
+                jump_end: g(jump + 1),
+                pet_attack: g(pet),
+                pet_order: g(pet + 1),
+                pet_dismiss: g(pet + 2),
             },
         );
     }
@@ -142,7 +171,11 @@ pub fn load_creature_voice_catalog(chain: &mut Chain) -> Result<CreatureVoiceCat
     let bytes = chain
         .read_file("DBFilesClient\\CreatureModelData.dbc")
         .context("reading CreatureModelData.dbc")?;
-    let rs = parse(&bytes, cmd_schema(), "CreatureModelData")?;
+    let rs = parse(
+        &bytes,
+        crate::creatures::creature_model_data_schema(chain.dbc_layout()),
+        "CreatureModelData",
+    )?;
     let mut model_to_sound = HashMap::new();
     for r in rs.records() {
         if let (Some(id), Some(sound)) = (u32_at(r, 0), u32_at(r, 13)) {
@@ -155,7 +188,11 @@ pub fn load_creature_voice_catalog(chain: &mut Chain) -> Result<CreatureVoiceCat
     let bytes = chain
         .read_file("DBFilesClient\\CreatureDisplayInfo.dbc")
         .context("reading CreatureDisplayInfo.dbc")?;
-    let rs = parse(&bytes, cdi_schema(), "CreatureDisplayInfo")?;
+    let rs = parse(
+        &bytes,
+        crate::creatures::creature_display_info_schema(chain.dbc_layout()),
+        "CreatureDisplayInfo",
+    )?;
     let mut display_to_sound = HashMap::new();
     for r in rs.records() {
         let (Some(id), Some(sound), Some(model)) = (u32_at(r, 0), u32_at(r, 2), u32_at(r, 1))
@@ -281,5 +318,55 @@ mod tests {
             )
             .expect("model join");
         assert_eq!(by_model.pet_dismiss, 9096);
+    }
+
+    /// 2.4.3's voice kits: a fifth fidget slot is inserted, so the custom attacks, loop sound and
+    /// pet barks sit one slot later; rows both builds ship, a 2.x race and the demon barks.
+    #[test]
+    fn the_2_4_3_creature_voices_read_through_the_inserted_fidget() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_creature_voice_catalog(&mut chain).expect("load creature voices");
+        assert_eq!(cat.len(), 799);
+
+        let v = cat.for_display(26).expect("display 26 has a voice");
+        assert_eq!(
+            (v.death, v.exertion, v.footstep_class, v.aggro),
+            (314, [312, 0], 8, 694)
+        );
+        let wolf = cat.for_display(903).expect("the Elwynn wolf");
+        assert_eq!((wolf.exertion[0], wolf.fidget[0]), (391, 1018));
+        let human = cat.for_display(49).expect("a human male");
+        assert_eq!(
+            (human.exertion, human.death, human.footstep_class),
+            ([2941, 186], 2944, 7)
+        );
+        // New in 2.x: the Blood Elf and Draenei males, voiced through their models.
+        let belf = cat.for_display(15476).expect("a Blood Elf male");
+        assert_eq!((belf.exertion[0], belf.death), (8996, 8999));
+        assert_eq!(cat.for_display(16125).map(|v| v.death), Some(8987));
+        // The slots after the inserted fidget.
+        assert_eq!(cat.rows[&1].custom_attack, [0, 7374, 0, 0]);
+        assert_eq!(cat.rows[&43].custom_attack, [3176; 4]);
+        assert_eq!(
+            (cat.rows[&24].loop_sound, cat.rows[&69].loop_sound),
+            (1454, 5634)
+        );
+        assert_eq!(cat.rows[&37].fidget, [0, 0, 1121, 0]);
+        let imp = cat.for_display(904).expect("an imp");
+        assert_eq!(
+            (imp.pet_attack, imp.pet_order, imp.pet_dismiss),
+            (9097, 9098, 9096)
+        );
+        let barking: std::collections::BTreeSet<u32> = cat
+            .rows
+            .iter()
+            .filter(|(_, v)| v.pet_attack != 0 || v.pet_order != 0 || v.pet_dismiss != 0)
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(
+            barking,
+            [11, 37, 68, 162, 348, 488, 2257].into_iter().collect()
+        );
     }
 }

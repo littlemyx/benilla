@@ -6,11 +6,11 @@
 
 use std::collections::HashMap;
 
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at, unread};
 
 /// The named dispel classes by `Spell.dbc` `Dispel` id; a row the gate withholds is absent.
 #[derive(Default)]
@@ -33,15 +33,19 @@ impl SpellDispelTypes {
     }
 }
 
-pub(crate) fn spell_dispel_type_schema() -> Schema {
-    let mut schema = Schema::new("SpellDispelType");
+/// 12 fields in 1.12.1; 2.4.3 has 21: the name is 17 slots wide and a mask word is inserted before
+/// the gate. The gate's slot is measured on all 11 shared rows (it equals 2.4.3's column 19 on every
+/// one, the four named rows and the seven others; the mask is 0 on the four named rows), so the
+/// definitions project's label for 1.12.1's column 10 does not hold for the gate.
+pub(crate) fn spell_dispel_type_schema(layout: DbcLayout) -> Schema {
+    let mut schema = layout.schema("SpellDispelType");
     schema.add_field(SchemaField::new("ID", FieldType::UInt32));
-    for i in 0..8 {
-        schema.add_field(SchemaField::new(format!("Name{i}"), FieldType::String));
+    schema.add_field(SchemaField::new("Name", FieldType::LocString));
+    if layout.is_tbc() {
+        unread(&mut schema, "Mask", 1);
     }
-    schema.add_field(SchemaField::new("NameFlags", FieldType::UInt32));
     schema.add_field(SchemaField::new("Named", FieldType::UInt32));
-    schema.add_field(SchemaField::new("Unknown11", FieldType::String));
+    schema.add_field(SchemaField::new("InternalName", FieldType::String));
     schema
 }
 
@@ -50,15 +54,17 @@ pub fn load_spell_dispel_types(chain: &mut Chain) -> Result<SpellDispelTypes> {
     let bytes = chain
         .read_file("DBFilesClient\\SpellDispelType.dbc")
         .context("reading SpellDispelType.dbc")?;
-    let set = parse(&bytes, spell_dispel_type_schema(), "SpellDispelType.dbc")?;
+    let schema = spell_dispel_type_schema(chain.dbc_layout());
+    let [name_slot, gate_slot] = slots(&schema, ["Name", "Named"])?;
+    let set = parse(&bytes, schema, "SpellDispelType.dbc")?;
     let mut names = HashMap::new();
     for r in set.records() {
         let Some(id) = u32_at(r, 0) else { continue };
         // The gate first: a 0 here withholds the name however good the string is (Stealth, id 5).
-        if u32_at(r, 10).unwrap_or(0) == 0 {
+        if u32_at(r, gate_slot).unwrap_or(0) == 0 {
             continue;
         }
-        if let Some(name) = str_at(&set, r, 1).filter(|n| !n.is_empty()) {
+        if let Some(name) = str_at(&set, r, name_slot).filter(|n| !n.is_empty()) {
             names.insert(id, name);
         }
     }
@@ -84,5 +90,23 @@ mod tests {
         assert_eq!(types.name(9), None, "Frenzy");
         assert_eq!(types.name(0), None, "no dispel class");
         assert_eq!(types.len(), 4, "exactly the four the gate allows");
+    }
+
+    /// 2.4.3: the same four named classes, read through the 17-slot name and the gate that follows
+    /// the new mask column.
+    #[test]
+    fn the_2_4_3_dispel_types_name_only_what_the_gate_allows() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let types = load_spell_dispel_types(&mut chain).expect("load SpellDispelType");
+        assert_eq!(types.name(1), Some("Magic"));
+        assert_eq!(types.name(4), Some("Poison"));
+        assert_eq!(types.name(5), None, "Stealth");
+        assert_eq!(
+            types.name(7),
+            None,
+            "the all-types row carries a mask, not the gate"
+        );
+        assert_eq!(types.len(), 4);
     }
 }

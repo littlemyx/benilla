@@ -3,11 +3,11 @@
 
 use std::collections::HashMap;
 
-use crate::Chain;
+use crate::{Chain, DbcLayout};
 use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, str_at, u32_at, unread};
 
 const GAMEOBJECT_DISPLAY_INFO: &str = "DBFilesClient\\GameObjectDisplayInfo.dbc";
 
@@ -35,12 +35,17 @@ impl GameObjectCatalog {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("GameObjectDisplayInfo");
+/// 12 fields in 1.12.1; 2.4.3 appends the model's bounding box, six floats (read columns keep their
+/// slots: measured on the 1638 shared rows, the emulator's format agrees).
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("GameObjectDisplayInfo");
     s.add_field(SchemaField::new("ID", FieldType::UInt32));
     s.add_field(SchemaField::new("ModelName", FieldType::String));
     for i in 0..10 {
         s.add_field(SchemaField::new(format!("Sound{i}"), FieldType::UInt32));
+    }
+    if layout.is_tbc() {
+        unread(&mut s, "BoundingBox", 6);
     }
     s
 }
@@ -50,7 +55,7 @@ pub fn load_gameobject_catalog(chain: &mut Chain) -> Result<GameObjectCatalog> {
     let bytes = chain
         .read_file(GAMEOBJECT_DISPLAY_INFO)
         .with_context(|| format!("reading {GAMEOBJECT_DISPLAY_INFO}"))?;
-    let rs = parse(&bytes, schema(), "GameObjectDisplayInfo")?;
+    let rs = parse(&bytes, schema(chain.dbc_layout()), "GameObjectDisplayInfo")?;
     let mut models = HashMap::with_capacity(rs.records().len());
     for r in rs.records() {
         if let (Some(id), Some(path)) = (u32_at(r, 0), str_at(&rs, r, 1)) {
@@ -92,7 +97,7 @@ pub fn load_gameobject_sounds(chain: &mut Chain) -> Result<GameObjectSounds> {
     let bytes = chain
         .read_file(GAMEOBJECT_DISPLAY_INFO)
         .with_context(|| format!("reading {GAMEOBJECT_DISPLAY_INFO}"))?;
-    let rs = parse(&bytes, schema(), "GameObjectDisplayInfo")?;
+    let rs = parse(&bytes, schema(chain.dbc_layout()), "GameObjectDisplayInfo")?;
     let mut sounds = HashMap::new();
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
@@ -105,4 +110,38 @@ pub fn load_gameobject_sounds(chain: &mut Chain) -> Result<GameObjectSounds> {
         }
     }
     Ok(GameObjectSounds { sounds })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 2.4.3's table, six bounding-box floats appended: models and sound slots of rows both builds
+    /// ship and of Outland and later rows.
+    #[test]
+    fn the_2_4_3_gameobject_displays_read_models_and_sounds() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let cat = load_gameobject_catalog(&mut chain).expect("load GameObjectDisplayInfo");
+        assert_eq!(cat.len(), 2487, "the 2504 rows less 17 with no model name");
+        assert_eq!(
+            cat.model_path(1),
+            Some("World\\Generic\\ActiveDoodads\\Chest02\\Chest02.mdx")
+        );
+        assert_eq!(
+            cat.model_path(6476),
+            Some("World\\Expansion01\\Doodads\\Generic\\BloodElf\\ScryingOrb\\BE_ScryingOrb.mdx")
+        );
+        assert!(cat
+            .model_path(8005)
+            .is_some_and(|p| p.ends_with("Beerfest_MoleMachine_anim_set2.mdx")));
+        let sounds = load_gameobject_sounds(&mut chain).expect("sounds");
+        assert_eq!(sounds.slots(1).map(|s| s[1]), Some(1277));
+        assert_eq!(sounds.slots(6476).map(|s| s[2]), Some(9058));
+        assert_eq!(
+            sounds.slots(6625).map(|s| (s[1], s[3])),
+            Some((8945, 8946)),
+            "an Karazhan door: open and close"
+        );
+    }
 }

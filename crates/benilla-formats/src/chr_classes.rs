@@ -25,26 +25,10 @@ use anyhow::{Context, Result};
 use benilla_dbc::{FieldType, Schema, SchemaField};
 
 use crate::chain::Chain;
-use crate::dbc::{parse, str_at, u32_at};
+use crate::dbc::{parse, slots, str_at, u32_at, unread};
+use crate::DbcLayout;
 
 const CHR_CLASSES: &str = "DBFilesClient\\ChrClasses.dbc";
-
-/// The patch copy's column count, which `benilla-dbc` enforces as the reference loader does
-/// (`0x54240e`, `0x542446`): the base archive's 16-column copy lacks the relic flag and is refused,
-/// never read one column short.
-const CHR_CLASSES_FIELDS: usize = 17;
-
-/// Field 2, read at `rec + 8` by `GetDamageBonusStat` (`0x48b569`).
-const DAMAGE_BONUS_STAT_FIELD: usize = 0x8 / 4;
-
-/// Field 4, read at `rec + 0x10` by `HasPetSpells` (`0x4b447c`).
-const PET_NAME_TOKEN_FIELD: usize = 0x10 / 4;
-
-/// Field 16, read at `row + 0x40` by `UnitHasRelicSlot` (`0x519ebb`).
-const RELIC_SLOT_FIELD: usize = 0x40 / 4;
-
-/// Field 15, read at `+0x3c` by `0x6e6ca0`.
-const SPELL_FAMILY_FIELD: usize = 0x3c / 4;
 
 /// The literal the reference pushes when the player does not resolve (`0x846a40`). Every class but
 /// the Warlock carries it too, so an unloaded table degrades invisibly.
@@ -97,17 +81,35 @@ impl ChrClasses {
     }
 }
 
-pub(crate) fn schema() -> Schema {
-    let mut s = Schema::new("ChrClasses");
-    for i in 0..CHR_CLASSES_FIELDS {
-        // Only the token is a string; the rest, the class name block from field 5 included, stay
-        // opaque dwords.
-        let ty = if i == PET_NAME_TOKEN_FIELD {
-            FieldType::String
-        } else {
-            FieldType::UInt32
-        };
-        s.add_field(SchemaField::new(format!("F{i}"), ty));
+/// The table's columns for a layout, the read ones named. 1.12.1 is 17 fields (the patch copy's
+/// count, which `benilla-dbc` enforces as the reference loader does, `0x54240e`, `0x542446`: the
+/// base archive's 16-column copy lacks the relic flag and is refused). 2.4.3 is 58: the class
+/// index word at column 1 is gone, the name is 17 slots wide with a female and a male name after
+/// it, and the last column is a flag word whose relic bit is not 1.12.1's boolean.
+pub(crate) fn schema(layout: DbcLayout) -> Schema {
+    let mut s = layout.schema("ChrClasses");
+    s.add_field(SchemaField::new("ID", FieldType::UInt32));
+    if layout.is_tbc() {
+        // Slots measured against the 1.12.1 rows (each read column matches on all nine shared
+        // ids) and confirmed by the emulator's format and the definitions project's column list.
+        s.add_field(SchemaField::new("DamageBonusStat", FieldType::UInt32));
+        unread(&mut s, "DisplayPower", 1);
+        s.add_field(SchemaField::new("PetNameToken", FieldType::String));
+        s.add_field(SchemaField::new("Name", FieldType::LocString));
+        s.add_field(SchemaField::new("NameFemale", FieldType::LocString));
+        s.add_field(SchemaField::new("NameMale", FieldType::LocString));
+        unread(&mut s, "FileName", 1);
+        s.add_field(SchemaField::new("SpellFamily", FieldType::UInt32));
+        unread(&mut s, "ClassFlags", 1);
+    } else {
+        unread(&mut s, "ClassIndex", 1);
+        s.add_field(SchemaField::new("DamageBonusStat", FieldType::UInt32));
+        unread(&mut s, "DisplayPower", 1);
+        s.add_field(SchemaField::new("PetNameToken", FieldType::String));
+        s.add_field(SchemaField::new("Name", FieldType::LocString));
+        unread(&mut s, "FileName", 1);
+        s.add_field(SchemaField::new("SpellFamily", FieldType::UInt32));
+        s.add_field(SchemaField::new("RelicSlot", FieldType::UInt32));
     }
     s
 }
@@ -117,17 +119,25 @@ pub fn load_chr_classes(chain: &mut Chain) -> Result<ChrClasses> {
     let bytes = chain
         .read_file(CHR_CLASSES)
         .with_context(|| format!("reading {CHR_CLASSES}"))?;
-    let rs = parse(&bytes, schema(), "ChrClasses.dbc")?;
+    let schema = schema(chain.dbc_layout());
+    let [damage_slot, token_slot, family_slot] =
+        slots(&schema, ["DamageBonusStat", "PetNameToken", "SpellFamily"])?;
+    // 2.4.3 packs the relic flag into a flag word with other bits (11 on Paladin, Shaman and
+    // Druid, 2 to 7 on the rest), not 1.12.1's boolean: the flag stays unset there.
+    let relic_slot = schema.slot_of("RelicSlot");
+    let rs = parse(&bytes, schema, "ChrClasses.dbc")?;
     let mut by_id = HashMap::new();
     for r in rs.records() {
         let Some(id) = u32_at(r, 0) else { continue };
         by_id.insert(
             id,
             ChrClass {
-                damage_bonus_stat: u32_at(r, DAMAGE_BONUS_STAT_FIELD).unwrap_or(0),
-                pet_name_token: str_at(&rs, r, PET_NAME_TOKEN_FIELD),
-                has_relic_slot: u32_at(r, RELIC_SLOT_FIELD).is_some_and(|v| v != 0),
-                spell_family: u32_at(r, SPELL_FAMILY_FIELD).unwrap_or(0),
+                damage_bonus_stat: u32_at(r, damage_slot).unwrap_or(0),
+                pet_name_token: str_at(&rs, r, token_slot),
+                has_relic_slot: relic_slot
+                    .and_then(|slot| u32_at(r, slot))
+                    .is_some_and(|v| v != 0),
+                spell_family: u32_at(r, family_slot).unwrap_or(0),
             },
         );
     }
@@ -224,5 +234,35 @@ mod tests {
         // No row: the reference's zeroed global, which the gate's first conjunct refuses.
         assert_eq!(t.spell_family(6), 0);
         assert_eq!(t.spell_family(0), 0);
+    }
+
+    /// 2.4.3's class table, whose columns sit 1, 1 and 41 slots from 1.12.1's: the same nine
+    /// rows' damage stat, pet token and spell family read through the new layout.
+    #[test]
+    fn the_2_4_3_class_table_reads_through_its_own_layout() {
+        let data = crate::wow_data_tbc_or_skip!();
+        let mut chain = crate::open_chain(&data).expect("open chain");
+        let t = load_chr_classes(&mut chain).expect("load ChrClasses.dbc");
+        assert_eq!(t.pet_name_token(9), "DEMON", "Warlock");
+        assert_eq!(t.pet_name_token(3), "PET", "Hunter");
+        for (class, stat) in [(3, 1), (4, 1), (1, 0), (11, 0)] {
+            assert_eq!(t.damage_bonus_stat(class), Some(stat), "class {class}");
+        }
+        for (class, family) in [
+            (1, 4),
+            (2, 10),
+            (3, 9),
+            (4, 8),
+            (5, 6),
+            (7, 11),
+            (8, 3),
+            (9, 5),
+            (11, 7),
+        ] {
+            assert_eq!(t.spell_family(class), family, "class {class}");
+        }
+        assert_eq!(t.damage_bonus_stat(6), None, "no Death Knight row in 2.4.3");
+        // The relic flag is packed into a flag word in 2.4.3: not read, so never set.
+        assert!(!t.has_relic_slot(2));
     }
 }

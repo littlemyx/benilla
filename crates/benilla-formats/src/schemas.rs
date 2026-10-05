@@ -31,6 +31,10 @@ pub(crate) enum Shape {
     /// fields: the record size is not four bytes a field). The walk test reads the shape.
     #[cfg_attr(not(test), allow(dead_code))]
     Hand { field_count: u32, record_size: u32 },
+    /// Hand-parsed like `Hand`, with a header shape that differs by build: `(field_count,
+    /// record_size)` for the layout.
+    #[cfg_attr(not(test), allow(dead_code))]
+    HandByBuild(fn(DbcLayout) -> (u32, u32)),
 }
 
 /// One table, as one loader reads it. A table several loaders read has one entry per distinct
@@ -63,20 +67,17 @@ macro_rules! wide {
 pub(crate) static TABLES: &[Table] = &[
     plain!("AnimationData", anim_data::schema()),
     wide!("AreaPOI", area_poi::schema),
-    plain!("AreaTable", area_table::schema()),
-    plain!("AreaTable", area_sound::area_schema()),
-    Table {
-        name: "AreaTable",
-        shape: Shape::Schema(|l| dbc::id_name_schema("AreaTable", l, 11, 25)),
-    },
+    wide!("AreaTable", area_table::schema),
+    wide!("AreaTable", area_sound::area_schema),
+    wide!("AreaTable", area_table::schema),
     plain!("AreaTrigger", area_trigger::area_trigger_schema()),
     wide!("AuctionHouse", auction_house::auction_house_schema),
     plain!("BankBagSlotPrices", bank_bag_slot_prices::schema()),
     plain!("CameraShakes", camera_shakes::camera_shakes_schema()),
     plain!("Cfg_Categories", cfg_categories::cfg_categories_schema()),
-    plain!(
+    wide!(
         "CharacterFacialHairStyles",
-        characters::char_facial_hair_schema()
+        characters::char_facial_hair_schema
     ),
     // `load_combos` refuses any header but 2 fields of 2 bytes.
     Table {
@@ -97,23 +98,26 @@ pub(crate) static TABLES: &[Table] = &[
         },
     },
     wide!("ChatChannels", chat_channels::schema),
-    plain!("ChatProfanity", text_filter_lists::schema("ChatProfanity")),
-    plain!("ChrClasses", chr_classes::schema()),
-    plain!("ChrRaces", languages::chr_races_schema()),
-    plain!("ChrRaces", factions::chr_races_schema()),
+    Table {
+        name: "ChatProfanity",
+        shape: Shape::Schema(|l| text_filter_lists::schema("ChatProfanity", l)),
+    },
+    wide!("ChrClasses", chr_classes::schema),
+    wide!("ChrRaces", languages::chr_races_schema),
+    wide!("ChrRaces", factions::chr_races_schema),
     plain!("CinematicCamera", cinematics::cameras_schema()),
     plain!("CinematicSequences", cinematics::sequences_schema()),
-    plain!(
+    wide!(
         "CreatureDisplayInfo",
-        creatures::creature_display_info_schema()
+        creatures::creature_display_info_schema
     ),
-    plain!(
+    wide!(
         "CreatureDisplayInfoExtra",
-        creatures::creature_display_info_extra_schema()
+        creatures::creature_display_info_extra_schema
     ),
     wide!("CreatureFamily", creature_families::family_schema),
-    plain!("CreatureModelData", creatures::creature_model_data_schema()),
-    plain!("CreatureSoundData", creature_sound::csd_schema()),
+    wide!("CreatureModelData", creatures::creature_model_data_schema),
+    wide!("CreatureSoundData", creature_sound::csd_schema),
     wide!("CreatureType", creature_types::creature_type_schema),
     plain!(
         "DeathThudLookups",
@@ -138,7 +142,7 @@ pub(crate) static TABLES: &[Table] = &[
         "FootstepTerrainLookup",
         footsteps::n_u32_schema("FootstepTerrainLookup", 5, &[])
     ),
-    plain!("GameObjectDisplayInfo", gameobjects::schema()),
+    wide!("GameObjectDisplayInfo", gameobjects::schema),
     wide!("GameTips", game_tips::schema),
     wide!(
         "GMTicketCategory",
@@ -146,10 +150,10 @@ pub(crate) static TABLES: &[Table] = &[
     ),
     plain!("GroundEffectDoodad", ground_effects::doodad_schema()),
     plain!("GroundEffectTexture", ground_effects::texture_schema()),
-    plain!("HelmetGeosetVisData", characters::helmet_vis_schema()),
+    wide!("HelmetGeosetVisData", characters::helmet_vis_schema),
     wide!("ItemBagFamily", itembagfamily::item_bag_family_schema),
     wide!("ItemClass", itemclass::item_class_schema),
-    plain!("ItemDisplayInfo", items::item_display_info_schema()),
+    wide!("ItemDisplayInfo", items::item_display_info_schema_for),
     plain!("ItemGroupSounds", item_sounds::item_group_sounds_schema()),
     wide!("ItemPetFood", creature_families::food_schema),
     wide!(
@@ -170,12 +174,12 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("LightFloatBand", light::float_band_schema()),
     plain!("LightIntBand", light::int_band_schema()),
     plain!("LightParams", light::light_params_schema()),
-    plain!("LightSkybox", light::light_skybox_schema()),
+    wide!("LightSkybox", light::light_skybox_schema),
     plain!("LoadingScreens", loading_screen::schema()),
     plain!("Lock", lock::schema()),
     wide!("LockType", lock_type::schema),
-    plain!("Map", maps::map_schema()),
-    plain!("Material", material::schema()),
+    wide!("Map", maps::map_schema),
+    wide!("Material", material::schema),
     plain!("NPCSounds", npc_greeting::npcsounds_schema()),
     wide!("Package", packages::package_schema),
     plain!(
@@ -205,15 +209,19 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("SoundEntries", sound_entries::sound_entries_schema()),
     plain!("SoundProviderPreferences", sound_provider::schema()),
     plain!("SoundWaterType", sound_water::schema()),
-    plain!("SpamMessages", text_filter_lists::schema("SpamMessages")),
-    plain!("Spell", spells::spell_schema()),
+    Table {
+        name: "SpamMessages",
+        shape: Shape::Schema(|l| text_filter_lists::schema("SpamMessages", l)),
+    },
+    wide!("Spell", spells::spell_schema_for),
     plain!("SpellCastTimes", spells::spell_cast_times_schema()),
     plain!("SpellCategory", spells::spell_category_schema()),
-    plain!(
-        "SpellChainEffects",
-        spell_visual::chain_effects::chain_effects_schema()
-    ),
-    plain!("SpellDispelType", spells::spell_dispel_type_schema()),
+    // Sub-dword fields in 2.4.3: `chain_effects::load` reads the leading eight dwords by hand.
+    Table {
+        name: "SpellChainEffects",
+        shape: Shape::HandByBuild(spell_visual::chain_effects::chain_effects_shape),
+    },
+    wide!("SpellDispelType", spells::spell_dispel_type_schema),
     plain!("SpellDuration", spells::spell_duration_schema()),
     plain!(
         "SpellEffectCameraShakes",
@@ -221,24 +229,24 @@ pub(crate) static TABLES: &[Table] = &[
     ),
     wide!("SpellFocusObject", spell_focus::schema),
     plain!("SpellIcon", dbc::spell_icon_schema()),
-    plain!(
+    wide!(
         "SpellItemEnchantment",
-        item_visuals::spell_item_enchantment_schema()
+        item_visuals::spell_item_enchantment_schema
     ),
     wide!("SpellMechanic", spell_mechanic::schema),
     plain!("SpellRadius", spells::spell_radius_schema()),
     wide!("SpellRange", spells::spell_range_schema),
-    plain!("SpellShapeshiftForm", spells::shapeshift_form_schema()),
-    plain!("SpellVisual", spell_visual::spell_visual_schema()),
+    wide!("SpellShapeshiftForm", spells::shapeshift_form_schema),
+    wide!("SpellVisual", spell_visual::spell_visual_schema),
     plain!("SpellVisualEffectName", spell_visual::effect_name_schema()),
-    plain!("SpellVisualKit", spell_visual::kit_schema()),
+    wide!("SpellVisualKit", spell_visual::kit_schema),
     plain!("StableSlotPrices", stable_slot_prices::schema()),
     plain!("Stationery", stationery::stationery_schema()),
     plain!("Talent", talents::talent_schema()),
     wide!("TalentTab", talents::talent_tab_schema),
     wide!("TaxiNodes", taxi_nodes::schema),
     plain!("TaxiPath", taxi_path::schema()),
-    plain!("TaxiPathNode", taxi::schema()),
+    wide!("TaxiPathNode", taxi::schema),
     plain!(
         "TerrainType",
         footsteps::n_u32_schema("TerrainType", 6, &[1])
@@ -254,7 +262,7 @@ pub(crate) static TABLES: &[Table] = &[
     plain!("WeaponImpactSounds", weapon_impact::schema()),
     plain!("WeaponSwingSounds2", weapon_swing::schema()),
     wide!("WMOAreaTable", wmo_area::schema),
-    plain!("WorldMapArea", world_map_area::schema()),
+    wide!("WorldMapArea", world_map_area::schema),
     plain!("WorldMapContinent", world_map_continent::schema()),
     plain!("WorldMapOverlay", world_map_overlay::schema()),
     wide!("WorldStateUI", world_state_ui::schema),
@@ -270,7 +278,7 @@ pub(crate) fn schema(table: &str, layout: DbcLayout) -> Option<Schema> {
         .filter(|t| t.name.eq_ignore_ascii_case(table))
         .find_map(|t| match t.shape {
             Shape::Schema(build) => Some(build(layout)),
-            Shape::Hand { .. } => None,
+            Shape::Hand { .. } | Shape::HandByBuild(_) => None,
         })
 }
 
