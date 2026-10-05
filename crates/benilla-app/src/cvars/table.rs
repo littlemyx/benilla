@@ -176,8 +176,6 @@ pub(crate) const REGISTERED_243: &[Registered] = &[
     same("autojoinBGVoice", "0"),
     // `autojoinPartyVoice` register site 0x4aa68f.
     same("autojoinPartyVoice", "1"),
-    // `buffDurations` register site 0x4aa252.
-    same("buffDurations", "1"),
     // `cameraPitchSmoothSpeed` register site 0x535a87.
     same("cameraPitchSmoothSpeed", "45.0"),
     // `chatLocked` register site 0x4aa2e2.

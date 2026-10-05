@@ -186,6 +186,7 @@ pub(super) struct NetHandles {
     pub(super) login: Sender<LoginRequest>,
     pub(super) login_abandon: Arc<AtomicU64>,
     pub(super) ping: Arc<Mutex<PingClock>>,
+    pub(super) expansion: Arc<std::sync::atomic::AtomicU8>,
 }
 
 /// Spawns the read thread with its park and cycle loop, and the one long-lived write thread.
@@ -197,7 +198,9 @@ pub(super) fn spawn_net(connect: bool) -> NetHandles {
     let (login_tx, login_rx) = crossbeam_channel::unbounded::<LoginRequest>();
     let login_abandon = Arc::new(AtomicU64::new(0));
     let ping_clock = Arc::new(Mutex::new(PingClock::default()));
+    let expansion = Arc::new(std::sync::atomic::AtomicU8::new(u8::MAX));
     if connect {
+        let read_expansion = Arc::clone(&expansion);
         // The writer thread outlives connections; the read thread hands it each new WorldWriter.
         let (writer_tx, writer_rx) = crossbeam_channel::unbounded::<WorldWriter>();
         let clock = Arc::clone(&ping_clock);
@@ -231,12 +234,14 @@ pub(super) fn spawn_net(connect: bool) -> NetHandles {
                     // A cycle starts with no measurements. `writer_loop` clears again on the new
                     // writer, since the keepalive can still fire on the stale one until then.
                     read_clock.lock_recover().clear();
-                    match run(
+                    read_expansion.store(u8::MAX, Ordering::Relaxed);
+                    match run_with(
                         &events_tx,
                         &writer_tx,
                         &parks,
                         &abandon,
                         &read_clock,
+                        &read_expansion,
                         &mut tails_announced,
                     ) {
                         Ok(Cycle::Exit) => return,
@@ -286,6 +291,7 @@ pub(super) fn spawn_net(connect: bool) -> NetHandles {
         login: login_tx,
         login_abandon,
         ping: ping_clock,
+        expansion,
     }
 }
 
@@ -293,12 +299,35 @@ pub(super) fn spawn_net(connect: bool) -> NetHandles {
 /// roster, park at character select, enter the world and stream [`SessionEvent`]s until the socket
 /// dies, the character logs out or the app exits. A pre-roster failure emits
 /// [`SessionEvent::LoginFailed`] and re-parks; any retry is the app's.
+#[cfg(test)]
 fn run(
     events_tx: &Sender<SessionEvent>,
     writer_tx: &Sender<WorldWriter>,
     parks: &Parks,
     abandon: &AtomicU64,
     ping_clock: &Mutex<PingClock>,
+    tails_announced: &mut std::collections::HashSet<u16>,
+) -> Result<Cycle> {
+    let expansion = std::sync::atomic::AtomicU8::new(u8::MAX);
+    run_with(
+        events_tx,
+        writer_tx,
+        parks,
+        abandon,
+        ping_clock,
+        &expansion,
+        tails_announced,
+    )
+}
+
+/// [`run`] with the cell the admitting auth response's expansion byte lands in.
+fn run_with(
+    events_tx: &Sender<SessionEvent>,
+    writer_tx: &Sender<WorldWriter>,
+    parks: &Parks,
+    abandon: &AtomicU64,
+    ping_clock: &Mutex<PingClock>,
+    expansion: &std::sync::atomic::AtomicU8,
     tails_announced: &mut std::collections::HashSet<u16>,
 ) -> Result<Cycle> {
     let Parks {
@@ -611,10 +640,7 @@ fn run(
         session.set_active_mover(guid)?;
 
         let billing_time_rested = session.billing_time_rested();
-        crate::net::ACCOUNT_EXPANSION.store(
-            session.expansion().unwrap_or(u8::MAX),
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        expansion.store(session.expansion().unwrap_or(u8::MAX), Ordering::Relaxed);
         let tutorial_flags = session.take_tutorial_flags();
         // `SMSG_ADDON_INFO` carries no names, so it is paired back against the block we sent. No
         // reply means no AddOn index space at all, carried as `None`.

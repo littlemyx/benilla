@@ -86,6 +86,7 @@ impl Plugin for NetPlugin {
             .insert_resource(LoginSubmit(handles.login))
             .insert_resource(LoginAbandon(handles.login_abandon))
             .insert_resource(PingShared(handles.ping))
+            .insert_resource(AccountExpansion(handles.expansion))
             .init_resource::<GuidIndex>()
             .init_resource::<SelfGuid>()
             .init_resource::<AddonInfoReply>()
@@ -503,6 +504,13 @@ pub(crate) struct NetStatus {
 /// never times a pong from the drain.
 #[derive(Resource)]
 pub(crate) struct PingShared(pub(crate) std::sync::Arc<std::sync::Mutex<io::PingClock>>);
+
+/// The expansion byte of the admitting 2.4.3 `SMSG_AUTH_RESPONSE`, `u8::MAX` while none came (1.12.1
+/// has none), shared with the read thread like [`PingShared`]. One per app, so two sessions never
+/// share it; the protocol crate's connect event has no field for it. The read thread resets it at
+/// the start of every cycle.
+#[derive(Resource)]
+pub(crate) struct AccountExpansion(pub(crate) std::sync::Arc<std::sync::atomic::AtomicU8>);
 
 /// Server packets the codec dropped, by opcode: `unknown` has no parse arm, `unparseable` failed
 /// its parser. Never cleared on reconnect.
@@ -2016,12 +2024,6 @@ pub(crate) struct CharActionResultMessage {
 pub(crate) struct CharacterLoginFailedMessage {
     pub(crate) result: u8,
 }
-
-/// The expansion byte of the admitting 2.4.3 `SMSG_AUTH_RESPONSE`, `u8::MAX` while none came (1.12.1
-/// has none). The session thread writes it before the world entry; `GetAccountExpansionLevel`
-/// reads it. A process-wide cell because the protocol crate's connect event carries no field for it.
-pub(crate) static ACCOUNT_EXPANSION: std::sync::atomic::AtomicU8 =
-    std::sync::atomic::AtomicU8::new(u8::MAX);
 
 /// We entered the world.
 #[derive(Message)]
