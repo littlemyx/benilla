@@ -512,6 +512,7 @@ dependencies = [
  "benilla-assets",
  "benilla-build",
  "benilla-formats",
+ "benilla-ios-input",
  "benilla-protocol",
  "benilla-srp",
  "benilla-ui",
@@ -608,6 +609,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "benilla-ios-input"
+version = "0.2.0"
+dependencies = [
+ "bevy",
+ "block2 0.6.2",
+ "objc2 0.6.4",
+ "objc2-avf-audio",
+ "objc2-foundation 0.3.2",
+ "objc2-game-controller",
+ "objc2-ui-kit 0.3.2",
+ "raw-window-handle",
+ "smol_str",
+]
+
+[[package]]
 name = "benilla-m2"
 version = "0.2.0"
 dependencies = [
@@ -687,6 +703,7 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4720,6 +4737,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
 dependencies = [
+ "bitflags 2.11.1",
  "objc2 0.6.4",
  "objc2-foundation 0.3.2",
 ]
@@ -4866,6 +4884,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-game-controller"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1962c1882c5abcedb18e5f01acffeaad7b3cbd0a9d4cd8f5ca259ba8a64cb9a3"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "objc2-io-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4953,6 +4983,18 @@ dependencies = [
  "objc2-symbols",
  "objc2-uniform-type-identifiers",
  "objc2-user-notifications",
+]
+
+[[package]]
+name = "objc2-ui-kit"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d87d638e33c06f577498cbcc50491496a3ed4246998a7fbba7ccb98b1e7eab22"
+dependencies = [
+ "bitflags 2.11.1",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -7862,7 +7904,7 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
- "objc2-ui-kit",
+ "objc2-ui-kit 0.2.2",
  "orbclient",
  "percent-encoding",
  "pin-project",

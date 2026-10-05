@@ -1,0 +1,48 @@
+# `xcodegen generate` in this folder writes benilla.xcodeproj (gitignored). The app is the Rust
+# `benilla` binary, built by build_rust.sh; Xcode only bundles, signs and installs it.
+name: benilla
+configs:
+  Debug: debug
+  Release: release
+configFiles:
+  Debug: Base.xcconfig
+  Release: Base.xcconfig
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    SDKROOT: iphoneos
+    TARGETED_DEVICE_FAMILY: "2"
+targets:
+  benilla:
+    type: application
+    platform: iOS
+    sources:
+      - path: resources
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: benilla
+        EXECUTABLE_NAME: benilla
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        # The binary is made by the script phase, not linked by Xcode.
+        MACH_O_TYPE: mh_execute
+    preBuildScripts:
+      - name: Build the Rust binary
+        script: |
+          "${SRCROOT}/build_rust.sh"
+        basedOnDependencyAnalysis: false
+        inputFiles: []
+        outputFiles: []
+    postBuildScripts:
+      - name: Sign the app
+        script: |
+          "${SRCROOT}/sign.sh"
+        basedOnDependencyAnalysis: false
+        inputFiles: []
+        outputFiles: []

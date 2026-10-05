@@ -89,6 +89,11 @@ from the `Version` enum (with their source trees deleted): benilla builds 5.1 an
 fork that still offered the other four would answer a request for one with a missing directory at
 build time instead of a compile error.
 
+The iOS port adds one platform hunk that is not about grammar: `loslib.c`'s `os_execute` is stubbed to a Lua error
+under `LUA_USE_IOS`, the way upstream stubs it under `__wasi__`, because the iOS SDK marks `system()`
+unavailable and the file does not compile; `src/lib.rs` defines `LUA_USE_IOS` for `apple-ios` targets. The 1.12 client
+exposes no `os` library to the interface, so no FrameXML or addon can tell.
+
 Five hunks restore what 5.1 changed or removed:
 
 | file | hunk | why |
@@ -124,6 +129,7 @@ diff -r third_party/lua-src/lua-5.1.5 \
 
 That must print exactly the hunks in the tables above (and the `benilla_setdialect` plumbing in
 `lstate.h`, `lstate.c`, `lapi.c`, `lua.h`, `lobject.c`, `lobject.h`) and nothing else.
+The `loslib.c` platform hunk (`LUA_USE_IOS`, above) is the only other difference.
 
 ## The generic-for, in detail
 

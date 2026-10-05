@@ -1,8 +1,8 @@
-//! macOS thread QoS: keep frame-critical threads on the P-cores under system load. Apple Silicon
+//! Darwin (macOS, iOS) thread QoS: keep frame-critical threads on the P-cores under system load. Apple Silicon
 //! schedules by QoS class, and the main thread is user-interactive, but every worker Bevy spawns
 //! starts at default, the class of `rustc`, so a background build starves the frame's workers.
 //! `pthread_set_qos_class_self_np` is not in the `libc` crate, so the extern lives here; everything
-//! is a no-op off macOS.
+//! is a no-op off Darwin.
 
 use bevy::prelude::*;
 use bevy::render::{Render, RenderApp, RenderSystems};
@@ -28,7 +28,7 @@ pub static COMPILE_BURST: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 
 /// Promote the calling thread to `class`. Safe to call repeatedly; logs once on failure.
 pub fn promote_current_thread(class: QosClass) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         unsafe extern "C" {
             fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
@@ -38,7 +38,7 @@ pub fn promote_current_thread(class: QosClass) {
             warn_once!("thread QoS promotion to {class:?} failed (rc={rc})");
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     let _ = class;
 }
 

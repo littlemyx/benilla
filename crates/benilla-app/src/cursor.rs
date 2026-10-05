@@ -255,6 +255,8 @@ impl Plugin for CursorPlugin {
                     // After the tick: a FrameXML `SetCursor` made this frame is read here.
                     .after(crate::ui_script::UiInput),
             );
+        #[cfg(target_os = "ios")]
+        app.add_plugins(ios::plugin);
     }
 }
 
@@ -265,7 +267,9 @@ mod other {
     use benilla_assets::{cursor_texture, WorldAssets};
     use bevy::platform::collections::{HashMap, HashSet};
     use bevy::prelude::*;
-    use bevy::window::{CursorIcon, CustomCursor, CustomCursorImage, PrimaryWindow};
+    use bevy::window::PrimaryWindow;
+    #[cfg(not(target_os = "ios"))]
+    use bevy::window::{CursorIcon, CustomCursor, CustomCursorImage};
 
     /// Stem → decoded cursor image, preloaded at startup.
     #[derive(Resource, Default)]
@@ -363,7 +367,15 @@ mod other {
         *last_set = Some(stem);
     }
 
+    /// iOS: winit's iOS backend ignores `CursorIcon::Custom`, so the image goes to the software
+    /// cursor ([`super::ios`]).
+    #[cfg(target_os = "ios")]
+    fn set_custom_cursor(commands: &mut Commands, _window: Entity, handle: Handle<Image>) {
+        commands.insert_resource(super::ios::CursorSprite(handle));
+    }
+
     /// Insert a custom cursor with hotspot `(0, 0)`, the vanilla cursors' top-left tip.
+    #[cfg(not(target_os = "ios"))]
     fn set_custom_cursor(commands: &mut Commands, window: Entity, handle: Handle<Image>) {
         commands
             .entity(window)
@@ -375,6 +387,102 @@ mod other {
                 rect: None,
                 hotspot: (0, 0),
             })));
+    }
+}
+
+/// Where the software cursor's top-left corner goes, in logical px: the pointer minus the
+/// hotspot, or `None` (hidden) while the pointer is absent, locked for mouse-look, or a cinematic
+/// plays (`0x58b590` hides the pointer there).
+#[cfg(any(target_os = "ios", test))]
+fn sprite_origin(
+    pointer: Option<Vec2>,
+    hotspot: Vec2,
+    locked: bool,
+    cinematic: bool,
+) -> Option<Vec2> {
+    if locked || cinematic {
+        return None;
+    }
+    pointer.map(|p| p - hotspot)
+}
+
+/// iOS: the system pointer is hidden over the view (`benilla-ios-input`), and the 1.12 cursor is
+/// drawn as a top-most `bevy_ui` image at the pointer, as the reference draws a software cursor.
+/// The image is the one `other` picks (a held payload's icon, else the mode's stem).
+#[cfg(target_os = "ios")]
+mod ios {
+    use bevy::prelude::*;
+    use bevy::window::PrimaryWindow;
+
+    /// Above every other `GlobalZIndex` in the app (the highest is the glue booth's 2000).
+    const CURSOR_Z: i32 = 5000;
+
+    /// The vanilla cursors' tip is their top-left pixel.
+    const HOTSPOT: Vec2 = Vec2::ZERO;
+
+    /// The image `other::drive` last chose.
+    #[derive(Resource)]
+    pub(super) struct CursorSprite(pub(super) Handle<Image>);
+
+    #[derive(Component)]
+    struct CursorNode;
+
+    pub(super) fn plugin(app: &mut App) {
+        app.add_systems(Startup, spawn).add_systems(
+            Update,
+            place
+                .after(super::other::drive)
+                .after(super::drive_displayed_cursor),
+        );
+    }
+
+    fn spawn(mut commands: Commands) {
+        commands.spawn((
+            CursorNode,
+            Name::new("software cursor"),
+            ImageNode::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            GlobalZIndex(CURSOR_Z),
+            Visibility::Hidden,
+        ));
+    }
+
+    /// Follow the pointer; the image size in px is its size in logical px, as winit sizes a
+    /// custom cursor.
+    fn place(
+        sprite: Option<Res<CursorSprite>>,
+        window: Single<&Window, With<PrimaryWindow>>,
+        lock: Res<benilla_ios_input::PointerLock>,
+        cinematic: Option<Res<crate::cinematic::Cinematic>>,
+        images: Res<Assets<Image>>,
+        mut node: Single<(&mut Node, &mut ImageNode, &mut Visibility), With<CursorNode>>,
+    ) {
+        let (node, image, visibility) = &mut *node;
+        let origin = sprite.as_ref().and_then(|_| {
+            super::sprite_origin(
+                window.cursor_position(),
+                HOTSPOT,
+                lock.is_locked(),
+                cinematic.is_some_and(|c| c.is_playing()),
+            )
+        });
+        let (Some(origin), Some(sprite)) = (origin, sprite) else {
+            visibility.set_if_neq(Visibility::Hidden);
+            return;
+        };
+        if image.image != sprite.0 {
+            image.image = sprite.0.clone();
+        }
+        if let Some(size) = images.get(&sprite.0).map(Image::size_f32) {
+            node.width = Val::Px(size.x);
+            node.height = Val::Px(size.y);
+        }
+        node.left = Val::Px(origin.x);
+        node.top = Val::Px(origin.y);
+        visibility.set_if_neq(Visibility::Inherited);
     }
 }
 
@@ -566,6 +674,19 @@ mod macos {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sprite_follows_the_pointer_minus_the_hotspot() {
+        let at = |p, l, c| sprite_origin(p, Vec2::new(2.0, 3.0), l, c);
+        assert_eq!(
+            at(Some(Vec2::new(100.0, 50.0)), false, false),
+            Some(Vec2::new(98.0, 47.0))
+        );
+        // Pointer outside the view, mouse-look lock, and a cinematic each hide it.
+        assert_eq!(at(None, false, false), None);
+        assert_eq!(at(Some(Vec2::new(100.0, 50.0)), true, false), None);
+        assert_eq!(at(Some(Vec2::new(100.0, 50.0)), false, true), None);
+    }
     use crate::target::{CursorKind, WorldCursor};
     use bevy::ecs::system::RunSystemOnce;
 

@@ -426,6 +426,17 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
         } else {
             bevy::window::WindowLevel::Normal
         },
+        // UIKit owns the iOS surface: one fixed, full-screen window, never resized or moved by
+        // the player, with the status bar and home indicator hidden and the edge swipes deferred
+        // so a drag at the bezel reaches the game first.
+        #[cfg(target_os = "ios")]
+        resizable: false,
+        #[cfg(target_os = "ios")]
+        prefers_home_indicator_hidden: true,
+        #[cfg(target_os = "ios")]
+        prefers_status_bar_hidden: true,
+        #[cfg(target_os = "ios")]
+        preferred_screen_edges_deferring_system_gestures: bevy::window::ScreenEdge::All,
         ..default()
     }))
     .add_plugins(benilla_world::thread_qos::ThreadQosPlugin)
@@ -481,6 +492,11 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     if let Some(extend) = extend {
         extend(&mut app);
     }
+
+    // winit 0.30 on iOS gives no key codes and no mouse: GameController feeds Bevy's keyboard and
+    // mouse messages instead.
+    #[cfg(target_os = "ios")]
+    app.add_plugins(benilla_ios_input::IosInputPlugin);
 
     // The probe fleet, last so it observes the fully-built app; compiled out by
     // `--no-default-features`.

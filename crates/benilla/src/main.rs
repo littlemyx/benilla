@@ -4,6 +4,22 @@
 use benilla_app::BuildId;
 
 fn main() -> benilla_app::AppExit {
+    // The iOS bundle is read-only, and the `current_exe()`-relative defaults of the install search
+    // and of `local_state` point into it; `$HOME` is the app container, whose `Documents` the
+    // player fills through Files (`UIFileSharingEnabled`).
+    #[cfg(target_os = "ios")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        for (key, tail) in [
+            ("WOW_DATA", "Documents/WoW/Data"),
+            ("BENILLA_HOME", "Documents/benilla-config"),
+        ] {
+            if std::env::var_os(key).is_none() {
+                // First statement of `main`: no thread exists yet to race the environment.
+                std::env::set_var(key, format!("{home}/{tail}"));
+            }
+        }
+    }
     benilla_app::run(BuildId {
         version: env!("CARGO_PKG_VERSION"),
         describe: env!("BENILLA_GIT_DESCRIBE"),

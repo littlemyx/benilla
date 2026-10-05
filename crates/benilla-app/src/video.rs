@@ -107,6 +107,11 @@ pub(crate) fn window_mode(
 /// does not flash windowed until `Startup`. `MonitorSelection::Primary`, since `Current` has no
 /// answer before the window exists (`bevy_winit::select_monitor`).
 pub(crate) fn boot_window_mode() -> WindowMode {
+    // UIKit sizes the iOS window to the screen (bevy's mobile example is born the same way), so
+    // the CVars do not pick the mode there.
+    if cfg!(target_os = "ios") {
+        return WindowMode::BorderlessFullscreen(MonitorSelection::Primary);
+    }
     let flag = |name| crate::cvars::boot_cvar(name).and_then(|v| v.parse::<f32>().ok());
     // A run that sizes its own window owns both rows for the session.
     let (display, maximize) = if windowed_env() {
@@ -544,7 +549,10 @@ fn log_display_session(windows: Query<&Window, With<PrimaryWindow>>) {
 /// The display-server facts as a trailing clause; empty except on Linux/BSD, where the windowing
 /// backend is chosen at runtime.
 fn display_session() -> String {
-    #[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
+    #[cfg(all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    ))]
     {
         let set = |k: &str| std::env::var_os(k).is_some();
         // winit prefers Wayland when `WAYLAND_DISPLAY` is set, else X11 (XWayland under a
@@ -566,7 +574,10 @@ fn display_session() -> String {
             std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unset".into()),
         )
     }
-    #[cfg(not(all(unix, not(any(target_os = "macos", target_os = "android")))))]
+    #[cfg(not(all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    )))]
     String::new()
 }
 
@@ -606,6 +617,11 @@ fn apply_window_mode(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut last_restart: Local<u32>,
 ) {
+    // iOS has one full-screen UIKit surface, born `BorderlessFullscreen` by `boot_window_mode`; a
+    // `gxWindow`/`gxResolution` write must not resize it or leave fullscreen.
+    if cfg!(target_os = "ios") {
+        return;
+    }
     // A `RestartGx()` re-asserts even when nothing moved, re-applying `gxResolution` to a window
     // that is already windowed.
     let forced = std::mem::replace(&mut *last_restart, restarts.0) != restarts.0;

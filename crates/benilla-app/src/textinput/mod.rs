@@ -96,7 +96,12 @@ pub(crate) fn feed_key(
         return FieldKey::Passthrough;
     }
     let name = crate::bindings::chord::key_token(ev.key_code, layout);
-    if let Some(chord) = chord(ev.key_code, name, mods, cfg!(target_os = "macos")) {
+    if let Some(chord) = chord(
+        ev.key_code,
+        name,
+        mods,
+        cfg!(any(target_os = "macos", target_os = "ios")),
+    ) {
         match chord {
             Chord::Edit(action) => {
                 field.apply(action);
