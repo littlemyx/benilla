@@ -245,6 +245,32 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
             ServerPacket::VendorList { vendor, items }
         }
         t::SMSG_QUESTGIVER_STATUS => super::tbc_npc::read_questgiver_status(r)?,
+        // --- Quest panels and the query reply (`tbc_quest`) ----------------------------------
+        t::SMSG_QUESTGIVER_QUEST_DETAILS => {
+            ServerPacket::QuestGiverDetails(super::tbc_quest::read_quest_details(r)?)
+        }
+        t::SMSG_QUESTGIVER_REQUEST_ITEMS => {
+            ServerPacket::QuestGiverRequestItems(super::tbc_quest::read_request_items(r)?)
+        }
+        t::SMSG_QUESTGIVER_OFFER_REWARD => {
+            ServerPacket::QuestGiverOfferReward(super::tbc_quest::read_offer_reward(r)?)
+        }
+        t::SMSG_QUESTGIVER_QUEST_COMPLETE => {
+            ServerPacket::QuestGiverComplete(super::tbc_quest::read_quest_complete(r)?)
+        }
+        t::SMSG_QUESTGIVER_QUEST_INVALID => ServerPacket::QuestGiverInvalid {
+            msg: super::tbc_quest::quest_invalid_reason_from_tbc(read_u32_le(r)?),
+        },
+        t::SMSG_QUESTGIVER_QUEST_FAILED => ServerPacket::QuestGiverFailed {
+            quest_id: read_u32_le(r)?,
+            reason: super::tbc_quest::quest_failed_reason_from_tbc(read_u32_le(r)?),
+        },
+        t::SMSG_QUEST_QUERY_RESPONSE => ServerPacket::QuestQueryResponse(Box::new(
+            super::tbc_quest::read_quest_query_response(r)?,
+        )),
+        t::SMSG_QUESTUPDATE_FAILED => ServerPacket::QuestUpdateFailed {
+            quest_id: super::tbc_quest::read_quest_update_failed(r)?,
+        },
         // --- Combat readout: values or bytes that differ from 1.12.1 (`tbc_combat`) -----------
         t::SMSG_ATTACKERSTATEUPDATE => {
             ServerPacket::AttackerState(super::attack::read_attacker_state_in(r, true)?)

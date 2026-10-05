@@ -893,6 +893,8 @@ impl Tally {
             ServerPacket::ChatPlayerNotFound { name } if self.verbose => {
                 println!("PARSED {label} name {name:?}")
             }
+            ServerPacket::QuestQueryResponse(q) => println!("PARSED {label} {q:?}"),
+            ServerPacket::QuestGiverInvalid { msg } => println!("PARSED {label} reason {msg}"),
             ServerPacket::QuestGiverStatus { npc, status } if self.verbose => {
                 println!("PARSED {label} npc {npc:#x} status {status}")
             }
@@ -1637,6 +1639,14 @@ fn scenario(
         "quest-status" => {
             let g = willem.ok_or_else(|| anyhow!("Deputy Willem not in view"))?;
             world.questgiver_status_query(g)?;
+        }
+        "quest-query" => {
+            // By id alone: needs no NPC, changes nothing. 783 is the quest on offer at the spawn;
+            // the rest carry rewards, items, honor, a title, spells, a point or a gameobject goal.
+            for id in [783, 103, 8367, 11549, 96, 8538, 9467, 498, 2945] {
+                world.quest_query(id)?;
+                pump(world, tally, errors, 0.5)?;
+            }
         }
         "gossip-hello" => {
             let g = willem.ok_or_else(|| anyhow!("Deputy Willem not in view"))?;
