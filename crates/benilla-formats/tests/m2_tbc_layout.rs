@@ -18,7 +18,8 @@ fn tbc_models_read_112_byte_bones_whose_parents_and_pivots_are_the_files() {
     let data = benilla_formats::wow_data_tbc_or_skip!();
     let chain = Chain::open(&data).expect("open the 2.4.3 chain");
     // (name, header version, bones, vertices, parents of bones 1..=6, bone 1's pivot z)
-    let cases: [(&str, u32, usize, usize, [i16; 6], f32); 4] = [
+    type Case = (&'static str, u32, usize, usize, [i16; 6], f32);
+    let cases: [Case; 4] = [
         (
             "CHARACTER\\BloodElf\\Female\\BloodElfFemale.m2",
             263,
