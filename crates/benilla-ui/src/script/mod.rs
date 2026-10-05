@@ -132,6 +132,7 @@ mod tooltip;
 mod tooltip_item;
 mod tooltip_spell;
 mod tooltip_unit;
+pub(crate) mod ui243;
 mod ui_errors;
 pub use tooltip_unit::TooltipTint;
 mod trade;
@@ -461,6 +462,32 @@ const SCRIPT_KINDS: [&str; 39] = [
     "OnKeyUp",
 ];
 
+/// The handler kinds 2.4.3 adds to [`SCRIPT_KINDS`], accepted by the 5.1 dialect only. `PreClick`,
+/// `PostClick` and `OnAttributeChanged` fire (the click path and `SetAttribute`); the other four
+/// are registered and never fired yet: `OnTooltipSetItem` and `OnTooltipSetUnit` wait on the
+/// tooltip's item and unit fills, `OnCharComposition` on IME input, `OnInputLanguageChanged` on
+/// the input language.
+const SCRIPT_KINDS_243: [&str; 6] = [
+    "PreClick",
+    "PostClick",
+    "OnAttributeChanged",
+    "OnTooltipSetItem",
+    "OnTooltipSetUnit",
+    "OnCharComposition",
+];
+
+/// The handler kind `name` names for this VM's build, in its canonical spelling.
+pub(crate) fn script_kind(lua: &Lua, name: &str) -> Option<&'static str> {
+    let found = |kinds: &'static [&'static str]| {
+        kinds.iter().copied().find(|k| k.eq_ignore_ascii_case(name))
+    };
+    found(&SCRIPT_KINDS).or_else(|| {
+        (ScriptDialect::of(lua) == ScriptDialect::Lua51)
+            .then(|| found(&SCRIPT_KINDS_243))
+            .flatten()
+    })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // UiScript: the public host
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -606,6 +633,7 @@ impl UiScript {
         worldmap::install(&lua)?;
         worldstate::install(&lua)?;
         net_stats::install(&lua)?;
+        ui243::install(&lua)?;
 
         dialect.apply(&lua)?;
         let s = UiScript {
@@ -1180,6 +1208,7 @@ impl UiScript {
                 crate::widget::FrameKind::MovieFrame => "MovieFrame",
                 crate::widget::FrameKind::GameTooltip => "GameTooltip",
                 crate::widget::FrameKind::Minimap => "Minimap",
+                crate::widget::FrameKind::Cooldown => "Cooldown",
             });
         }
         // Region leaves publish into their own name table, not the arena's.

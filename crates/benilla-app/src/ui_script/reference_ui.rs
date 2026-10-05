@@ -9,7 +9,9 @@
 
 use std::sync::OnceLock;
 
+use benilla_build::Expansion;
 use benilla_formats::Chain;
+use benilla_ui::script::{ScriptDialect, UiScript};
 use benilla_ui::toc::Toc;
 use bevy::prelude::*;
 
@@ -86,10 +88,28 @@ pub(super) fn read(req: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// The Lua the chain's stock interface is written in: 5.1 for a 2.4.3 chain, else 1.12.1's 5.0,
+/// also for a chain that names no build.
+pub(super) fn dialect() -> ScriptDialect {
+    match chain().and_then(Chain::build).map(|b| b.expansion) {
+        Some(Expansion::Tbc) => ScriptDialect::Lua51,
+        _ => ScriptDialect::Lua50,
+    }
+}
+
+/// A VM speaking the chain's Lua ([`dialect`]).
+pub(super) fn new_script() -> Result<UiScript, impl std::fmt::Display + std::fmt::Debug> {
+    UiScript::with_dialect(dialect())
+}
+
 /// The player's patch chain, opened once per process and shared by every VM. Process-local, not
 /// the one [`benilla_assets`] holds: tests, the addon harness and a bare `UiScript` load the
 /// interface with no Bevy world to ask.
 fn chain() -> Option<&'static Chain> {
+    #[cfg(test)]
+    if let Some(laid) = fixture::chain() {
+        return Some(laid);
+    }
     static CHAIN: OnceLock<Option<Chain>> = OnceLock::new();
     CHAIN
         .get_or_init(|| {
@@ -121,6 +141,28 @@ pub(super) mod fixture {
 
     thread_local! {
         static OVERLAY: RefCell<HashMap<String, Option<Vec<u8>>>> = RefCell::new(HashMap::new());
+        static CHAIN: std::cell::Cell<Option<&'static benilla_formats::Chain>> =
+            const { std::cell::Cell::new(None) };
+    }
+
+    /// The chain a test reads the interface from instead of `$WOW_DATA`'s, per test thread.
+    pub(super) fn chain() -> Option<&'static benilla_formats::Chain> {
+        CHAIN.with(std::cell::Cell::get)
+    }
+
+    /// Reads the interface off `chain` until the guard drops.
+    pub(in crate::ui_script) fn use_chain(chain: &'static benilla_formats::Chain) -> ChainGuard {
+        CHAIN.with(|c| c.set(Some(chain)));
+        ChainGuard
+    }
+
+    /// Returns the thread to `$WOW_DATA`'s chain on drop.
+    pub(in crate::ui_script) struct ChainGuard;
+
+    impl Drop for ChainGuard {
+        fn drop(&mut self) {
+            CHAIN.with(|c| c.set(None));
+        }
     }
 
     fn key(path: &str) -> String {

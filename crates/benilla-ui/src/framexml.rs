@@ -334,7 +334,32 @@ pub fn expand_known(
     warnings: &mut Vec<String>,
 ) -> Element {
     let mut active = HashSet::new();
-    expand_inner(element, templates, fonts, warnings, &mut active)
+    expand_inner(element, templates, fonts, warnings, &mut active, false)
+}
+
+/// [`expand_known`] for a build whose `inherits` is a comma-separated list (2.4.3 writes
+/// `inherits="A, B"`): the names apply in order, each over the last, then the element.
+pub fn expand_listed(
+    element: &Element,
+    templates: &HashMap<&str, &Element>,
+    fonts: &HashSet<&str>,
+    warnings: &mut Vec<String>,
+) -> Element {
+    let mut active = HashSet::new();
+    expand_inner(element, templates, fonts, warnings, &mut active, true)
+}
+
+/// The template names an `inherits` value lists: the one verbatim name of 1.12.1, or the trimmed
+/// non-empty items of a comma list.
+pub fn inherit_names(raw: &str, listed: bool) -> Vec<&str> {
+    if listed {
+        raw.split(',')
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .collect()
+    } else {
+        [raw].into_iter().filter(|s| !s.is_empty()).collect()
+    }
 }
 
 fn expand_inner(
@@ -343,6 +368,7 @@ fn expand_inner(
     fonts: &HashSet<&str>,
     warnings: &mut Vec<String>,
     active: &mut HashSet<String>,
+    listed: bool,
 ) -> Element {
     let Some(inherits) = element.attr("inherits") else {
         return element.clone();
@@ -353,7 +379,7 @@ fn expand_inner(
     // skipped, `" "` misses) and matched case-insensitively, ASCII only: `_strnicmp` at
     // `0x6ee747`, reached despite a mis-cased name because `SStrHash 0x64b3f0` uppercases.
     let mut base: Option<Element> = None;
-    for name in [inherits].into_iter().filter(|s| !s.is_empty()) {
+    for name in inherit_names(inherits, listed) {
         if !active.insert(name.to_string()) {
             warnings.push(format!(
                 "inheritance cycle detected at template '{name}'; skipping this reference"
@@ -376,7 +402,7 @@ fn expand_inner(
             active.remove(name);
             continue;
         };
-        let expanded_template = expand_inner(template, templates, fonts, warnings, active);
+        let expanded_template = expand_inner(template, templates, fonts, warnings, active, listed);
         active.remove(name);
         base = Some(match base {
             None => expanded_template,

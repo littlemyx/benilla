@@ -50,44 +50,7 @@ pub(super) fn production_load_with(
     before: &str,
     addons: impl FnOnce(&std::path::Path),
 ) -> (UiScript, Vec<String>) {
-    let tmp = std::env::temp_dir().join(format!("benilla-layer-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&tmp);
-    let home = tmp.join("benilla-config");
-    let root = home.join("AddOns");
-    std::fs::create_dir_all(&root).unwrap();
-    addons(&root);
-    let _c = EnvGuard::unset("WOW_CAPTURE");
-    let _h = EnvGuard::set("BENILLA_HOME", home.to_str().unwrap());
-
-    let mut s = UiScript::new().unwrap();
-    s.set_screen_size(1024.0, 768.0);
-    s.set_unit(
-        "player",
-        Some(benilla_ui::script::UnitState {
-            exists: true,
-            name: Some("Probesix".into()),
-            level: 60,
-            class: Some("Warrior".into()),
-            class_file: Some("WARRIOR".into()),
-            ..Default::default()
-        }),
-    );
-    // A reply that hid nothing, so `GetNumAddOns` counts the registry.
-    s.note_addon_info_reply(&[]);
-    s.register_cvars(crate::cvars::registered_pairs());
-    s.run(before).unwrap();
-    // The layer passed in, not set through `WOW_STOCK_UI`: every test in this process reads it.
-    let mut failures = Vec::new();
-    failures.extend(super::manifest::load_ingame_ui_with(
-        &mut s,
-        None,
-        &[],
-        true,
-        !stock_ui,
-    ));
-    failures.extend(s.errors());
-    let _ = std::fs::remove_dir_all(&tmp);
-    (s, failures)
+    super::stock_load::production_load_observed(tag, stock_ui, before, addons, &mut |_, _| {})
 }
 
 /// Where `name` was first defined in [`DEFINE_LOG`].

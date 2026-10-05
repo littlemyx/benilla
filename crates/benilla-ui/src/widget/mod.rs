@@ -119,13 +119,14 @@ impl<T> Arena<T> {
 mod kinds;
 pub use kinds::{
     model_key, slider_fraction, slider_grab, slider_set_value, ArmedSequence, ButtonFont,
-    ButtonState, ButtonVisualState, ColorSelectState, EditAction, EditBoxState, EditOutcome,
-    EditUnit, FrameKind, InsertMode, KindState, MessageFrameState, MessageLine, MinimapState,
-    ModelFileFacts, ModelFog, ModelLight, ModelPlayHead, ModelState, RegionKind, ScrollFrameState,
-    ScrollingMessageState, SequenceFacts, SliderState, StatusBarState, TooltipAnchor, TooltipState,
-    MINIMAP_DEFAULT_ARROW_MODEL, MINIMAP_DEFAULT_MASK, MINIMAP_DEFAULT_PLAYER_MODEL,
-    MINIMAP_DEFAULT_ZOOM, MINIMAP_ENGINE_CHILDREN, MINIMAP_ZOOM_LEVELS, TOOLTIP_DOUBLE_GAP,
-    TOOLTIP_FADE_SECS, TOOLTIP_LINE_GAP, TOOLTIP_PAD, TOOLTIP_WRAP_WIDTH,
+    ButtonState, ButtonVisualState, ColorSelectState, CooldownState, EditAction, EditBoxState,
+    EditOutcome, EditUnit, FrameKind, InsertMode, KindState, MessageFrameState, MessageLine,
+    MinimapState, ModelFileFacts, ModelFog, ModelLight, ModelPlayHead, ModelState, RegionKind,
+    ScrollFrameState, ScrollingMessageState, SequenceFacts, SliderState, StatusBarState,
+    TooltipAnchor, TooltipState, MINIMAP_DEFAULT_ARROW_MODEL, MINIMAP_DEFAULT_MASK,
+    MINIMAP_DEFAULT_PLAYER_MODEL, MINIMAP_DEFAULT_ZOOM, MINIMAP_ENGINE_CHILDREN,
+    MINIMAP_ZOOM_LEVELS, TOOLTIP_DOUBLE_GAP, TOOLTIP_FADE_SECS, TOOLTIP_LINE_GAP, TOOLTIP_PAD,
+    TOOLTIP_WRAP_WIDTH,
 };
 
 // ── Frame and Region nodes ───────────────────────────────────────────────────────────────────
@@ -196,6 +197,8 @@ pub struct Frame {
     /// `resizable` `0x200`, all set by `0x76a3c0`). It raises nothing; `CSimpleTop::Raise`
     /// (`0x7650f0`) raises the nearest toplevel self-or-ancestor of a clicked or shown frame.
     pub toplevel: bool,
+    /// `protected="true"` (2.4.3): the flag `IsProtected` answers. Nothing enforces it yet.
+    pub protected: bool,
     /// This frame's own scale (`ownScale +0xb8`, default 1.0).
     pub scale: f32,
     /// `layoutScale` = `parentEffective * ownScale`, ε-gated (`0x76ac90`).
@@ -445,6 +448,7 @@ impl WidgetArena {
             scale,
             effective_scale: parent_scale * scale,
             ignore_parent_scale: false,
+            protected: false,
             wow_id: 0,
             insertion_seq,
             kind_state: match kind {
@@ -472,6 +476,7 @@ impl WidgetArena {
                 | FrameKind::TabardModel => KindState::Model(kinds::ModelState::default()),
                 FrameKind::Minimap => KindState::Minimap(kinds::MinimapState::default()),
                 FrameKind::GameTooltip => KindState::Tooltip(kinds::TooltipState::default()),
+                FrameKind::Cooldown => KindState::Cooldown(kinds::CooldownState::default()),
                 _ => KindState::None,
             },
             next_decl: 0,

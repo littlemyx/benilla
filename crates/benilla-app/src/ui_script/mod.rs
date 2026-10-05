@@ -20,6 +20,8 @@ mod input;
 mod layer_tests;
 mod load_log;
 mod manifest;
+#[cfg(test)]
+mod stock_load;
 
 /// The stock FrameXML this client runs off the player's own patch chain; its header is the rule.
 mod reference_ui;

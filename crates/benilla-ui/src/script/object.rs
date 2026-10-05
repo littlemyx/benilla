@@ -259,6 +259,11 @@ pub fn frame_kind_from_tag(s: &str) -> Option<FrameKind> {
 /// record is released once the first one is made (`0x6ee439`), so a second one misses. On a miss
 /// Lua raises and XML logs `Unknown frame type: %s` and skips the node.
 pub(crate) fn registered_frame_kind(lua: &Lua, kind: &str) -> Option<FrameKind> {
+    // 2.4.3 registers one more type; the 1.12.1 table has no such row.
+    if enum_token(kind) == "COOLDOWN" {
+        return (super::ScriptDialect::of(lua) == super::ScriptDialect::Lua51)
+            .then_some(FrameKind::Cooldown);
+    }
     let frame_kind = frame_kind_from_str(kind)?;
     let one_shot_spent = frame_kind == FrameKind::WorldFrame
         && lua
@@ -475,6 +480,7 @@ fn kind_method_registries(kind: Option<FrameKind>) -> &'static [&'static str] {
         Some(FrameKind::SimpleHtml) => &[super::simplehtml::REG_SIMPLEHTML_METHODS],
         Some(FrameKind::Slider) => &[super::slider::REG_SLIDER_METHODS],
         Some(FrameKind::ColorSelect) => &[super::colorselect::REG_COLORSELECT_METHODS],
+        Some(FrameKind::Cooldown) => &[super::ui243::REG_COOLDOWN_METHODS],
         Some(FrameKind::Button) => &[super::button::REG_BUTTON_METHODS],
         // Its one method, then `Button`'s: `0x4c1be0` probes its map `0xb71b64`, then `0x782c90`.
         Some(FrameKind::LootButton) => &[
@@ -567,8 +573,14 @@ pub(super) fn create_frame(
         let known = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let templates = model.framexml_templates.borrow();
-            // One name, verbatim, case-folded, as `framexml::expand` resolves it.
-            templates.contains_key(t) || templates.keys().any(|k| k.eq_ignore_ascii_case(t))
+            // One name, verbatim, case-folded, as `framexml::expand` resolves it; every name of a
+            // 2.4.3 list.
+            let listed = super::ScriptDialect::of(lua) == super::ScriptDialect::Lua51;
+            crate::framexml::inherit_names(t, listed)
+                .into_iter()
+                .all(|t| {
+                    templates.contains_key(t) || templates.keys().any(|k| k.eq_ignore_ascii_case(t))
+                })
         };
         if !known {
             return Err(mlua::Error::runtime(format!(

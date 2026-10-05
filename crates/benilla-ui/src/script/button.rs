@@ -995,10 +995,27 @@ pub(super) fn click_button(lua: &Lua, id: u32, button: &str, down: bool, scripte
         Ok(s) => Value::String(s),
         Err(_) => return,
     };
-    if let Err(e) = event::fire_widget_handler(lua, id, "OnClick", vec![btn]) {
-        lua.app_data_mut::<Model>()
-            .expect("model app_data")
-            .record_script_error(e.to_string());
+    // 2.4.3 runs `PreClick` before `OnClick` and `PostClick` after it, each `(self, button, down)`;
+    // 1.12.1's click is the one `OnClick(button)`.
+    let tbc = super::ScriptDialect::of(lua) == super::ScriptDialect::Lua51;
+    let args = |btn: &Value| {
+        let mut a = vec![btn.clone()];
+        if tbc {
+            a.push(Value::Boolean(down));
+        }
+        a
+    };
+    let stages: &[&str] = if tbc {
+        &["PreClick", "OnClick", "PostClick"]
+    } else {
+        &["OnClick"]
+    };
+    for stage in stages {
+        if let Err(e) = event::fire_widget_handler(lua, id, stage, args(&btn)) {
+            lua.app_data_mut::<Model>()
+                .expect("model app_data")
+                .record_script_error(e.to_string());
+        }
     }
     // A nameplate click selects its unit, from the pointer or `Click()` alike (the plate's
     // override `0x7cb910` chains the base), after the handler so an erroring hook cannot eat it. A
