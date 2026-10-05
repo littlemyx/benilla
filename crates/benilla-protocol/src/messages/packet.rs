@@ -1251,6 +1251,8 @@ pub enum ServerPacket {
         /// One status per record, in arrival order.
         statuses: Vec<u8>,
     },
+    /// A packet only 2.4.3 sends (or whose 2.4.3 meaning has no 1.12.1 variant), by its 2.4.3 name.
+    Tbc(super::tbc_world::TbcPacket),
     Other {
         opcode: u16,
     },
@@ -1605,6 +1607,7 @@ impl ServerPacket {
             ServerPacket::InitWorldStates(_) => "SMSG_INIT_WORLD_STATES".into(),
             ServerPacket::UpdateWorldState { .. } => "SMSG_UPDATE_WORLD_STATE".into(),
             ServerPacket::AddonInfo { .. } => "SMSG_ADDON_INFO".into(),
+            ServerPacket::Tbc(packet) => packet.name().into(),
             ServerPacket::Other { opcode } => format!("opcode {opcode:#06x}"),
         }
     }

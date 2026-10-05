@@ -19,7 +19,7 @@ mod session;
 mod writer;
 
 pub use reader::WorldReader;
-pub use session::{WardenRequired, WorldAuthReject, WorldSession};
+pub use session::{PacketRead, WardenRequired, WorldAuthReject, WorldSession};
 pub use writer::WorldWriter;
 
 /// The stock `mangosd` port, for probes that dial the world server without a realm list.
@@ -32,16 +32,17 @@ pub(super) fn recv_packet(
     build: &ClientBuild,
     fields: Option<&'static FieldTable>,
 ) -> Result<ServerPacket> {
-    recv_packet_raw(stream, decrypter, build, fields).map(|(packet, _, _)| packet)
+    recv_packet_raw(stream, decrypter, build, fields).map(|(packet, _, _, _)| packet)
 }
 
-/// [`recv_packet`], also returning the opcode and the undecoded body.
+/// [`recv_packet`], also returning the opcode, the undecoded body and the count of body bytes the
+/// parse left unread.
 pub(super) fn recv_packet_raw(
     stream: &mut TcpStream,
     decrypter: Option<&mut DecrypterHalf>,
     build: &ClientBuild,
     fields: Option<&'static FieldTable>,
-) -> Result<(ServerPacket, u16, Vec<u8>)> {
+) -> Result<(ServerPacket, u16, Vec<u8>, usize)> {
     let mut header = [0u8; 4];
     stream
         .read_exact(&mut header)
@@ -57,9 +58,9 @@ pub(super) fn recv_packet_raw(
     stream
         .read_exact(&mut body)
         .map_err(|e| anyhow!("reading world body (opcode {opcode:#x}, {body_len} bytes): {e}"))?;
-    let packet = messages::parse_server_for(build, fields, opcode, &body)
+    let (packet, tail) = messages::parse_server_with_tail_for(build, fields, opcode, &body)
         .map_err(|e| anyhow!("parsing opcode {opcode:#x}: {e}"))?;
-    Ok((packet, opcode, body))
+    Ok((packet, opcode, body, tail))
 }
 
 /// Write one client packet: a 6-byte header, its size counting opcode and body, then the body.

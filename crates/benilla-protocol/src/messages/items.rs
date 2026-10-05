@@ -228,12 +228,27 @@ pub struct ItemUseSpell {
 
 /// Read `SMSG_ITEM_QUERY_SINGLE_RESPONSE` in the field order of `ItemHandler.cpp:269-415`.
 pub(super) fn read_item_query_response(r: &mut &[u8]) -> io::Result<(u32, Option<ItemInfo>)> {
+    read_item_query_in(r, false)
+}
+
+/// The 2.4.3 `SMSG_ITEM_QUERY_SINGLE_RESPONSE` (cmangos-tbc `HandleItemQuerySingleOpcode`): the
+/// 1.12.1 body plus a `u32` after the subclass, a random-suffix `u32` after the random property
+/// and the socket, totem and duration tail (read and dropped). Its bag family is a bit mask, not
+/// 1.12.1's enum, and is carried as sent.
+pub(super) fn read_item_query_response_tbc(r: &mut &[u8]) -> io::Result<(u32, Option<ItemInfo>)> {
+    read_item_query_in(r, true)
+}
+
+fn read_item_query_in(r: &mut &[u8], tbc: bool) -> io::Result<(u32, Option<ItemInfo>)> {
     let entry = read_u32_le(r)?;
     if entry & 0x8000_0000 != 0 {
         return Ok((entry & 0x7FFF_FFFF, None));
     }
     let class = read_u32_le(r)?;
     let subclass = read_u32_le(r)?;
+    if tbc {
+        let _sound_override_subclass = read_u32_le(r)?; // -1 from cmangos-tbc
+    }
     let name = read_cstring(r)?;
     for _ in 0..3 {
         let _ = read_cstring(r)?; // name2..name4, always sent empty
@@ -351,12 +366,27 @@ pub(super) fn read_item_query_response(r: &mut &[u8]) -> io::Result<(u32, Option
     let material = read_u32_le(r)?;
     let sheath = read_u32_le(r)?;
     let random_property = read_u32_le(r)?;
+    if tbc {
+        let _random_suffix = read_u32_le(r)?;
+    }
     let block = read_u32_le(r)?;
     let item_set = read_u32_le(r)?;
     let max_durability = read_u32_le(r)?;
     let area = read_u32_le(r)?;
     let map = read_u32_le(r)?;
     let bag_family = read_u32_le(r)?;
+    if tbc {
+        let _totem_category = read_u32_le(r)?;
+        for _ in 0..3 {
+            let _socket_color = read_u32_le(r)?;
+            let _socket_content = read_u32_le(r)?;
+        }
+        let _socket_bonus = read_u32_le(r)?;
+        let _gem_properties = read_u32_le(r)?;
+        let _required_disenchant_skill = read_u32_le(r)?;
+        let _armor_damage_modifier = read_f32_le(r)?;
+        let _duration_seconds = read_u32_le(r)?;
+    }
 
     Ok((
         entry,
@@ -415,6 +445,11 @@ pub(super) fn read_item_query_response(r: &mut &[u8]) -> io::Result<(u32, Option
             bag_family,
         }),
     ))
+}
+
+/// Body of the 2.4.3 `CMSG_ITEM_QUERY_SINGLE`: the entry alone (the 1.12.1 body adds a guid).
+pub fn item_query_tbc(entry: u32) -> Vec<u8> {
+    entry.to_le_bytes().to_vec()
 }
 
 /// Body of `CMSG_ITEM_QUERY_SINGLE`: entry, then a full item guid (0 with no instance in hand).

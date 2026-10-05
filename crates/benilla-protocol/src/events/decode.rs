@@ -1084,6 +1084,8 @@ pub fn decode(packet: ServerPacket) -> Vec<SessionEvent> {
             scope: None,
             states: vec![(id, value)],
         }],
+        // 2.4.3-only values: parsed, with no session event yet.
+        ServerPacket::Tbc(_) => Vec::new(),
         // No parse arm at all: surfaced for the app's dropped-opcode tally.
         ServerPacket::Other { opcode } => vec![SessionEvent::PacketDropped {
             opcode,
