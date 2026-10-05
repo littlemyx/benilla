@@ -573,8 +573,14 @@ pub(super) fn create_frame(
         let known = {
             let model = lua.app_data_ref::<Model>().expect("model app_data");
             let templates = model.framexml_templates.borrow();
-            // One name, verbatim, case-folded, as `framexml::expand` resolves it.
-            templates.contains_key(t) || templates.keys().any(|k| k.eq_ignore_ascii_case(t))
+            // One name, verbatim, case-folded, as `framexml::expand` resolves it; every name of a
+            // 2.4.3 list.
+            let listed = super::ScriptDialect::of(lua) == super::ScriptDialect::Lua51;
+            crate::framexml::inherit_names(t, listed)
+                .into_iter()
+                .all(|t| {
+                    templates.contains_key(t) || templates.keys().any(|k| k.eq_ignore_ascii_case(t))
+                })
         };
         if !known {
             return Err(mlua::Error::runtime(format!(

@@ -470,6 +470,11 @@ impl Loader<'_> {
         }
     }
 
+    /// Whether this build's `inherits=` is a comma list: 2.4.3's is, 1.12.1's one name.
+    fn listed_inherits(&self) -> bool {
+        crate::script::ScriptDialect::of(self.lua) == crate::script::ScriptDialect::Lua51
+    }
+
     /// Resolve `inherits=` against the persistent template registry (`framexml::expand`).
     pub(super) fn expand(&mut self, el: &Element) -> Element {
         let model = self.model();
@@ -481,7 +486,11 @@ impl Loader<'_> {
         let font_names: std::collections::HashSet<&str> =
             fonts.keys().map(|k| k.as_str()).collect();
         let mut warns = Vec::new();
-        let out = framexml::expand_known(el, &view, &font_names, &mut warns);
+        let out = if self.listed_inherits() {
+            framexml::expand_listed(el, &view, &font_names, &mut warns)
+        } else {
+            framexml::expand_known(el, &view, &font_names, &mut warns)
+        };
         drop(font_names);
         drop(fonts);
         drop(view);
@@ -495,12 +504,16 @@ impl Loader<'_> {
     /// a FontString's `inherits=` usually names a font object, which passes through unwarned.
     pub(super) fn expand_region(&mut self, el: &Element) -> Element {
         // One verbatim name, matched case-insensitively, as `framexml::expand` looks it up.
-        let hit = el.attr("inherits").is_some_and(|name| {
+        let listed = self.listed_inherits();
+        let hit = el.attr("inherits").is_some_and(|raw| {
             let model = self.model();
             let templates = model.framexml_templates.borrow();
-            !name.is_empty()
-                && (templates.contains_key(name)
-                    || templates.keys().any(|k| k.eq_ignore_ascii_case(name)))
+            framexml::inherit_names(raw, listed)
+                .into_iter()
+                .any(|name| {
+                    templates.contains_key(name)
+                        || templates.keys().any(|k| k.eq_ignore_ascii_case(name))
+                })
         });
         if hit {
             self.expand(el)

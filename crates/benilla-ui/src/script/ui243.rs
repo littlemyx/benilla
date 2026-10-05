@@ -160,4 +160,44 @@ mod tests {
         let report = load(&s, &doc, &|_| None);
         assert_eq!(report.warnings, ["Unknown frame type: Cooldown"]);
     }
+
+    const LISTED: &str = r#"<Ui>
+        <Frame name="TplA" virtual="true" frameLevel="7"/>
+        <Button name="TplB" virtual="true" id="9"/>
+        <Button name="Both" inherits="TplA, TplB"/>
+    </Ui>"#;
+
+    #[test]
+    fn a_comma_list_of_templates_applies_each_in_order_on_2_4_3() {
+        let s = s51();
+        let doc = crate::framexml::parse(LISTED).unwrap();
+        let report = load(&s, &doc, &|_| None);
+        assert!(
+            report.warnings.is_empty() && report.errors.is_empty(),
+            "{report:?}"
+        );
+        assert_eq!(s.eval::<i64>("return Both:GetFrameLevel()").unwrap(), 7);
+        assert_eq!(s.eval::<i64>("return Both:GetID()").unwrap(), 9);
+        s.run("CreateFrame('Frame', 'Made', nil, 'TplA, TplB')")
+            .unwrap();
+        let e = s
+            .run("CreateFrame('Frame', 'Nope', nil, 'TplA, Missing')")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("Couldn't find inherited node"), "{e}");
+    }
+
+    #[test]
+    fn vanilla_reads_the_whole_value_as_one_template_name() {
+        let s = UiScript::new().unwrap();
+        let doc = crate::framexml::parse(LISTED).unwrap();
+        let report = load(&s, &doc, &|_| None);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("unknown template 'TplA, TplB'")),
+            "{report:?}"
+        );
+    }
 }
