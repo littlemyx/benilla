@@ -60,6 +60,8 @@ pub use tbc_chat::{
     chat_ignored_tbc, chat_type_to_tbc, join_channel_tbc, leave_channel_tbc, messagechat_tbc,
     UserListChange,
 };
+mod tbc_casts;
+pub use tbc_casts::{cast_spell_tbc, gossip_select_option_tbc, next_cast_count, use_item_tbc};
 mod tbc_combat;
 mod tbc_items;
 pub use tbc_items::{repair_item_tbc, slot_to_tbc};

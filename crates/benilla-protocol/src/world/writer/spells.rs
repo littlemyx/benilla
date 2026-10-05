@@ -8,13 +8,23 @@ use crate::messages::{self, opcode};
 use super::WorldWriter;
 
 impl WorldWriter {
+    /// Send a built `CMSG_CAST_SPELL` body: as is on 1.12.1, on 2.4.3 with the next cast count and
+    /// the widened flag word (single-source, cmangos-tbc; `messages::cast_spell_tbc`).
+    fn send_cast(&mut self, body_112: Vec<u8>) -> Result<()> {
+        if !self.tbc {
+            return self.send(opcode::CMSG_CAST_SPELL, &body_112);
+        }
+        let count = messages::next_cast_count(&mut self.tbc_state.cast_count);
+        self.send(
+            opcode::CMSG_CAST_SPELL,
+            &messages::cast_spell_tbc(&body_112, count),
+        )
+    }
+
     /// `CMSG_CAST_SPELL`: `None` is a self or implicit cast, `Some` a unit target; answered by
     /// `SMSG_CAST_RESULT`.
     pub fn cast_spell(&mut self, spell_id: u32, target: Option<u64>) -> Result<()> {
-        self.send(
-            opcode::CMSG_CAST_SPELL,
-            &messages::cast_spell(spell_id, target),
-        )
+        self.send_cast(messages::cast_spell(spell_id, target))
     }
 
     /// `CMSG_CANCEL_AURA`: by spell id, not slot; the server refuses passives, no-cancel spells and
@@ -26,10 +36,7 @@ impl WorldWriter {
     /// `CMSG_CAST_SPELL` at a GameObject: the open-lock cast on a chest, vein or herb. The server
     /// checks the skill, and a chest answers with its loot.
     pub fn cast_spell_gameobject(&mut self, spell_id: u32, go_guid: u64) -> Result<()> {
-        self.send(
-            opcode::CMSG_CAST_SPELL,
-            &messages::cast_spell_gameobject(spell_id, go_guid),
-        )
+        self.send_cast(messages::cast_spell_gameobject(spell_id, go_guid))
     }
 
     /// `CMSG_CAST_SPELL` at a corpse: a corpse bit and the corpse's packed guid, a resurrection on
@@ -40,37 +47,25 @@ impl WorldWriter {
         target: messages::CorpseTarget,
         corpse_guid: u64,
     ) -> Result<()> {
-        self.send(
-            opcode::CMSG_CAST_SPELL,
-            &messages::cast_spell_corpse(spell_id, target, corpse_guid),
-        )
+        self.send_cast(messages::cast_spell_corpse(spell_id, target, corpse_guid))
     }
 
     /// `CMSG_CAST_SPELL` with `TARGET_FLAG_ITEM` and the item's packed guid: an enchant on the item
     /// picked in the craft frame.
     pub fn cast_spell_item(&mut self, spell_id: u32, item_guid: u64) -> Result<()> {
-        self.send(
-            opcode::CMSG_CAST_SPELL,
-            &messages::cast_spell_item(spell_id, item_guid),
-        )
+        self.send_cast(messages::cast_spell_item(spell_id, item_guid))
     }
 
     /// `CMSG_CAST_SPELL` with `TARGET_FLAG_DEST_LOCATION`: a ground-targeted spell at a world
     /// point; the server checks range and line of sight (`Spell::CheckCast`).
     pub fn cast_spell_at_dest(&mut self, spell_id: u32, dest: [f32; 3]) -> Result<()> {
-        self.send(
-            opcode::CMSG_CAST_SPELL,
-            &messages::cast_spell_at_dest(spell_id, dest),
-        )
+        self.send_cast(messages::cast_spell_at_dest(spell_id, dest))
     }
 
     /// `CMSG_CAST_SPELL` with `TARGET_FLAG_SOURCE_LOCATION`, for a `Targets & 0x20` spell; the
     /// server centres the area effect on `src`, a world point.
     pub fn cast_spell_at_source(&mut self, spell_id: u32, src: [f32; 3]) -> Result<()> {
-        self.send(
-            opcode::CMSG_CAST_SPELL,
-            &messages::cast_spell_at_source(spell_id, src),
-        )
+        self.send_cast(messages::cast_spell_at_source(spell_id, src))
     }
 
     /// `CMSG_CANCEL_CAST`, one `u32` spell id: sent by the wand auto-repeat handoff (reference:

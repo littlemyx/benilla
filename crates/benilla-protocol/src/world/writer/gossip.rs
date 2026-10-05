@@ -2,6 +2,8 @@
 //! interactable creature (`GetNPCIfCanInteractWith` with `UNIT_NPC_FLAG_NONE`,
 //! `NPCHandler.cpp:347`).
 
+use std::sync::atomic::Ordering;
+
 use anyhow::Result;
 
 use crate::messages::{self, opcode};
@@ -21,9 +23,15 @@ impl WorldWriter {
         gossip_list_id: u32,
         code: Option<&str>,
     ) -> Result<()> {
+        let body = messages::gossip_select_option(npc_guid, gossip_list_id, code);
+        if !self.tbc {
+            return self.send(opcode::CMSG_GOSSIP_SELECT_OPTION, &body);
+        }
+        // 2.4.3 also names the menu on screen, which the reader recorded (single-source, cmangos-tbc).
+        let menu = self.tbc_state.gossip_menu.load(Ordering::Relaxed);
         self.send(
             opcode::CMSG_GOSSIP_SELECT_OPTION,
-            &messages::gossip_select_option(npc_guid, gossip_list_id, code),
+            &messages::gossip_select_option_tbc(&body, menu),
         )
     }
 

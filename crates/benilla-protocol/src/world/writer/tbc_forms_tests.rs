@@ -20,6 +20,7 @@ fn writer(tbc: bool) -> (WorldWriter, TcpStream) {
         sent: Some(Vec::new()),
         chat_language: 7,
         tbc,
+        tbc_state: Default::default(),
     };
     (w, peer)
 }
@@ -114,4 +115,43 @@ fn the_slot_verbs_renumber_for_2_4_3_and_refuse_a_slot_it_has_no_number_for() {
     assert!(t.buyback_item(5, 300).is_err());
     assert_eq!(sent(&t).len(), 4);
     v.swap_inv_item(100, 23).unwrap();
+}
+
+#[test]
+fn the_cast_family_sends_the_2_4_3_form_with_a_counting_cast_count() {
+    let (mut t, _a) = writer(true);
+    let (mut v, _b) = writer(false);
+    for w in [&mut t, &mut v] {
+        w.cast_spell(133, None).unwrap();
+        w.cast_spell(78, Some(5)).unwrap();
+        w.cast_spell_gameobject(1, 5).unwrap();
+        w.use_item(255, 24, 0, messages::UseItemTarget::SelfImplicit, 0xA01)
+            .unwrap();
+        w.gossip_select_option(9, 2, None).unwrap();
+    }
+    // 2.4.3 adds a count and two flag bytes to a cast, a count and a u64 guid and the two flag
+    // bytes to an item use, a menu id to a gossip selection; 1.12.1 keeps its bytes.
+    assert_eq!(
+        sent(&t),
+        [
+            (opcode::CMSG_CAST_SPELL, 9),
+            (opcode::CMSG_CAST_SPELL, 11),
+            (opcode::CMSG_CAST_SPELL, 11),
+            (opcode::CMSG_USE_ITEM, 16),
+            (opcode::CMSG_GOSSIP_SELECT_OPTION, 16),
+        ]
+    );
+    assert_eq!(
+        sent(&v),
+        [
+            (opcode::CMSG_CAST_SPELL, 6),
+            (opcode::CMSG_CAST_SPELL, 8),
+            (opcode::CMSG_CAST_SPELL, 8),
+            (opcode::CMSG_USE_ITEM, 5),
+            (opcode::CMSG_GOSSIP_SELECT_OPTION, 12),
+        ]
+    );
+    // One counter for casts and item uses: four sends, count 4; 1.12.1 never counts.
+    assert_eq!(t.tbc_state.cast_count, 4);
+    assert_eq!(v.tbc_state.cast_count, 0);
 }
