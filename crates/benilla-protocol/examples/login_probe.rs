@@ -8,8 +8,12 @@
 //! With `WOW_ENTER=1` and `WOW_CHAR=<Name>` set, it then logs that character in, reads the world stream
 //! until the own player's create has arrived and 5 s more, prints the own player through the typed
 //! accessors (and which of them found their member absent for the build), the objects and update
-//! blocks seen and every opcode read as `Other`, then requests a logout and waits for it. It sends
-//! nothing but the login and the logout request: no movement, chat, combat or interaction.
+//! blocks seen and every opcode read as `Other`. Every packet other than an update is counted by
+//! the build's own opcode name, decoded or `Other`, with its raw bytes (`RAWP`), its decoded value
+//! (`PARSED`) and any bytes the parse left unread (`TAIL`) printed for a script to check. It then
+//! sends one read-only query per player and per distinct creature, game-object and item entry it
+//! saw, keeps reading for 20 s answering 2.4.3 time-sync requests, requests a logout and waits for
+//! it. It sends nothing else: no movement, chat, combat or interaction.
 //! It also prints the groups 2.4.3 lays out differently (inventory and visible items with their
 //! enchantments, the item objects, skills, quest log, explored zones, bytes fields, and the auras
 //! and virtual items of every unit in range) as `RAW` lines that a script can check against
@@ -25,10 +29,10 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result};
 use benilla_build::ClientBuild;
 use benilla_protocol::messages::{
-    self, Character, FieldTable, Object, ObjectFields, ObjectType, ServerPacket,
+    self, Character, FieldTable, Object, ObjectFields, ObjectType, ServerPacket, TbcPacket,
 };
 use benilla_protocol::wire::Vector3d;
-use benilla_protocol::{logon_as, CharCreateReq, CharRecord, WorldSession};
+use benilla_protocol::{logon_as, CharCreateReq, CharRecord, PacketRead, WorldSession};
 
 fn env(name: &str) -> Result<String> {
     std::env::var(name).map_err(|_| anyhow!("set {name}"))
@@ -50,6 +54,10 @@ fn main() -> Result<()> {
     println!(
         "build {} ({}.{}.{})",
         build.build, build.version[0], build.version[1], build.version[2]
+    );
+    TBC.store(
+        matches!(build.expansion, benilla_build::Expansion::Tbc),
+        std::sync::atomic::Ordering::Relaxed,
     );
 
     let logon = logon_as(&build, &host, &user, &pass).context("realm logon")?;
@@ -168,6 +176,7 @@ struct Seen {
     guid: u64,
     ty: ObjectType,
     fields: ObjectFields,
+    position: Option<Vector3d>,
 }
 
 /// Prints each own-player value and keeps which readers had nothing to say, and why.
@@ -408,6 +417,7 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
     let mut other: BTreeMap<u16, u32> = BTreeMap::new();
     let mut typed: BTreeMap<String, u32> = BTreeMap::new();
     let mut parse_errors: Vec<String> = Vec::new();
+    let mut tally = Tally::default();
     let mut seen: Vec<Seen> = Vec::new();
     let mut first_own_at = None;
     loop {
@@ -418,7 +428,7 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
             println!("giving up: no own-player create within 60 s");
             break;
         }
-        let packet = match world.recv() {
+        let read = match world.recv_detailed() {
             Ok(p) => p,
             Err(e) => {
                 let text = format!("{e:#}");
@@ -433,7 +443,9 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
                 return Err(e.context("reading the world stream"));
             }
         };
-        match packet {
+        tally.note(&read, begin.elapsed());
+        answer_time_sync(world, &mut tally)?;
+        match read.packet {
             ServerPacket::LoginVerifyWorld {
                 map,
                 position,
@@ -467,6 +479,7 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
                                 guid,
                                 ty: object_type,
                                 fields: mask.clone(),
+                                position: movement.position.map(|(p, _)| p),
                             });
                             if guid == character.guid && own.is_none() {
                                 own = Some(OwnPlayer {
@@ -517,24 +530,66 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
     );
     println!("update blocks, by update type: {by_update_type:?} (out-of-range guids {out_of_range_guids}, near guids {near_guids})");
     println!("typed packets other than updates: {typed:?}");
-    let mut ranked: Vec<(u16, u32)> = other.iter().map(|(&op, &n)| (op, n)).collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    println!(
-        "`Other` opcodes ({} distinct, by count; names from cmangos-tbc, else the 1.12.1 table):",
-        ranked.len()
-    );
-    for (op, n) in ranked {
+    for (id, s) in seen.iter().enumerate() {
         println!(
-            "    {op:#06x} x{n}  {}",
-            tbc_opcode_name(op)
-                .map(str::to_string)
-                .or_else(|| {
-                    messages::opcode_name(op).map(|n| format!("(1.12.1 table only: {n})"))
-                })
-                .unwrap_or_else(|| "(no name known)".to_string())
+            "RAW create {id} guid {} type {:?} entry {:?} position {:?}",
+            hex_guid(s.guid),
+            s.ty,
+            s.fields.object_entry(),
+            s.position.map(|p| (p.x, p.y, p.z))
         );
     }
     println!("parse errors: {}", parse_errors.len());
+    let _ = &other;
+
+    // The queries: one per distinct entry seen (and every player), then 20 s answering time sync.
+    let sent = send_queries(world, &seen)?;
+    let waiting = Instant::now();
+    while waiting.elapsed() < Duration::from_secs(20) {
+        match world.recv_detailed() {
+            Ok(read) => {
+                tally.note(&read, begin.elapsed());
+                answer_time_sync(world, &mut tally)?;
+            }
+            Err(e) => {
+                let text = format!("{e:#}");
+                if is_timeout(&text) {
+                    continue;
+                }
+                if text.contains("parsing opcode") {
+                    println!("  parse error: {text}");
+                    parse_errors.push(text);
+                    continue;
+                }
+                return Err(e.context("reading the world stream after the queries"));
+            }
+        }
+    }
+    println!(
+        "session alive {:.1} s after the queries went out",
+        waiting.elapsed().as_secs_f64()
+    );
+    println!("queries sent {sent:?}");
+    println!("query replies (found, missed) {:?}", tally.replies);
+    println!(
+        "time sync: requests {:?}, replies sent {}",
+        tally.sync_requests, tally.sync_replied
+    );
+    println!("parse errors in all: {}", parse_errors.len());
+    println!("unread tails: {}", tally.tails.len());
+    println!("decoded packets other than updates, by opcode:");
+    for (op, n) in &tally.parsed {
+        println!("    {op:#06x} x{n}  {}", opcode_label(*op));
+    }
+    let mut ranked: Vec<(u16, u32)> = tally.other.iter().map(|(&op, &n)| (op, n)).collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    println!(
+        "`Other` opcodes ({} distinct, by count; names from the build's own table):",
+        ranked.len()
+    );
+    for (op, n) in ranked {
+        println!("    {op:#06x} x{n}  {}", opcode_label(op));
+    }
 
     let logout_began = Instant::now();
     let result = world.logout(Duration::from_secs(25));
@@ -548,46 +603,271 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
     Ok(())
 }
 
-/// Names of the 2.4.3 opcodes the entry run reads, from cmangos-tbc `Opcodes.h`: the 1.12.1 table
-/// names several of these numbers otherwise or not at all (0x209, 0x33B), so it is only a fallback.
-fn tbc_opcode_name(opcode: u16) -> Option<&'static str> {
-    Some(match opcode {
-        0x042 => "SMSG_LOGIN_SETTIMESPEED",
-        0x067 => "SMSG_CONTACT_LIST",
-        0x096 => "SMSG_MESSAGECHAT",
-        0x0DD => "SMSG_MONSTER_MOVE",
-        0x0FA => "SMSG_TRIGGER_CINEMATIC",
-        0x0FD => "SMSG_TUTORIAL_FLAGS",
-        0x122 => "SMSG_INITIALIZE_FACTIONS",
-        0x127 => "SMSG_SET_PROFICIENCY",
-        0x129 => "SMSG_ACTION_BUTTONS",
-        0x12A => "SMSG_INITIAL_SPELLS",
-        0x131 => "SMSG_SPELL_START",
-        0x132 => "SMSG_SPELL_GO",
-        0x137 => "SMSG_UPDATE_AURA_DURATION",
-        0x14F => "SMSG_SPELLBREAKLOG",
-        0x155 => "SMSG_BINDPOINTUPDATE",
-        0x1CB => "SMSG_NOTIFICATION",
-        0x209 => "SMSG_ACCOUNT_DATA_TIMES",
-        0x21E => "SMSG_SET_REST_START",
-        0x24C => "SMSG_SPELLLOGEXECUTE",
-        0x293 => "SMSG_MEETINGSTONE_LEAVE",
-        0x2C2 => "SMSG_INIT_WORLD_STATES",
-        0x2F4 => "SMSG_WEATHER",
-        0x329 => "MSG_SET_DUNGEON_DIFFICULTY",
-        0x332 => "SMSG_EXPECTED_SPAM_RECORDS",
-        0x33A => "SMSG_DEFENSE_MESSAGE",
-        0x33B => "SMSG_INSTANCE_DIFFICULTY",
-        0x33D => "SMSG_MOTD",
-        0x36C => "SMSG_LFG_UPDATE",
-        0x390 => "SMSG_TIME_SYNC_REQ",
-        0x3A3 => "SMSG_INIT_EXTRA_AURA_INFO",
-        0x3A4 => "SMSG_SET_EXTRA_AURA_INFO",
-        0x3A6 => "SMSG_CLEAR_EXTRA_AURA_INFO",
-        0x3C8 => "SMSG_FEATURE_SYSTEM_STATUS",
-        0x41D => "SMSG_SEND_UNLEARN_SPELLS",
-        _ => return None,
-    })
+/// Whether the run is on 2.4.3, which picks the opcode table the labels come from.
+static TBC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The name of a server opcode for this build: on 2.4.3 its own table first, then (flagged) the
+/// 1.12.1 one, which names several 2.4.3 numbers otherwise.
+fn opcode_label(opcode: u16) -> String {
+    let tbc = TBC.load(std::sync::atomic::Ordering::Relaxed);
+    let own = if tbc {
+        messages::tbc_opcode_name(opcode)
+    } else {
+        messages::opcode_name(opcode)
+    };
+    own.map(str::to_string)
+        .or_else(|| {
+            tbc.then(|| messages::opcode_name(opcode))
+                .flatten()
+                .map(|n| format!("(1.12.1 table only: {n})"))
+        })
+        .unwrap_or_else(|| "(no name known)".to_string())
+}
+
+/// Send one query per distinct entry the run saw (creature, game object, item) and one name query
+/// per player; returns the counts by kind.
+fn send_queries(world: &mut WorldSession, seen: &[Seen]) -> Result<BTreeMap<&'static str, u32>> {
+    let mut sent: BTreeMap<&'static str, u32> = BTreeMap::new();
+    let mut done: std::collections::BTreeSet<(&'static str, u32)> = Default::default();
+    for s in seen {
+        let entry = s.fields.object_entry().unwrap_or(0);
+        match s.ty {
+            ObjectType::Player => {
+                world.name_query(s.guid)?;
+                *sent.entry("name").or_default() += 1;
+            }
+            ObjectType::Unit if done.insert(("creature", entry)) => {
+                world.creature_query(entry, s.guid)?;
+                *sent.entry("creature").or_default() += 1;
+            }
+            ObjectType::GameObject if done.insert(("game object", entry)) => {
+                world.gameobject_query(entry, s.guid)?;
+                *sent.entry("game object").or_default() += 1;
+            }
+            ObjectType::Item | ObjectType::Container if done.insert(("item", entry)) => {
+                world.item_query(entry, s.guid)?;
+                *sent.entry("item").or_default() += 1;
+            }
+            _ => {}
+        }
+    }
+    Ok(sent)
+}
+
+/// A hex string of `bytes`.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What the run read, by packet: counts, unread tails, raw bytes for the checker, the time-sync
+/// exchange and the query replies.
+#[derive(Default)]
+struct Tally {
+    /// Opcode to count, for packets the dispatch decoded.
+    parsed: BTreeMap<u16, u32>,
+    /// Opcode to count, for packets left as `Other`.
+    other: BTreeMap<u16, u32>,
+    /// `(opcode, tail, hex)` of every parse that left bytes unread.
+    tails: Vec<String>,
+    /// Time-sync counters asked for and not yet answered.
+    pending_sync: Vec<u32>,
+    /// `(counter, seconds since the login request)` of each request.
+    sync_requests: Vec<(u32, f64)>,
+    sync_replied: u32,
+    /// Replies by query kind: `(found, missed)`.
+    replies: BTreeMap<&'static str, (u32, u32)>,
+}
+
+impl Tally {
+    /// Count one packet, print its raw bytes and parsed value for the checker, and queue any
+    /// time-sync reply.
+    fn note(&mut self, read: &PacketRead, since: Duration) {
+        let op = read.opcode;
+        let label = opcode_label(op);
+        let is_other = matches!(read.packet, ServerPacket::Other { .. });
+        *if is_other {
+            self.other.entry(op).or_default()
+        } else {
+            self.parsed.entry(op).or_default()
+        } += 1;
+        if read.tail != 0 {
+            let line = format!(
+                "{op:#06x} {label} left {} of {} bytes unread: {}",
+                read.tail,
+                read.body.len(),
+                hex(&read.body)
+            );
+            println!("TAIL {line}");
+            self.tails.push(line);
+        }
+        let update = op == messages::opcode::SMSG_UPDATE_OBJECT
+            || op == messages::opcode::SMSG_COMPRESSED_UPDATE_OBJECT;
+        if !update {
+            println!(
+                "RAWP {op:#06x} {label} {} {}",
+                read.body.len(),
+                hex(&read.body)
+            );
+        }
+        match &read.packet {
+            ServerPacket::Tbc(p) => {
+                println!("PARSED {} {p:?}", p.name());
+                if let TbcPacket::TimeSyncRequest { counter } = p {
+                    self.pending_sync.push(*counter);
+                    self.sync_requests.push((*counter, since.as_secs_f64()));
+                }
+            }
+            ServerPacket::TimeSpeed {
+                hours,
+                minutes,
+                day_serial,
+                timescale,
+            } => println!("PARSED {label} {hours}:{minutes:02} day_serial {day_serial} speed {timescale}"),
+            ServerPacket::TutorialFlags(t) => println!("PARSED {label} {:?}", t.bytes),
+            ServerPacket::BindPoint {
+                position,
+                map,
+                area,
+            } => println!(
+                "PARSED {label} ({}, {}, {}) map {map} area {area}",
+                position.x, position.y, position.z
+            ),
+            ServerPacket::InitialSpells {
+                spell_ids,
+                cooldowns,
+            } => println!("PARSED {label} spells {spell_ids:?} cooldowns {cooldowns:?}"),
+            ServerPacket::ActionButtons { buttons } => {
+                println!("PARSED {label} {} occupied {buttons:?}", buttons.len())
+            }
+            ServerPacket::InitializeFactions { standings } => {
+                let listed: Vec<_> = standings
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (f, s))| *f != 0 || *s != 0)
+                    .map(|(i, (f, s))| format!("{i}:{f}:{s}"))
+                    .collect();
+                println!(
+                    "PARSED {label} count {} nonzero {}",
+                    standings.len(),
+                    listed.join(",")
+                );
+            }
+            ServerPacket::SetProficiency {
+                item_class,
+                subclass_mask,
+            } => println!("PARSED {label} class {item_class} mask {subclass_mask:#x}"),
+            ServerPacket::MessageChat(m) => println!("PARSED {label} {m:?}"),
+            ServerPacket::Notification { text } => println!("PARSED {label} {text:?}"),
+            ServerPacket::Weather {
+                weather_type,
+                grade,
+                sound_id,
+                instant,
+            } => println!("PARSED {label} type {weather_type} grade {grade} sound {sound_id} instant {instant}"),
+            ServerPacket::InitWorldStates(w) => println!("PARSED {label} {w:?}"),
+            ServerPacket::UpdateAuraDuration { slot, remaining_ms } => {
+                println!("PARSED {label} slot {slot} remaining {remaining_ms}")
+            }
+            ServerPacket::SpellStart(s) => println!("PARSED {label} {s:?}"),
+            ServerPacket::SpellGo(s) => println!("PARSED {label} {s:?}"),
+            ServerPacket::MonsterMove {
+                guid,
+                transport,
+                start,
+                spline_id,
+                path,
+                facing,
+                stop,
+                duration_ms,
+                flying,
+                run_mode,
+            } => {
+                let points: Vec<String> = path
+                    .iter()
+                    .map(|p| format!("({:.2},{:.2},{:.2})", p.x, p.y, p.z))
+                    .collect();
+                println!(
+                    "PARSED {label} guid {guid:#x} transport {transport:?} start ({:.2},{:.2},{:.2}) id {spline_id} stop {stop} duration {duration_ms} flying {flying} run {run_mode} facing {facing:?} path [{}]",
+                    start.x, start.y, start.z, points.join(" ")
+                );
+            }
+            ServerPacket::DestroyObject { guid } => println!("PARSED {label} {guid:#x}"),
+            ServerPacket::DefenseMessage { zone_id, text } => {
+                println!("PARSED {label} zone {zone_id} {text:?}")
+            }
+            ServerPacket::NameQueryResponse {
+                guid,
+                name,
+                race,
+                gender,
+                class,
+            } => {
+                self.replies.entry("name").or_default().0 += 1;
+                println!("PARSED {label} guid {guid:#x} name {name:?} race {race} gender {gender} class {class}");
+            }
+            ServerPacket::CreatureQueryResponse { entry, info } => {
+                let slot = self.replies.entry("creature").or_default();
+                match info {
+                    Some(i) => {
+                        slot.0 += 1;
+                        println!("PARSED {label} entry {entry} {i:?}");
+                    }
+                    None => {
+                        slot.1 += 1;
+                        println!("PARSED {label} entry {entry} MISS");
+                    }
+                }
+            }
+            ServerPacket::GameObjectQueryResponse { entry, info } => {
+                let slot = self.replies.entry("game object").or_default();
+                match info {
+                    Some(i) => {
+                        slot.0 += 1;
+                        println!(
+                            "PARSED {label} entry {entry} type {} display {} name {:?} data0..5 {:?}",
+                            i.type_id,
+                            i.display_id,
+                            i.name,
+                            &i.data[..6]
+                        );
+                    }
+                    None => {
+                        slot.1 += 1;
+                        println!("PARSED {label} entry {entry} MISS");
+                    }
+                }
+            }
+            ServerPacket::ItemQueryResponse { entry, info } => {
+                let slot = self.replies.entry("item").or_default();
+                match info {
+                    Some(i) => {
+                        slot.0 += 1;
+                        println!(
+                            "PARSED {label} entry {entry} name {:?} class {} subclass {} display {} quality {} inventory {} stack {} flags {:#x} bag_family {} buy {} sell {} level {} required {}",
+                            i.name, i.class, i.subclass, i.display_info_id, i.quality,
+                            i.inventory_type, i.stackable, i.flags, i.bag_family, i.buy_price,
+                            i.sell_price, i.item_level, i.required_level
+                        );
+                    }
+                    None => {
+                        slot.1 += 1;
+                        println!("PARSED {label} entry {entry} MISS");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Answer every queued time-sync request, as the 2.4.3 client does.
+fn answer_time_sync(world: &mut WorldSession, tally: &mut Tally) -> Result<()> {
+    for counter in std::mem::take(&mut tally.pending_sync) {
+        world.time_sync_response(counter)?;
+        tally.sync_replied += 1;
+        println!("sent CMSG_TIME_SYNC_RESP for counter {counter}");
+    }
+    Ok(())
 }
 
 /// The values `report_groups` cross-checks internally, counted over the whole run.
