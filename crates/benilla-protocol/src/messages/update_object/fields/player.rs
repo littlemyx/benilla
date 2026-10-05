@@ -19,6 +19,15 @@ impl ObjectFields {
             .then(|| self.get_u32(at(self.table.item_spell_charges, u16::from(i))))?
             .map(|v| v as i32)
     }
+    /// `ITEM_FIELD_OWNER` (field 6): the guid of the player the item belongs to.
+    pub fn item_owner(&self) -> Option<u64> {
+        self.get_guid(self.table.item_owner).filter(|&g| g != 0)
+    }
+    /// `ITEM_FIELD_CONTAINED` (field 8): the guid of what holds the item, the player for an
+    /// equipped or backpack item, a bag otherwise.
+    pub fn item_contained(&self) -> Option<u64> {
+        self.get_guid(self.table.item_contained).filter(|&g| g != 0)
+    }
     /// `ITEM_FIELD_FLAGS` (field 21): `0x08` wrapped, never alerts; `0x10` forces red status 4.
     pub fn item_flags(&self) -> Option<u32> {
         self.get_u32(self.table.item_flags)
@@ -32,11 +41,16 @@ impl ObjectFields {
     pub fn item_text_id(&self) -> Option<u32> {
         self.get_u32(self.table.item_text_id)
     }
-    /// `ITEM_FIELD_ENCHANTMENT + 3*slot` (field `22 + 3*slot`): the enchant id in one of 7 slots
-    /// (0 permanent, 1 temporary, 2-6 random properties), each an id, duration and charges
-    /// (`Item.h:117-119`). Signed: the tooltip looks up `abs(id)` and paints a negative one red.
+    /// The enchantment slots of an item in this build: 7 in 1.12.1, 11 in 2.4.3.
+    pub fn item_enchant_slot_count(&self) -> u8 {
+        self.table.shape.item_enchant_slots
+    }
+    /// `ITEM_FIELD_ENCHANTMENT + 3*slot` (field `22 + 3*slot`): the enchant id in one of the
+    /// build's slots (0 permanent, 1 temporary, then sockets and random properties), each an id,
+    /// duration and charges (`Item.h:117-119`). Signed: the tooltip looks up `abs(id)` and paints
+    /// a negative one red.
     pub fn item_enchant(&self, slot: u8) -> Option<i32> {
-        (slot < 7)
+        (slot < self.table.shape.item_enchant_slots)
             .then(|| self.get_u32(at(self.table.item_enchantment, 3 * u16::from(slot))))?
             .map(|id| id as i32)
             .filter(|&id| id != 0)
@@ -44,7 +58,7 @@ impl ObjectFields {
     /// `ITEM_FIELD_ENCHANTMENT + 3*slot + 2`: charges left, shown as `" (N Charges)"` if nonzero.
     /// The tooltip skips the duration; a countdown comes from `SMSG_ITEM_ENCHANT_TIME_UPDATE`.
     pub fn item_enchant_charges(&self, slot: u8) -> u32 {
-        (slot < 7)
+        (slot < self.table.shape.item_enchant_slots)
             .then(|| self.get_u32(at(self.table.item_enchantment, 3 * u16::from(slot) + 2)))
             .flatten()
             .unwrap_or(0)
@@ -71,41 +85,48 @@ impl ObjectFields {
     pub fn container_slot(&self, i: u8) -> Option<u64> {
         (i < 36).then(|| self.get_guid(at(self.table.container_slot_1, 2 * u16::from(i))))?
     }
+    /// The base index of visible-item slot `i`, the creator guid it starts with; absent when the
+    /// build has no such member.
+    fn visible_item_base(&self, i: u8) -> u16 {
+        at(
+            self.table.player_visible_item_1_creator,
+            self.table.shape.visible_stride * u16::from(i),
+        )
+    }
     /// `PLAYER_VISIBLE_ITEM_<slot>_0`: the public entry worn in equipment slot `i`, which other
-    /// clients render from; each slot is 12 dwords, the entry after a 2-dword creator.
+    /// clients render from; each slot is a creator guid (2 dwords) then the entry, in strides of
+    /// 12 dwords (1.12.1) or 16 (2.4.3).
     pub fn player_visible_item_entry(&self, i: u8) -> Option<u32> {
         (i < 19)
             .then(|| {
-                self.get_u32(at(
-                    self.table.player_visible_item_1_creator,
-                    2 + 12 * u16::from(i),
-                ))
-                .filter(|&e| e != 0)
+                self.get_u32(at(self.visible_item_base(i), 2))
+                    .filter(|&e| e != 0)
             })
             .flatten()
     }
+    /// The enchant fields of one visible item: 7 in 1.12.1, 11 in 2.4.3.
+    pub fn player_visible_item_enchant_slot_count(&self) -> u8 {
+        self.table.shape.visible_enchant_slots
+    }
     /// `PLAYER_VISIBLE_ITEM_<slot>_0 + 1 + j`: broadcast enchant `j` of the item in slot `i`;
-    /// vmangos fills only 0 and 1 (`MAX_INSPECTED_ENCHANTMENT_SLOT`). The reference's enchant
-    /// visuals for every unit, itself included, come from these (`item+0xc`).
+    /// vmangos fills only 0 and 1 (`MAX_INSPECTED_ENCHANTMENT_SLOT`), cmangos-tbc 0 to 5. The
+    /// reference's enchant visuals for every unit, itself included, come from these (`item+0xc`).
     pub fn player_visible_item_enchant(&self, i: u8, j: u8) -> Option<u32> {
-        (i < 19 && j < 7)
+        (i < 19 && j < self.table.shape.visible_enchant_slots)
             .then(|| {
-                self.get_u32(at(
-                    self.table.player_visible_item_1_creator,
-                    3 + 12 * u16::from(i) + u16::from(j),
-                ))
-                .filter(|&e| e != 0)
+                self.get_u32(at(self.visible_item_base(i), 3 + u16::from(j)))
+                    .filter(|&e| e != 0)
             })
             .flatten()
     }
     /// `PLAYER_VISIBLE_ITEM_<slot>_PROPERTIES`: slot `i`'s broadcast suffix roll, the low half
-    /// (`0x53339f`, `movzx WORD`) of the dword after the 7 enchants. Only the name uses it.
+    /// (`0x53339f`, `movzx WORD`) of the dword after the enchants. Only the name uses it.
     pub fn player_visible_item_properties(&self, i: u8) -> u32 {
         (i < 19)
             .then(|| {
                 self.get_u32(at(
-                    self.table.player_visible_item_1_creator,
-                    10 + 12 * u16::from(i),
+                    self.visible_item_base(i),
+                    self.table.shape.visible_properties,
                 ))
             })
             .flatten()
@@ -120,14 +141,25 @@ impl ObjectFields {
     pub fn player_pack_slot(&self, i: u8) -> Option<u64> {
         (i < 16).then(|| self.get_guid(at(self.table.player_pack_slot_1, 2 * u16::from(i))))?
     }
-    /// `PLAYER_FIELD_BANK_SLOT_1 + 2i`: our bank's 24 item guids.
+    /// The bank's item slots: 24 in 1.12.1, 28 in 2.4.3.
+    pub fn player_bank_slot_count(&self) -> u8 {
+        self.table.shape.bank_slots
+    }
+    /// The bank's bag slots: 6 in 1.12.1, 7 in 2.4.3.
+    pub fn player_bank_bag_slot_count(&self) -> u8 {
+        self.table.shape.bank_bag_slots
+    }
+    /// `PLAYER_FIELD_BANK_SLOT_1 + 2i`: our bank's item guids, one per slot of
+    /// [`Self::player_bank_slot_count`].
     pub fn player_bank_slot(&self, i: u8) -> Option<u64> {
-        (i < 24).then(|| self.get_guid(at(self.table.player_bank_slot_1, 2 * u16::from(i))))?
+        (i < self.table.shape.bank_slots)
+            .then(|| self.get_guid(at(self.table.player_bank_slot_1, 2 * u16::from(i))))?
     }
     /// `PLAYER_FIELD_BANK_BAG_SLOT_1 + 2i`: bank bag `i`'s guid; its contents stream on the bag
-    /// item's own `CONTAINER_FIELD_SLOT_*`, addressed as bag 63-68.
+    /// item's own `CONTAINER_FIELD_SLOT_*`, addressed as the bank bag slots after the bank.
     pub fn player_bank_bag_slot(&self, i: u8) -> Option<u64> {
-        (i < 6).then(|| self.get_guid(at(self.table.player_bank_bag_slot_1, 2 * u16::from(i))))?
+        (i < self.table.shape.bank_bag_slots)
+            .then(|| self.get_guid(at(self.table.player_bank_bag_slot_1, 2 * u16::from(i))))?
     }
     /// `PLAYER_FIELD_KEYRING_SLOT_1 + 2i`: 32 guids the client walks as slots 81-112, but only
     /// 16 are addressable (vmangos `KEYRING_SLOT_END 97`) and level unlocks 4, 8, 12 or 16.
@@ -191,32 +223,59 @@ impl ObjectFields {
     /// `PLAYER_FIELD_BYTES` byte 0 bit `0x2` (private): set by aura type 151, track stealthed;
     /// every creep-flagged unit then gets a minimap dot (`0x5ed210`, the `+0x1028` read).
     pub fn player_track_stealthed(&self) -> bool {
-        self.get_u32(self.table.player_field_bytes).unwrap_or(0) & 0x2 != 0
+        self.get_byte(self.table.shape.player_flags_byte)
+            .unwrap_or(0)
+            & 0x2
+            != 0
+    }
+    /// The quest-log slots of this build: 20 in 1.12.1, 25 in 2.4.3.
+    pub fn player_quest_log_slot_count(&self) -> u8 {
+        self.table.shape.quest_slots
     }
     /// `PLAYER_QUEST_LOG_<slot+1>_*`: one quest-log slot, `quest_id == 0` when the server cleared
     /// it; the count-state and timer are written with the id (`Player.h:1094-1099`).
     pub fn player_quest_log(&self, slot: u8) -> Option<QuestLogSlot> {
-        if slot >= PLAYER_QUEST_LOG_SLOTS {
+        let shape = &self.table.shape;
+        if slot >= shape.quest_slots {
             return None;
         }
-        let base = at(self.table.player_quest_log_1_1, 3 * u16::from(slot));
+        let base = at(
+            self.table.player_quest_log_1_1,
+            u16::from(shape.quest_stride) * u16::from(slot),
+        );
         let quest_id = self.get_u32(base)?;
-        let count_state = self.get_u32(at(base, 1)).unwrap_or(0);
-        let timer = self.get_u32(at(base, 2)).unwrap_or(0);
+        let counts = self
+            .get_u32(at(base, u16::from(shape.quest_counts)))
+            .unwrap_or(0);
+        let timer = self
+            .get_u32(at(base, u16::from(shape.quest_timer)))
+            .unwrap_or(0);
+        let bits = u32::from(shape.quest_counter_bits);
         let mut counters = [0u8; 4];
         for (i, c) in counters.iter_mut().enumerate() {
-            *c = ((count_state >> (6 * i)) & 0x3F) as u8;
+            *c = ((counts >> (bits * i as u32)) & ((1u32 << bits) - 1)) as u8;
         }
+        let state = match shape.quest_state {
+            QuestState::CountsByte3 => (counts >> 24) as u8,
+            QuestState::Dword(offset) => {
+                self.get_u32(at(base, u16::from(offset))).unwrap_or(0) as u8
+            }
+        };
         Some(QuestLogSlot {
             quest_id,
             counters,
-            state: (count_state >> 24) as u8,
+            state,
             timer,
         })
     }
+    /// The words of the explored-zones bitset in this build: 64 in 1.12.1, 128 in 2.4.3.
+    pub fn player_explored_zone_count(&self) -> u16 {
+        self.table.shape.explored_zone_words
+    }
     /// `PLAYER_EXPLORED_ZONES_1 + i`: bitset dword `i`; bit `n` is `AreaTable` explore flag `n`.
+    /// Words past the build's count read 0.
     pub fn player_explored_zone_slot(&self, i: u16) -> u32 {
-        if i >= PLAYER_EXPLORED_ZONES_SLOTS {
+        if i >= self.table.shape.explored_zone_words {
             return 0;
         }
         self.get_u32(at(self.table.player_explored_zones_1, i))
@@ -334,8 +393,7 @@ impl ObjectFields {
     /// `PLAYER_BYTES_3` byte 1: drunkenness, the high byte of `drunk & 0xFFFE` in the low half
     /// (`SetDrunkValue`); the reference clamps it to 100 and scales by 0.01 (`0x5e2a90`).
     pub fn player_drunk_byte(&self) -> Option<u8> {
-        self.get_u32(self.table.player_bytes_3)
-            .map(|v| (v >> 8) as u8)
+        self.get_byte(self.table.shape.drunk)
     }
     /// `PLAYER_FLAGS` (field 190): the player state flags.
     pub fn player_flags(&self) -> u32 {
@@ -391,48 +449,56 @@ impl ObjectFields {
     /// outside instances, where the server releases the spirit after 6 minutes; the client arms
     /// its own `now + 360000` ms, and with the bit clear `GetReleaseTimeRemaining()` is -1.
     pub fn player_release_timer_running(&self) -> bool {
-        self.get_u32(self.table.player_field_bytes).unwrap_or(0) & 0x08 != 0
+        self.get_byte(self.table.shape.player_flags_byte)
+            .unwrap_or(0)
+            & 0x08
+            != 0
     }
     /// `PLAYER_FIELD_BYTES` byte 1 (private): combo points, 0-5, read at `[player+0xe68]+0x1029`.
     /// vmangos also sets one when a warrior's target dodges (the 4 s Overpower window): the usable
     /// check reads it for any class, `GetComboPoints` (`0x51a190`) only for rogues and druids.
+    /// `None` on 2.4.3, where combo points are not a descriptor field (`SMSG_UPDATE_COMBO_POINTS`).
     pub fn player_combo_points(&self) -> Option<u8> {
-        self.get_u32(self.table.player_field_bytes)
-            .map(|b| ((b >> 8) & 0xff) as u8)
+        self.get_byte(self.table.shape.combo_points)
     }
     /// `PLAYER_FIELD_COMBO_TARGET` (field 714, guid, private): the unit the combo points sit on;
-    /// `GetComboPoints` shows 0 unless it is the current target (`0xb4e2d8`).
+    /// `GetComboPoints` shows 0 unless it is the current target (`0xb4e2d8`). 0 where the build
+    /// has no such field (2.4.3) or the object did not carry it; see
+    /// [`Self::player_combo_target_carried`].
     pub fn player_combo_target(&self) -> u64 {
+        self.player_combo_target_carried().unwrap_or(0)
+    }
+    /// [`Self::player_combo_target`] keeping absence: `None` for a build without the field and for
+    /// an object that did not carry it.
+    pub fn player_combo_target_carried(&self) -> Option<u64> {
         self.get_guid(self.table.player_field_combo_target)
-            .unwrap_or(0)
     }
     /// `PLAYER_FIELD_BYTES` byte 2 (private, field 1222): the four extra action bars' toggles,
     /// bits `0x01..0x08` (`Player.h:360-363`), read by `GetActionBarToggles` (`0x4e7660`) at
     /// `[[player+0xe68]+0x102a]`. The client never writes it and no event fires when it moves.
     /// vmangos's `// 0x4C0` beside the field is stale; `UNIT_END + 0x40A` is right.
     pub fn player_action_bar_toggles(&self) -> Option<u8> {
-        self.get_u32(self.table.player_field_bytes)
-            .map(|b| ((b >> 16) & 0xff) as u8)
+        self.get_byte(self.table.shape.action_bar_toggles)
     }
     /// `PLAYER_FIELD_BYTES` byte 3 (private): the highest honor rank held, 0 never ranked, which
     /// `RequiredHonorRank` checks (`0x5ea930`); only ever raised (`HonorMgr.cpp:894-895`), so it
-    /// outlives a demotion, unlike [`Self::player_pvp_rank`].
+    /// outlives a demotion, unlike [`Self::player_pvp_rank`]. 2.4.3 keeps the same byte as the
+    /// lifetime max PvP rank.
     pub fn player_honor_rank(&self) -> Option<u8> {
-        self.get_u32(self.table.player_field_bytes)
-            .map(|b| ((b >> 24) & 0xff) as u8)
+        self.get_byte(self.table.shape.honor_rank)
     }
     /// `PLAYER_BYTES_3` byte 3 (public, `UpdateFields_1_12_1.h:125`): the current internal rank
     /// (`HonorMgr.cpp:900`), 0 unranked, 1-4 negative, 5 up positive, indexing `PVP_RANK_*`;
-    /// the drawn rank is `rank > 4 ? rank - 4 : -rank` (`HonorMgr.cpp:991`).
+    /// the drawn rank is `rank > 4 ? rank - 4 : -rank` (`HonorMgr.cpp:991`). `None` on 2.4.3,
+    /// where that byte is the arena faction.
     pub fn player_pvp_rank(&self) -> Option<u8> {
-        self.get_u32(self.table.player_bytes_3)
-            .map(|b| ((b >> 24) & 0xff) as u8)
+        self.get_byte(self.table.shape.pvp_rank)
     }
     /// `PLAYER_BYTES_3` byte 2 (public): the city-protector title, a race id (`Player.h:354`);
-    /// `UnitPVPName` (`0x609370`) appends `PVP_MEDAL<n>` when nonzero. vmangos never writes it.
+    /// `UnitPVPName` (`0x609370`) appends `PVP_MEDAL<n>` when nonzero. vmangos never writes it;
+    /// `None` on 2.4.3, where the byte is unused.
     pub fn player_pvp_medal(&self) -> Option<u8> {
-        self.get_u32(self.table.player_bytes_3)
-            .map(|b| ((b >> 16) & 0xff) as u8)
+        self.get_byte(self.table.shape.pvp_medal)
     }
     /// `PLAYER_FIELD_SESSION_KILLS` (private): today's honorable and dishonorable kills, both
     /// halves written (`HonorMgr.cpp:913-914`); "session" means today, `GetPVPSessionStats()`.
@@ -484,10 +550,10 @@ impl ObjectFields {
         self.get_u32(self.table.player_field_lifetime_dishonorable_kills)
     }
     /// `PLAYER_FIELD_BYTES2` byte 0 (private): progress through the current rank, 0-255
-    /// (`HonorMgr.cpp:905-909`); a negative rank's `-255` scale wraps in the `uint8` cast.
+    /// (`HonorMgr.cpp:905-909`); a negative rank's `-255` scale wraps in the `uint8` cast. `None`
+    /// on 2.4.3, which has no rank bar.
     pub fn player_honor_rank_bar(&self) -> Option<u8> {
-        self.get_u32(self.table.player_field_bytes2)
-            .map(|b| (b & 0xff) as u8)
+        self.get_byte(self.table.shape.honor_rank_bar)
     }
     /// `UNIT_FIELD_BYTES_0` byte 0: race.
     pub fn unit_race(&self) -> Option<u8> {

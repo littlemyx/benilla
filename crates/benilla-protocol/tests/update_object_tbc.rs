@@ -292,8 +292,11 @@ fn an_own_player_create_reads_through_the_typed_accessors() {
     assert_eq!(mask.player_skin(), Some(3));
     assert_eq!(mask.player_money(), Some(12345));
     assert_eq!(mask.player_xp(), Some(0));
-    // Members the table marks absent read None, whatever the store holds.
-    assert_eq!(mask.player_quest_log(0), None);
+    // The groups 2.4.3 lays out differently read through the shape: 25 empty quest-log slots and
+    // no aura on a fresh create; the combo points are not a descriptor field.
+    assert_eq!(mask.player_quest_log(0).map(|q| q.quest_id), Some(0));
+    assert_eq!(mask.player_quest_log(24).map(|q| q.quest_id), Some(0));
+    assert_eq!(mask.player_quest_log(25), None);
     assert_eq!(mask.unit_aura(0), None);
     assert_eq!(mask.player_combo_points(), None);
     assert_eq!(movement.speeds.unwrap()[1], 7.0);

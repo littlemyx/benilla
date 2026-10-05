@@ -10,6 +10,10 @@
 //! accessors (and which of them found their member absent for the build), the objects and update
 //! blocks seen and every opcode read as `Other`, then requests a logout and waits for it. It sends
 //! nothing but the login and the logout request: no movement, chat, combat or interaction.
+//! It also prints the groups 2.4.3 lays out differently (inventory and visible items with their
+//! enchantments, the item objects, skills, quest log, explored zones, bytes fields, and the auras
+//! and virtual items of every unit in range) as `RAW` lines that a script can check against
+//! the DBCs, and the cross-checks that need no outside fact (the counts after `CHECKS`).
 //!
 //! `WOW_HOST` (default `localhost`, an optional `:port` for realmd), `WOW_USER` and `WOW_PASS` name
 //! the server and account; the password is never printed. Refuses to run without
@@ -20,7 +24,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use benilla_build::ClientBuild;
-use benilla_protocol::messages::{self, Character, FieldTable, Object, ObjectFields, ServerPacket};
+use benilla_protocol::messages::{
+    self, Character, FieldTable, Object, ObjectFields, ObjectType, ServerPacket,
+};
 use benilla_protocol::wire::Vector3d;
 use benilla_protocol::{logon_as, CharCreateReq, CharRecord, WorldSession};
 
@@ -157,6 +163,13 @@ struct OwnPlayer {
     flight: Option<[f32; 2]>,
 }
 
+/// One create the run saw: what it is and its field snapshot.
+struct Seen {
+    guid: u64,
+    ty: ObjectType,
+    fields: ObjectFields,
+}
+
 /// Prints each own-player value and keeps which readers had nothing to say, and why.
 #[derive(Default)]
 struct Shown {
@@ -250,8 +263,16 @@ fn print_own(own: &OwnPlayer, character: &Character, verify: Option<(u32, Vector
     );
     shown.plain("combat reach", t.unit_combatreach, f.unit_combat_reach());
     shown.plain("npc flags", t.unit_npc_flags, f.unit_npc_flags());
-    shown.plain("stand state", t.unit_bytes_1, f.unit_stand_state());
-    shown.plain("shapeshift form", t.unit_bytes_1, f.unit_shapeshift_form());
+    shown.plain(
+        "stand state",
+        t.shape.stand_state.field,
+        f.unit_stand_state(),
+    );
+    shown.plain(
+        "shapeshift form",
+        t.shape.shapeshift_form.field,
+        f.unit_shapeshift_form(),
+    );
     shown.value("sheath state", t.unit_bytes_2, f.unit_sheath_state());
     shown.value("strength", t.unit_stat0, f.unit_stat(0));
     shown.value("armor", t.unit_resistances, f.unit_resistance(0));
@@ -300,7 +321,7 @@ fn print_own(own: &OwnPlayer, character: &Character, verify: Option<(u32, Vector
     );
     shown.value(
         "combo points",
-        t.player_field_bytes,
+        t.shape.combo_points.field,
         f.player_combo_points(),
     );
     shown.value(
@@ -387,6 +408,7 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
     let mut other: BTreeMap<u16, u32> = BTreeMap::new();
     let mut typed: BTreeMap<String, u32> = BTreeMap::new();
     let mut parse_errors: Vec<String> = Vec::new();
+    let mut seen: Vec<Seen> = Vec::new();
     let mut first_own_at = None;
     loop {
         if own_at.is_some_and(|t| t.elapsed() >= Duration::from_secs(5)) {
@@ -441,6 +463,11 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
                                 *move_flags.entry(format!("{:#x}", m.flags)).or_default() += 1;
                             }
                             splines += u32::from(movement.spline.is_some());
+                            seen.push(Seen {
+                                guid,
+                                ty: object_type,
+                                fields: mask.clone(),
+                            });
                             if guid == character.guid && own.is_none() {
                                 own = Some(OwnPlayer {
                                     fields: mask,
@@ -480,6 +507,7 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
                 first_own_at.map_or(0.0, |d| d.as_secs_f64())
             );
             print_own(own, &character, verify);
+            report_groups(own, character.guid, &seen);
         }
         None => println!("the own player's create never arrived"),
     }
@@ -560,4 +588,239 @@ fn tbc_opcode_name(opcode: u16) -> Option<&'static str> {
         0x41D => "SMSG_SEND_UNLEARN_SPELLS",
         _ => return None,
     })
+}
+
+/// The values `report_groups` cross-checks internally, counted over the whole run.
+#[derive(Default)]
+struct Checks {
+    visible_entries: u32,
+    visible_entries_matching_items: u32,
+    equipped_items: u32,
+    items_owned_by_player: u32,
+    items_contained_by_player: u32,
+    durability_equals_max: u32,
+    enchanted_items: u32,
+    units: u32,
+    units_with_auras: u32,
+    auras: u32,
+    aura_flag_anomalies: u32,
+    units_with_virtual_items: u32,
+    virtual_items: u32,
+}
+
+fn hex_guid(g: u64) -> String {
+    format!("{g:#x}")
+}
+
+/// Prints the groups 2.4.3 lays out differently, through the typed accessors only, and the
+/// internal cross-checks: `RAW` lines are for a script to check against the DBCs.
+fn report_groups(own: &OwnPlayer, player_guid: u64, seen: &[Seen]) {
+    let f = &own.fields;
+    let t = f.table();
+    let mut c = Checks::default();
+    println!("groups report (build shape: aura slots {}, quest slots {}, visible stride {}, enchant slots {}, bank {}+{}, explored words {}):",
+        f.unit_aura_slot_count(), f.player_quest_log_slot_count(), t.shape.visible_stride,
+        f.item_enchant_slot_count(), f.player_bank_slot_count(), f.player_bank_bag_slot_count(),
+        f.player_explored_zone_count());
+
+    // The item objects by guid.
+    let items: BTreeMap<u64, &ObjectFields> = seen
+        .iter()
+        .filter(|s| matches!(s.ty, ObjectType::Item | ObjectType::Container))
+        .map(|s| (s.guid, &s.fields))
+        .collect();
+    println!("item objects created: {}", items.len());
+    for (&guid, it) in &items {
+        let enchants: Vec<(u8, i32)> = (0..it.item_enchant_slot_count())
+            .filter_map(|slot| it.item_enchant(slot).map(|id| (slot, id)))
+            .collect();
+        println!(
+            "RAW item guid {} entry {:?} stack {:?} durability {:?}/{:?} owner {:?} contained {:?} enchants {:?} container slots {:?}",
+            hex_guid(guid),
+            it.object_entry(),
+            it.item_stack_count(),
+            it.item_durability(),
+            it.item_max_durability(),
+            it.item_owner().map(hex_guid),
+            it.item_contained().map(hex_guid),
+            enchants,
+            it.container_num_slots(),
+        );
+        c.items_owned_by_player += u32::from(it.item_owner() == Some(player_guid));
+        c.items_contained_by_player += u32::from(it.item_contained() == Some(player_guid));
+        c.durability_equals_max += u32::from(it.item_durability() == it.item_max_durability());
+        c.enchanted_items += u32::from(!enchants.is_empty());
+    }
+
+    // Equipment and bag slots, with the visible item of each equipped slot.
+    for i in 0..23u8 {
+        let Some(guid) = f.player_inv_slot(i).filter(|&g| g != 0) else {
+            continue;
+        };
+        let item_entry = items.get(&guid).and_then(|it| it.object_entry());
+        let visible = (i < 19).then(|| f.player_visible_item_entry(i)).flatten();
+        let venchants: Vec<(u8, u32)> = (0..f.player_visible_item_enchant_slot_count())
+            .filter_map(|j| f.player_visible_item_enchant(i, j).map(|e| (j, e)))
+            .collect();
+        println!(
+            "RAW equip slot {i} guid {} item entry {:?} visible entry {:?} visible enchants {:?} properties {}",
+            hex_guid(guid), item_entry, visible, venchants, f.player_visible_item_properties(i)
+        );
+        if i < 19 {
+            c.equipped_items += 1;
+            c.visible_entries += u32::from(visible.is_some());
+            c.visible_entries_matching_items +=
+                u32::from(visible.is_some() && visible == item_entry);
+        }
+    }
+    let visible_without_item: Vec<u8> = (0..19u8)
+        .filter(|&i| {
+            f.player_visible_item_entry(i).is_some()
+                && f.player_inv_slot(i).filter(|&g| g != 0).is_none()
+        })
+        .collect();
+    println!("visible items with no item in the slot: {visible_without_item:?}");
+    for i in 0..16u8 {
+        if let Some(guid) = f.player_pack_slot(i).filter(|&g| g != 0) {
+            println!(
+                "RAW pack slot {i} guid {} item entry {:?} stack {:?}",
+                hex_guid(guid),
+                items.get(&guid).and_then(|it| it.object_entry()),
+                items.get(&guid).and_then(|it| it.item_stack_count())
+            );
+        }
+    }
+    let bank: Vec<u8> = (0..f.player_bank_slot_count())
+        .filter(|&i| f.player_bank_slot(i).is_some_and(|g| g != 0))
+        .collect();
+    let bank_bags: Vec<u8> = (0..f.player_bank_bag_slot_count())
+        .filter(|&i| f.player_bank_bag_slot(i).is_some_and(|g| g != 0))
+        .collect();
+    println!(
+        "bank: {} slots read, occupied {bank:?}; bank bags {} slots, occupied {bank_bags:?}; bank bag slots purchased {:?}",
+        f.player_bank_slot_count(),
+        f.player_bank_bag_slot_count(),
+        f.player_bank_bag_slots_purchased()
+    );
+
+    for slot in 0..benilla_protocol::messages::PLAYER_SKILL_SLOTS {
+        if let Some(sk) = f.player_skill(slot).filter(|k| k.skill_id != 0) {
+            println!(
+                "RAW skill slot {slot} id {} value {} max {} step {} temp {} perm {}",
+                sk.skill_id, sk.value, sk.max, sk.step, sk.temp_bonus, sk.perm_bonus
+            );
+        }
+    }
+
+    let log: Vec<_> = (0..f.player_quest_log_slot_count())
+        .filter_map(|s| f.player_quest_log(s).map(|q| (s, q)))
+        .collect();
+    let occupied: Vec<_> = log.iter().filter(|(_, q)| q.quest_id != 0).collect();
+    println!(
+        "quest log: {} slots read, {} occupied {occupied:?}",
+        log.len(),
+        occupied.len()
+    );
+
+    for i in 0..f.player_explored_zone_count() {
+        let w = f.player_explored_zone_slot(i);
+        if w != 0 {
+            println!("RAW explored word {i} = {w:#010x}");
+        }
+    }
+
+    println!(
+        "bytes: stand {} sheath {:?} form {} drunk {:?} rest {:?} skin/face/hair/color/facial {:?}/{:?}/{:?}/{:?}/{:?}",
+        f.unit_stand_state(), f.unit_sheath_state(), f.unit_shapeshift_form(), f.player_drunk_byte(),
+        f.player_rest_state(), f.player_skin(), f.player_face(), f.player_hair_style(),
+        f.player_hair_color(), f.player_facial_hair()
+    );
+    println!(
+        "honor and PvP: honor rank {:?} pvp rank {:?} medal {:?} rank bar {:?} yesterday contribution {:?} lifetime honorable {:?} session kills {:?}; combo points {:?} combo target {:?} track stealthed {} release timer {} action bars {:?}",
+        f.player_honor_rank(), f.player_pvp_rank(), f.player_pvp_medal(), f.player_honor_rank_bar(),
+        f.player_yesterday_contribution(), f.player_lifetime_honorable_kills(), f.player_session_kills(),
+        f.player_combo_points(), f.player_combo_target_carried(), f.player_track_stealthed(),
+        f.player_release_timer_running(), f.player_action_bar_toggles()
+    );
+    println!(
+        "pet training points carried {:?}",
+        f.unit_training_points_carried()
+    );
+
+    // Auras and virtual items of every unit and player, the own player included.
+    let mut limits: BTreeMap<Option<u8>, u32> = BTreeMap::new();
+    let mut stand: BTreeMap<u8, u32> = BTreeMap::new();
+    let mut forms: BTreeMap<u8, u32> = BTreeMap::new();
+    let mut with_npc_flags = 0u32;
+    let mut examples: Vec<String> = Vec::new();
+    for s in seen
+        .iter()
+        .filter(|s| matches!(s.ty, ObjectType::Unit | ObjectType::Player))
+    {
+        let u = &s.fields;
+        c.units += 1;
+        *limits.entry(u.unit_aura_positive_limit()).or_default() += 1;
+        *stand.entry(u.unit_stand_state()).or_default() += 1;
+        *forms.entry(u.unit_shapeshift_form()).or_default() += 1;
+        with_npc_flags += u32::from(u.unit_npc_flags() != 0);
+        let auras: Vec<_> = u.unit_auras().collect();
+        if !auras.is_empty() {
+            c.units_with_auras += 1;
+        }
+        for a in &auras {
+            c.auras += 1;
+            let exactly_one_cancel_bit =
+                (a.flags & (t.shape.aura_cancelable | (t.shape.aura_cancelable << 1))).count_ones()
+                    == 1;
+            if t.shape.aura_flag_bits == 8 && !exactly_one_cancel_bit {
+                c.aura_flag_anomalies += 1;
+            }
+            println!(
+                "RAW aura unit {} ({:?}) slot {} spell {} flags {:#04x} level {} stacks {} helpful {} cancelable {}",
+                hex_guid(s.guid), s.ty, a.slot, a.spell_id, a.flags, a.level, a.stacks,
+                u.unit_aura_is_helpful(a), u.unit_aura_is_cancelable(a)
+            );
+            if examples.len() < 3 && s.guid != player_guid {
+                examples.push(format!(
+                    "unit {} slot {} spell {} level {} stacks {}",
+                    hex_guid(s.guid),
+                    a.slot,
+                    a.spell_id,
+                    a.level,
+                    a.stacks
+                ));
+            }
+        }
+        let mut any_virtual = false;
+        for slot in 0..3u8 {
+            let display = u.unit_virtual_item_display(slot).filter(|&d| d != 0);
+            let info = u.unit_virtual_item_info(slot);
+            if display.is_some() {
+                any_virtual = true;
+                c.virtual_items += 1;
+                println!(
+                    "RAW vitem unit {} slot {slot} display {:?} info {:?} sheath {:?}",
+                    hex_guid(s.guid),
+                    display,
+                    info,
+                    u.unit_virtual_item_sheath(slot)
+                );
+            }
+        }
+        c.units_with_virtual_items += u32::from(any_virtual);
+    }
+    println!(
+        "units and players created: {}, auras live: {}",
+        c.units, c.auras
+    );
+    println!("debuff limit by unit count: {limits:?}");
+    println!("stand state by unit count: {stand:?}; shapeshift form by unit count: {forms:?}; units with npc flags: {with_npc_flags}");
+    println!("aura examples (other units): {examples:?}");
+    println!(
+        "CHECKS equipped items {} | visible entries {} | visible entries equal to the item object's entry {} | items owned by the player {} of {} | items contained by the player {} | durability equals max {} of {} | enchanted items {} | units with auras {} of {} | aura flag anomalies {} | units with virtual items {} ({} items)",
+        c.equipped_items, c.visible_entries, c.visible_entries_matching_items,
+        c.items_owned_by_player, items.len(), c.items_contained_by_player,
+        c.durability_equals_max, items.len(), c.enchanted_items,
+        c.units_with_auras, c.units, c.aura_flag_anomalies, c.units_with_virtual_items, c.virtual_items
+    );
 }

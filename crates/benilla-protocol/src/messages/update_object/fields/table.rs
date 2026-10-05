@@ -5,6 +5,7 @@
 use benilla_build::ClientBuild;
 
 use super::super::movement::ObjectType;
+use super::shape::{FieldShape, SHAPE_5875, SHAPE_8606};
 
 const ABSENT: u16 = FieldTable::ABSENT;
 
@@ -14,6 +15,8 @@ macro_rules! field_table {
         #[derive(Debug, PartialEq, Eq)]
         pub struct FieldTable {
             $($(#[$doc])* pub $name: u16,)*
+            /// Counts, strides and packing of the groups the builds lay out differently.
+            pub shape: FieldShape,
         }
 
         impl FieldTable {
@@ -305,6 +308,10 @@ field_table! {
     item_spell_charges,
     /// `ITEM_FIELD_CREATOR`.
     item_creator,
+    /// `ITEM_FIELD_OWNER` (OBJECT_END + 0, a guid): the player holding the item.
+    item_owner,
+    /// `ITEM_FIELD_CONTAINED` (OBJECT_END + 2, a guid): the player or bag the item sits in.
+    item_contained,
     /// `ITEM_FIELD_FLAGS`.
     item_flags,
     /// `ITEM_FIELD_RANDOM_PROPERTIES_ID`.
@@ -500,6 +507,8 @@ pub const FIELDS_5875: FieldTable = FieldTable {
     object_entry: 3,
     item_spell_charges: 16,
     item_creator: 10,
+    item_owner: 6,
+    item_contained: 8,
     item_flags: 21,
     item_random_properties_id: 44,
     item_text_id: 45,
@@ -526,12 +535,13 @@ pub const FIELDS_5875: FieldTable = FieldTable {
     gameobject_end: 26,
     dynamicobject_end: 16,
     corpse_end: 38,
+    shape: SHAPE_5875,
 };
 
 /// 2.4.3 (8606), from cmangos-tbc's `UpdateFields.h` for that build (one source; each packing and
-/// length named below was read in its code). A member is filled only when its accessors read the
-/// right answer on 2.4.3 as written: same meaning, packing, array length and stride. Every other
-/// member is [`FieldTable::ABSENT`], with the difference named above it.
+/// length was read in its code). Structure that differs from 1.12.1 (counts, strides, packing) is
+/// in the `shape`. A member is [`FieldTable::ABSENT`] only where 2.4.3 has no value of the same
+/// meaning; the reason is named above it.
 pub const FIELDS_8606: FieldTable = FieldTable {
     object_type: 2,
     object_scale_x: 4,
@@ -566,19 +576,14 @@ pub const FIELDS_8606: FieldTable = FieldTable {
     unit_level: 34,
     unit_factiontemplate: 35,
     unit_bytes_0: 36,
-    // byte 2 is the vis flags and byte 3 the misc flags, where the accessors read stealth, ghost
-    // and untrackable from byte 3 and the shapeshift form from byte 2 (the 2.4.3 form is BYTES_2
-    // byte 3)
-    unit_bytes_1: ABSENT,
+    // stand state, loyalty, vis flags (byte 2) and misc flags; the form moved to BYTES_2 byte 3
+    unit_bytes_1: 159,
     unit_flags: 46,
-    // 56 slots against the 48 the accessors assume
-    unit_aura: ABSENT,
-    // byte-packed over 14 dwords against 1.12.1's 8-slot nibbles over 6
-    unit_auraflags: ABSENT,
-    // 56 byte-packed slots over 14 dwords against 48 over 12
-    unit_auralevels: ABSENT,
-    // 56 byte-packed slots over 14 dwords against 48 over 12
-    unit_auraapplications: ABSENT,
+    // 56 slots; the flags, levels and applications are a byte per slot over 14 dwords each
+    unit_aura: 48,
+    unit_auraflags: 104,
+    unit_auralevels: 118,
+    unit_auraapplications: 132,
     unit_aurastate: 146,
     unit_boundingradius: 150,
     unit_combatreach: 151,
@@ -591,8 +596,8 @@ pub const FIELDS_8606: FieldTable = FieldTable {
     unit_pet_name_timestamp: 161,
     unit_petexperience: 162,
     unit_petnextlevelexp: 163,
-    // the packing is not checked: the server stores a signed display value (`GetDispTP`) in a
-    // TWO_SHORT field
+    // `UNIT_TRAINING_POINTS` (170) is one whole signed display value (`GetDispTP`), not the
+    // (total, spent) halves the accessor reads: no counterpart
     unit_training_points: ABSENT,
     unit_dynamic_flags: 164,
     unit_channel_spell: 165,
@@ -600,10 +605,8 @@ pub const FIELDS_8606: FieldTable = FieldTable {
     unit_npc_flags: 168,
     unit_npc_emotestate: 169,
     unit_virtual_item_slot_display: 37,
-    // byte layout differs: class, subclass, unknown, material in the first dword, then inventory
-    // type and sheath in the second (1.12.1: class, subclass, material, inventory type, then
-    // sheath)
-    unit_virtual_item_info: ABSENT,
+    // the byte order inside the two dwords is in the shape
+    unit_virtual_item_info: 40,
     unit_bytes_2: 209,
     unit_baseattacktime: 147,
     unit_rangedattacktime: 149,
@@ -623,24 +626,23 @@ pub const FIELDS_8606: FieldTable = FieldTable {
     unit_maxrangeddamage: 217,
     player_bytes: 239,
     player_bytes_2: 240,
-    // byte 3 is the arena faction and byte 2 is unused, where the accessors read the honor rank
-    // and the city-protector medal
-    player_bytes_3: ABSENT,
-    // 25 slots of 4 fields against 20 of 3
-    player_quest_log_1_1: ABSENT,
+    // byte 3 is the arena faction and byte 2 unused: no rank or medal byte (the shape)
+    player_bytes_3: 241,
+    // 25 slots of 4 fields
+    player_quest_log_1_1: 244,
     item_stack_count: 14,
-    // 11 slots of 3 against 7
-    item_enchantment: ABSENT,
+    // 11 slots of 3
+    item_enchantment: 22,
     container_num_slots: 60,
     container_slot_1: 62,
-    // 16 fields per slot against 12
-    player_visible_item_1_creator: ABSENT,
+    // 16 fields per slot
+    player_visible_item_1_creator: 344,
     player_inv_slot_head: 650,
     player_pack_slot_1: 696,
-    // 28 slots against 24
-    player_bank_slot_1: ABSENT,
-    // 7 slots against 6
-    player_bank_bag_slot_1: ABSENT,
+    // 28 slots
+    player_bank_slot_1: 728,
+    // 7 slots
+    player_bank_bag_slot_1: 784,
     player_vendorbuyback_slot_1: 798,
     player_keyring_slot_1: 822,
     player_farsight: 922,
@@ -655,8 +657,8 @@ pub const FIELDS_8606: FieldTable = FieldTable {
     player_dodge_percentage: 1317,
     player_parry_percentage: 1318,
     player_crit_percentage: 1321,
-    // 128 slots against 64
-    player_explored_zones_1: ABSENT,
+    // 128 words
+    player_explored_zones_1: 1332,
     player_posstat0: 176,
     player_negstat0: 181,
     player_resistancebuffmodspositive: 193,
@@ -678,36 +680,37 @@ pub const FIELDS_8606: FieldTable = FieldTable {
     player_guildrank: 238,
     // no such field: combo points and their target are sent by `SMSG_UPDATE_COMBO_POINTS`
     player_field_combo_target: ABSENT,
-    // byte 1 is the refer-a-friend grantable level and byte 3 the lifetime top PvP rank, where the
-    // accessors read combo points from byte 1
-    player_field_bytes: ABSENT,
-    // honor block replaced: one `PLAYER_FIELD_KILLS` pair, today and yesterday contribution, honor
-    // and arena currency, no weekly or standing fields
+    // byte 1 is the refer-a-friend level (the combo points are gone, the shape says so)
+    player_field_bytes: 1486,
+    // The honor block is replaced: `PLAYER_FIELD_KILLS` is today's and yesterday's honorable kills
+    // (no dishonorable half) and there is no weekly or standing field, so the pair and weekly
+    // members have no counterpart; the three below have the same meaning.
     player_field_session_kills: ABSENT,
-    // honor block replaced (see session kills)
+    // no counterpart (see session kills)
     player_field_yesterday_kills: ABSENT,
-    // honor block replaced (see session kills)
+    // no counterpart (no weekly block)
     player_field_last_week_kills: ABSENT,
-    // honor block replaced (see session kills)
+    // no counterpart (no weekly block)
     player_field_this_week_kills: ABSENT,
-    // honor block replaced (see session kills)
+    // no counterpart: 2.4.3 has today's contribution, not this week's
     player_field_this_week_contribution: ABSENT,
-    // honor block replaced (see session kills)
-    player_field_lifetime_honorable_kills: ABSENT,
-    // honor block replaced: no lifetime dishonorable counter
+    // `PLAYER_FIELD_LIFETIME_HONORABLE_KILLS`
+    player_field_lifetime_honorable_kills: 1517,
+    // no counterpart: no lifetime dishonorable counter
     player_field_lifetime_dishonorable_kills: ABSENT,
-    // honor block replaced (see session kills)
-    player_field_yesterday_contribution: ABSENT,
-    // honor block replaced: no last-week contribution
+    // `PLAYER_FIELD_YESTERDAY_CONTRIBUTION`
+    player_field_yesterday_contribution: 1516,
+    // no counterpart: no last-week contribution
     player_field_last_week_contribution: ABSENT,
-    // honor block replaced: no weekly standing
+    // no counterpart: no weekly standing
     player_field_last_week_rank: ABSENT,
-    // byte 0 is no longer the honor rank bar; the 2.4.3 byte flags (stealth, invisibility glow)
-    // sit in byte 1
-    player_field_bytes2: ABSENT,
+    // byte 0 is no longer the honor rank bar (the shape); byte 1 holds the stealth flags
+    player_field_bytes2: 1518,
     object_entry: 3,
     item_spell_charges: 16,
     item_creator: 10,
+    item_owner: 6,
+    item_contained: 8,
     item_flags: 21,
     item_random_properties_id: 56,
     item_text_id: 57,
@@ -734,6 +737,7 @@ pub const FIELDS_8606: FieldTable = FieldTable {
     gameobject_end: 26,
     dynamicobject_end: 16,
     corpse_end: 40,
+    shape: SHAPE_8606,
 };
 
 /// The table of `build`; a build without one is a programming error, not a runtime condition.
@@ -1020,27 +1024,41 @@ mod tests {
         );
     }
 
-    // The members left absent are the structural differences, and 1.12.1 has none.
+    // The members left absent are the ones 2.4.3 has no value of the same meaning for, and 1.12.1
+    // has none.
     #[test]
-    fn the_absent_members_of_8606_are_the_checked_structural_differences() {
+    fn the_absent_members_of_8606_have_no_counterpart() {
         let absent: Vec<&str> = FIELDS_8606
             .entries()
             .into_iter()
             .filter(|&(_, i)| i == FieldTable::ABSENT)
             .map(|(n, _)| n)
             .collect();
-        assert_eq!(absent.len(), 27, "{absent:?}");
+        assert_eq!(absent.len(), 10, "{absent:?}");
+        for name in [
+            "unit_training_points",
+            "player_field_combo_target",
+            "player_field_session_kills",
+            "player_field_yesterday_kills",
+            "player_field_last_week_kills",
+            "player_field_this_week_kills",
+            "player_field_this_week_contribution",
+            "player_field_lifetime_dishonorable_kills",
+            "player_field_last_week_contribution",
+            "player_field_last_week_rank",
+        ] {
+            assert!(absent.contains(&name), "{name} should be absent");
+        }
+        // The groups that only differ in structure are filled, their shape in the table.
         for name in [
             "unit_aura",
-            "unit_auraflags",
             "unit_bytes_1",
             "player_quest_log_1_1",
             "player_visible_item_1_creator",
             "item_enchantment",
             "player_explored_zones_1",
-            "player_field_combo_target",
         ] {
-            assert!(absent.contains(&name), "{name} should be absent");
+            assert!(!absent.contains(&name), "{name} should be filled");
         }
         assert!(FIELDS_5875
             .entries()
@@ -1062,11 +1080,31 @@ mod tests {
         assert_eq!(at(0, 0), 0);
     }
 
+    // The 2.4.3 table with the structured groups taken out, so the ABSENT guard of each is exercised.
+    static NO_STRUCTURE: FieldTable = FieldTable {
+        unit_aura: ABSENT,
+        unit_auraflags: ABSENT,
+        unit_auralevels: ABSENT,
+        unit_auraapplications: ABSENT,
+        unit_bytes_1: ABSENT,
+        unit_virtual_item_info: ABSENT,
+        player_quest_log_1_1: ABSENT,
+        item_enchantment: ABSENT,
+        player_visible_item_1_creator: ABSENT,
+        player_bank_slot_1: ABSENT,
+        player_bank_bag_slot_1: ABSENT,
+        player_explored_zones_1: ABSENT,
+        player_field_bytes: ABSENT,
+        player_bytes_3: ABSENT,
+        player_field_bytes2: ABSENT,
+        ..FIELDS_8606
+    };
+
     #[test]
     fn an_absent_member_reads_none_whatever_the_store_holds() {
         // Every index set, so only the ABSENT guard can make a read miss.
         let all: Vec<(u16, u32)> = (0..1592).map(|i| (i, 1)).collect();
-        let f = ObjectFields::from_pairs_in(&FIELDS_8606, &all).into_created(ObjectType::Player);
+        let f = ObjectFields::from_pairs_in(&NO_STRUCTURE, &all).into_created(ObjectType::Player);
         assert_eq!(f.player_quest_log(0), None);
         assert_eq!(f.unit_aura(0), None);
         assert_eq!(f.player_visible_item_entry(0), None);
