@@ -127,9 +127,32 @@ fn create(lua: &Lua, which: Arrow, parent: Value) -> mlua::Result<()> {
             return Ok(()); // the singleton exists: the parent is not even read (`0x4a7a80`)
         }
     }
+    // 2.4.3 names the singleton `PlayerArrowFrame` and also makes `PlayerArrowEffectFrame` beside
+    // it (the exe holds both names; `WorldMapFrame.lua` reads the second as made in code). Its
+    // model file is not known, so the effect frame holds none.
+    let named = matches!(which, Arrow::World)
+        && super::ScriptDialect::of(lua) == super::ScriptDialect::Lua51;
+    if named {
+        let name = |n: &str| lua.create_string(n).map(Value::String);
+        create_frame(
+            lua,
+            (
+                "Model".to_string(),
+                Some(name("PlayerArrowEffectFrame")?),
+                Some(Value::Table(t.clone())),
+                None,
+            ),
+        )?;
+        let arrow_name = Some(name("PlayerArrowFrame")?);
+        return finish_create(lua, which, t, arrow_name);
+    }
+    finish_create(lua, which, t, None)
+}
+
+fn finish_create(lua: &Lua, which: Arrow, t: Table, name: Option<Value>) -> mlua::Result<()> {
     let wrapper = create_frame(
         lua,
-        ("Model".to_string(), None, Some(Value::Table(t)), None),
+        ("Model".to_string(), name, Some(Value::Table(t)), None),
     )?;
     let id = decode_id(&wrapper)?;
     let scale = {

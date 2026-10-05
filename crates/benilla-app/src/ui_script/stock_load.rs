@@ -47,9 +47,17 @@ pub(super) fn production_load_observed(
             level: 60,
             class: Some("Warrior".into()),
             class_file: Some("WARRIOR".into()),
+            race: Some("Human".into()),
+            race_file: Some("Human".into()),
             ..Default::default()
         }),
     );
+    // The window's own mode, as the app always publishes one.
+    let mode = benilla_ui::script::ScreenResolution {
+        width: 1024,
+        height: 768,
+    };
+    s.set_screen_resolutions(vec![mode], Some(mode));
     // A reply that hid nothing, so `GetNumAddOns` counts the registry.
     s.note_addon_info_reply(&[]);
     s.register_cvars(crate::cvars::registered_pairs());
@@ -557,18 +565,18 @@ mod tests {
         unattributed: 0,
     };
 
-    const SECURE_MODEL_CALLS_2_4_3: u64 = 114;
+    const SECURE_MODEL_CALLS_2_4_3: u64 = 144;
 
     const BASELINE_2_4_3: Baseline = Baseline {
         rows: 113,
-        clean: 85,
+        clean: 88,
         classes: [
             (0, 0),
             (0, 0),
-            (1, 1),
             (0, 0),
             (0, 0),
-            (4, 4),
+            (0, 0),
+            (2, 2),
             (0, 0),
             (5, 2),
             (14, 7),
@@ -577,6 +585,6 @@ mod tests {
             (76, 76),
             (3, 3),
         ],
-        unattributed: 1,
+        unattributed: 0,
     };
 }

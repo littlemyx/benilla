@@ -220,12 +220,17 @@ fn install_account(lua: &Lua) -> mlua::Result<()> {
             let Value::Table(parent) = parent else {
                 return Err(mlua::Error::runtime("Usage: InitWorldMapPing(parent)"));
             };
+            // The same two checks, in the same order, as `CreateWorldMapArrowFrame`'s.
+            let Ok(id) = decode_id(&parent) else {
+                return Err(mlua::Error::runtime(
+                    "InitWorldMapPing(): Couldn't find 'this' in parent object",
+                ));
+            };
             if frame_handle_of(lua, &parent).is_err() {
                 return Err(mlua::Error::runtime(
                     "InitWorldMapPing(): Wrong object type, expected frame",
                 ));
             }
-            let id = decode_id(&parent)?;
             lua.app_data_mut::<Model>()
                 .expect("model app_data")
                 .world_map_ping_host = Some(id);
@@ -469,12 +474,34 @@ mod tests {
     }
 
     #[test]
+    fn the_world_map_arrow_is_named_and_has_its_effect_frame_only_in_2_4_3() {
+        let code = "P = CreateFrame('Frame', 'ProbeMap') CreateWorldMapArrowFrame(P) \
+                    CreateWorldMapArrowFrame(P) return PlayerArrowFrame ~= nil, PlayerArrowEffectFrame ~= nil";
+        let s = s51();
+        let (arrow, effect): (bool, bool) = s.eval(code).unwrap();
+        assert!(arrow && effect);
+        assert_eq!(
+            s.eval::<String>("return PlayerArrowEffectFrame:GetObjectType()")
+                .unwrap(),
+            "Model"
+        );
+        let old = UiScript::new().unwrap();
+        let (arrow, effect): (bool, bool) = old.eval(code).unwrap();
+        assert!(!arrow && !effect, "1.12.1 builds the one unnamed arrow");
+    }
+
+    #[test]
     fn the_world_map_ping_host_must_be_a_frame() {
         let s = s51();
         s.run("InitWorldMapPing(CreateFrame('Frame'))").unwrap();
         let e = s.run("InitWorldMapPing()").unwrap_err().to_string();
         assert!(e.contains("Usage: InitWorldMapPing(parent)"), "{e}");
         let e = s.run("InitWorldMapPing({})").unwrap_err().to_string();
+        assert!(e.contains("Couldn't find 'this' in parent object"), "{e}");
+        let e = s
+            .run("InitWorldMapPing(CreateFrame('Frame'):CreateTexture())")
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("Wrong object type, expected frame"), "{e}");
     }
 
