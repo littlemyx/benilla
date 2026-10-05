@@ -117,22 +117,19 @@ fn track_first_quat(bytes: &[u8], track: usize) -> Option<[f32; 4]> {
     if nval == 0 {
         return None;
     }
-    Some([
-        bytes.f32_at(ofs)?,
-        bytes.f32_at(ofs + 4)?,
-        bytes.f32_at(ofs + 8)?,
-        bytes.f32_at(ofs + 12)?,
-    ])
+    benilla_m2::M2Layout::of(bytes).read_rotation_key(bytes, ofs)
 }
 
 /// A bone's model-space +Z at the track origin, its first rotation keys composed up the parent
-/// chain. Bone table `count@0x34`/`ofs@0x38`, stride `0x6c`: flags `u32@4` (`0x04` keeps the
-/// root's orientation), parent `i16@8`, rotation `@0x28`. Rotation animation is not applied.
+/// chain. Bone table `count@0x34`/`ofs@0x38`, record size and rotation track from the file's
+/// [`benilla_m2::M2Layout`] (1.12.1: `0x6c`, `@0x28`): flags `u32@4` (`0x04` keeps the root's
+/// orientation), parent `i16@8`. Rotation animation is not applied.
 fn bone_z_axis(bytes: &[u8], bone: i16) -> [f32; 3] {
     let (Some(count), Some(ofs)) = (bytes.u32_at(0x34), bytes.u32_at(0x38)) else {
         return [0.0, 0.0, 1.0];
     };
     let (count, ofs) = (count as usize, ofs as usize);
+    let layout = benilla_m2::M2Layout::of(bytes);
     // Local rotations leaf to root, bounded by the bone count.
     let mut chain: Vec<[f32; 4]> = Vec::new();
     let mut idx = bone;
@@ -140,8 +137,8 @@ fn bone_z_axis(bytes: &[u8], bone: i16) -> [f32; 3] {
         if idx < 0 || idx as usize >= count {
             break;
         }
-        let rec = ofs + idx as usize * 0x6c;
-        if let Some(q) = track_first_quat(bytes, rec + 0x28) {
+        let rec = ofs + idx as usize * layout.bone_size;
+        if let Some(q) = track_first_quat(bytes, rec + layout.bone_rotation) {
             chain.push(q);
         }
         let flags = bytes.u32_at(rec + 4).unwrap_or(0);
@@ -344,6 +341,44 @@ mod tests {
         }
         // No rotation keys anywhere: identity +Z.
         assert_eq!(bone_z_axis(&vec![0u8; 0x400], 0), [0.0, 0.0, 1.0]);
+    }
+
+    /// The same chain in a 2.4.3 (v263) file: 112-byte bone records (a `boneNameCRC` after the
+    /// parent), rotation track at `+0x2c`, 8-byte compressed keys.
+    #[test]
+    fn bone_z_axis_walks_112_byte_bones_with_compressed_keys() {
+        let enc = |x: f32| -> i16 {
+            let s = (x * 32767.0).round() as i32;
+            (if s < 0 { s - 32768 } else { s + 32767 }) as i16
+        };
+        let mut b = vec![0u8; 0x400];
+        let put_u32 =
+            |b: &mut Vec<u8>, at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let put_quat = |b: &mut Vec<u8>, at: usize, q: [f32; 4]| {
+            for (i, c) in q.iter().enumerate() {
+                b[at + 2 * i..at + 2 * i + 2].copy_from_slice(&enc(*c).to_le_bytes());
+            }
+        };
+        put_u32(&mut b, 4, 263);
+        let bones = 0x100;
+        put_u32(&mut b, 0x34, 2);
+        put_u32(&mut b, 0x38, bones as u32);
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        put_u32(&mut b, bones + 8, 0xffff);
+        put_u32(&mut b, bones + 0x2c + 0x14, 1);
+        put_u32(&mut b, bones + 0x2c + 0x18, 0x300);
+        put_quat(&mut b, 0x300, [s, 0.0, 0.0, s]);
+        let r1 = bones + 112;
+        put_u32(&mut b, r1 + 8, 0);
+        put_u32(&mut b, r1 + 0x2c + 0x14, 1);
+        put_u32(&mut b, r1 + 0x2c + 0x18, 0x340);
+        put_quat(&mut b, 0x340, [0.0, 0.0, s, s]);
+        let root = bone_z_axis(&b, 0);
+        assert!(root[0].abs() < 1e-3 && (root[1] + 1.0).abs() < 1e-3 && root[2].abs() < 1e-3);
+        let child = bone_z_axis(&b, 1);
+        for (c, r) in child.iter().zip(root) {
+            assert!((c - r).abs() < 1e-3, "child {child:?} vs root {root:?}");
+        }
     }
 }
 

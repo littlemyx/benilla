@@ -105,7 +105,13 @@ impl RawBoneTrack {
         let ranges = (0..rn)
             .map_while(|i| Some((u32_at(ro + i * 8)?, u32_at(ro + i * 8 + 4)?)))
             .collect();
-        let stride = comps * 4;
+        // A 4-component track is a bone rotation: the file's key form (f32 or compressed int16).
+        let layout = benilla_m2::M2Layout::of(b);
+        let stride = if comps == 4 {
+            layout.rotation_key_size
+        } else {
+            comps * 4
+        };
         let n = tn.min(vn);
         let mut ts = Vec::with_capacity(n);
         let mut vals = Vec::with_capacity(n);
@@ -113,6 +119,15 @@ impl RawBoneTrack {
             let Some(t) = u32_at(to + i * 4) else { break };
             let mut v = [0.0f32; 4];
             let mut ok = true;
+            if comps == 4 {
+                match layout.read_rotation_key(b, vo + i * stride) {
+                    Some(q) => v = q,
+                    None => break,
+                }
+                ts.push(t);
+                vals.push(v);
+                continue;
+            }
             for (c, slot) in v.iter_mut().take(comps).enumerate() {
                 match f32_at(vo + i * stride + c * 4) {
                     Some(f) => *slot = f,
@@ -289,12 +304,17 @@ pub fn bonescan(chain: &mut Chain, prefix: Option<&str>) -> Result<()> {
         };
         let (bn, bo) = (u32_at(0x34), u32_at(0x38));
         let (mut m_step, mut m_empty, mut m_edge) = (0u64, 0u64, 0u64);
+        let layout = benilla_m2::M2Layout::of(&b);
         for bi in 0..bn {
-            let brec = bo + bi * 0x6c;
-            if brec + 0x6c > b.len() {
+            let brec = bo + bi * layout.bone_size;
+            if brec + layout.bone_size > b.len() {
                 break;
             }
-            for (off, comps, ch) in [(0x0c, 3, "trans"), (0x28, 4, "rot"), (0x44, 3, "scale")] {
+            for (off, comps, ch) in [
+                (layout.bone_translation, 3, "trans"),
+                (layout.bone_rotation, 4, "rot"),
+                (layout.bone_scale, 3, "scale"),
+            ] {
                 let Some(tr) = RawBoneTrack::read(&b, brec + off, comps) else {
                     continue;
                 };
@@ -412,11 +432,11 @@ pub fn bonescan(chain: &mut Chain, prefix: Option<&str>) -> Result<()> {
         for a in benilla_formats::parse_m2_animations(&b) {
             for bk in &a.bones {
                 for (off, comps, emitted) in [
-                    (0x0c, 3, bk.translation.len()),
-                    (0x28, 4, bk.rotation.len()),
-                    (0x44, 3, bk.scale.len()),
+                    (layout.bone_translation, 3, bk.translation.len()),
+                    (layout.bone_rotation, 4, bk.rotation.len()),
+                    (layout.bone_scale, 3, bk.scale.len()),
                 ] {
-                    let brec = bo + bk.bone as usize * 0x6c;
+                    let brec = bo + bk.bone as usize * layout.bone_size;
                     let Some(tr) = RawBoneTrack::read(&b, brec + off, comps) else {
                         continue;
                     };

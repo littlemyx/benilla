@@ -5,7 +5,7 @@ use std::io::Cursor;
 
 use anyhow::Result;
 use benilla_bytes::capped;
-use benilla_m2::parse_m2;
+use benilla_m2::{parse_m2, M2Layout};
 
 use super::{le_f32, le_u16, le_u32};
 use crate::BoneSpin;
@@ -49,7 +49,8 @@ impl Skeleton {
     }
 }
 
-/// Parse the bone hierarchy (stride `0x6c`: parent `+0x08`, pivot `+0x60`, as `0x714260` reads).
+/// Parse the bone hierarchy (record size, parent `+0x08` and pivot from [`M2Layout`]; 1.12.1: stride
+/// `0x6c`, pivot `+0x60`, as `0x714260` reads).
 pub fn parse_m2_skeleton(bytes: &[u8]) -> Result<Skeleton> {
     let format =
         parse_m2(&mut Cursor::new(bytes)).map_err(|e| anyhow::anyhow!("parsing M2: {e}"))?;
@@ -226,6 +227,7 @@ pub fn m2_bone_spins(bytes: &[u8]) -> HashMap<u16, BoneSpin> {
     let Some(seq) = anims.iter().find(|a| a.anim_id == 0) else {
         return out;
     };
+    let layout = M2Layout::of(bytes);
     let (bone_count, bone_ofs) = (le_u32(bytes, 0x34) as usize, le_u32(bytes, 0x38) as usize);
     for keys in &seq.bones {
         let idx = keys.bone as usize;
@@ -240,7 +242,7 @@ pub fn m2_bone_spins(bytes: &[u8]) -> HashMap<u16, BoneSpin> {
         // The rotation track's `interp_type`, bounds-checked here: `le_u16` panics past the end.
         let interp = idx < bone_count
             && bone_ofs
-                .checked_add(idx * 0x6c + 0x28)
+                .checked_add(idx * layout.bone_size + layout.bone_rotation)
                 .is_some_and(|t| t + 2 <= bytes.len() && le_u16(bytes, t) != 0);
         out.insert(
             keys.bone,
@@ -362,23 +364,73 @@ impl ModelAnimation {
 
 /// One bone-channel `M2Track` (`0x1c` bytes: interp `+0`, gseq `+2`, ranges `+0x04`, timestamps
 /// `+0x0c`, values `+0x14`), read once per model and sliced per sequence.
-struct ChannelTrack<T> {
+pub struct ChannelTrack<T> {
+    /// The track's raw `interp_type` (`+0`).
+    pub interp: u16,
     /// `interp_type == 0`: hold each key, no interpolation (`0x713ea0`/`0x71af20`).
-    step: bool,
+    pub step: bool,
     /// Global-sequence id, `0xffff` for a sequence-timeline track.
-    gseq: u16,
+    pub gseq: u16,
     /// Key-index windows `(lo, hi)` by file slot, which the key search selects first (`0x713d50`);
     /// empty means the whole list (`[track+4] == 0`).
-    ranges: Vec<(u32, u32)>,
+    pub ranges: Vec<(u32, u32)>,
     /// `(absolute ms, value)`: every sequence's keys on one timeline.
-    keys: Vec<(u32, T)>,
+    pub keys: Vec<(u32, T)>,
 }
 
-type BoneChannels = (
+/// One bone's translation, rotation and scale tracks, as the file holds them.
+pub type BoneChannels = (
     ChannelTrack<[f32; 3]>,
     ChannelTrack<[f32; 4]>,
     ChannelTrack<[f32; 3]>,
 );
+
+/// A bone rotation key reader for `layout`: the 16-byte f32 quaternion (1.12.1) or the 8-byte
+/// compressed one (2.4.3); an unreadable key is the identity (the callers bound-check first).
+fn bone_quat(layout: M2Layout) -> impl Fn(&[u8], usize) -> [f32; 4] + Copy {
+    move |b, o| {
+        layout
+            .read_rotation_key(b, o)
+            .unwrap_or([0.0, 0.0, 0.0, 1.0])
+    }
+}
+
+/// Every bone's three channel tracks at the file's own record layout (rotation keys decoded to
+/// `[x, y, z, w]`); stops at the first record that does not fit the file.
+pub fn parse_m2_bone_tracks(b: &[u8]) -> Vec<BoneChannels> {
+    if b.len() < 0x40 || &b[0..4] != b"MD20" {
+        return Vec::new();
+    }
+    let (bone_count, bone_ofs) = (le_u32(b, 0x34) as usize, le_u32(b, 0x38) as usize);
+    read_bone_channels(b, M2Layout::of(b), bone_count, bone_ofs)
+}
+
+fn read_bone_channels(
+    b: &[u8],
+    layout: M2Layout,
+    bone_count: usize,
+    bone_ofs: usize,
+) -> Vec<BoneChannels> {
+    let vec3 = |b: &[u8], o: usize| [le_f32(b, o), le_f32(b, o + 4), le_f32(b, o + 8)];
+    let quat = bone_quat(layout);
+    (0..bone_count)
+        .map_while(|i| {
+            let brec = bone_ofs + i * layout.bone_size;
+            (brec + layout.bone_pivot <= b.len()).then(|| {
+                (
+                    read_channel_track(b, brec + layout.bone_translation, 12, vec3),
+                    read_channel_track(
+                        b,
+                        brec + layout.bone_rotation,
+                        layout.rotation_key_size,
+                        quat,
+                    ),
+                    read_channel_track(b, brec + layout.bone_scale, 12, vec3),
+                )
+            })
+        })
+        .collect()
+}
 
 /// Read one `M2Track` whole; out-of-range reads truncate the keys, which vanilla art relies on.
 fn read_channel_track<T>(
@@ -389,6 +441,7 @@ fn read_channel_track<T>(
 ) -> ChannelTrack<T> {
     if track + 0x1c > b.len() {
         return ChannelTrack {
+            interp: 1,
             step: false,
             gseq: 0xffff,
             ranges: Vec::new(),
@@ -418,6 +471,7 @@ fn read_channel_track<T>(
         })
         .collect();
     ChannelTrack {
+        interp: le_u16(b, track),
         step: le_u16(b, track) == 0,
         gseq: le_u16(b, track + 0x02),
         ranges,
@@ -506,21 +560,20 @@ pub fn hand_grip_finger_poses(bytes: &[u8], bones: &[u16]) -> Vec<(u16, [f32; 4]
     let Some((slot, frame)) = hands_closed else {
         return Vec::new();
     };
-    let quat = |b: &[u8], o: usize| {
-        [
-            le_f32(b, o),
-            le_f32(b, o + 4),
-            le_f32(b, o + 8),
-            le_f32(b, o + 12),
-        ]
-    };
+    let layout = M2Layout::of(b);
+    let quat = bone_quat(layout);
     let mut out = Vec::new();
     for &bone in bones {
         let bi = bone as usize;
-        if bi >= bone_count || bone_ofs + bi * 0x6c + 0x6c > b.len() {
+        if bi >= bone_count || bone_ofs + bi * layout.bone_size + layout.bone_size > b.len() {
             continue;
         }
-        let tr = read_channel_track(b, bone_ofs + bi * 0x6c + 0x28, 16, quat);
+        let tr = read_channel_track(
+            b,
+            bone_ofs + bi * layout.bone_size + layout.bone_rotation,
+            layout.rotation_key_size,
+            quat,
+        );
         if tr.gseq != 0xffff || tr.keys.is_empty() {
             continue; // a global-sequence track runs on its own clock
         }
@@ -547,14 +600,7 @@ pub fn parse_m2_animations(b: &[u8]) -> Vec<ModelAnimation> {
     let (seq_count, seq_ofs) = (le_u32(b, 0x1c) as usize, le_u32(b, 0x20) as usize);
     let (bone_count, bone_ofs) = (le_u32(b, 0x34) as usize, le_u32(b, 0x38) as usize);
     let vec3 = |b: &[u8], o: usize| [le_f32(b, o), le_f32(b, o + 4), le_f32(b, o + 8)];
-    let quat = |b: &[u8], o: usize| {
-        [
-            le_f32(b, o),
-            le_f32(b, o + 4),
-            le_f32(b, o + 8),
-            le_f32(b, o + 12),
-        ]
-    };
+    let layout = M2Layout::of(b);
     // The event table (MD20 `0x114`/`0x118`, stride 44; the `M2TrackBase` at `+24` puts the
     // absolute-ms timestamps at `+36`), read once and cut per sequence like the bone keys.
     let (ev_count, ev_ofs) = (le_u32(b, 0x114) as usize, le_u32(b, 0x118) as usize);
@@ -599,18 +645,7 @@ pub fn parse_m2_animations(b: &[u8]) -> Vec<ModelAnimation> {
         });
     }
 
-    let bone_tracks: Vec<BoneChannels> = (0..bone_count)
-        .map_while(|i| {
-            let brec = bone_ofs + i * 0x6c;
-            (brec + 0x60 <= b.len()).then(|| {
-                (
-                    read_channel_track(b, brec + 0x0c, 12, vec3),
-                    read_channel_track(b, brec + 0x28, 16, quat),
-                    read_channel_track(b, brec + 0x44, 12, vec3),
-                )
-            })
-        })
-        .collect();
+    let bone_tracks = read_bone_channels(b, layout, bone_count, bone_ofs);
 
     let mut out = Vec::new();
     for s in 0..seq_count {
@@ -750,24 +785,25 @@ pub fn parse_m2_global_sequence_bones(b: &[u8]) -> Vec<GlobalSeqBone> {
         (d > 0).then_some(d)
     };
     let vec3 = |b: &[u8], o: usize| [le_f32(b, o), le_f32(b, o + 4), le_f32(b, o + 8)];
-    let quat = |b: &[u8], o: usize| {
-        [
-            le_f32(b, o),
-            le_f32(b, o + 4),
-            le_f32(b, o + 8),
-            le_f32(b, o + 12),
-        ]
-    };
+    let layout = M2Layout::of(b);
+    let quat = bone_quat(layout);
     let (bone_count, bone_ofs) = (le_u32(b, 0x34) as usize, le_u32(b, 0x38) as usize);
     let mut out = Vec::new();
     for i in 0..bone_count {
-        let brec = bone_ofs + i * 0x6c;
-        if brec + 0x60 > b.len() {
+        let brec = bone_ofs + i * layout.bone_size;
+        if brec + layout.bone_pivot > b.len() {
             break;
         }
-        let translation = read_global_channel(b, brec + 0x0c, 12, &period_of, vec3);
-        let rotation = read_global_channel(b, brec + 0x28, 16, &period_of, quat);
-        let scale = read_global_channel(b, brec + 0x44, 12, &period_of, vec3);
+        let translation =
+            read_global_channel(b, brec + layout.bone_translation, 12, &period_of, vec3);
+        let rotation = read_global_channel(
+            b,
+            brec + layout.bone_rotation,
+            layout.rotation_key_size,
+            &period_of,
+            quat,
+        );
+        let scale = read_global_channel(b, brec + layout.bone_scale, 12, &period_of, vec3);
         if translation.is_some() || rotation.is_some() || scale.is_some() {
             out.push(GlobalSeqBone {
                 bone: i as u16,
@@ -1256,5 +1292,55 @@ mod doodad_sound_tests {
             keys[1].1
         );
         assert_ne!(keys[0].0, keys[1].0, "and they are different kits");
+    }
+    /// A v263 file with two 112-byte bones, the second with a 2-key compressed rotation track
+    /// and a 2-key scale track: records, key size and decoding follow the header version.
+    #[test]
+    fn a_v263_file_reads_112_byte_bones_and_compressed_rotation_keys() {
+        let mut b = vec![0u8; 0x400];
+        let put32 =
+            |b: &mut Vec<u8>, at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let put16 =
+            |b: &mut Vec<u8>, at: usize, v: i16| b[at..at + 2].copy_from_slice(&v.to_le_bytes());
+        b[0..4].copy_from_slice(b"MD20");
+        put32(&mut b, 4, 263);
+        let (bones, rec1) = (0x100usize, 0x100 + 112);
+        put32(&mut b, 0x34, 2);
+        put32(&mut b, 0x38, bones as u32);
+        // Bone 1: rotation track @ +0x2c: two keys at 0 and 1000 ms; values at 0x300 (4 x i16 each).
+        put32(&mut b, rec1 + 0x2c + 0x0c, 2);
+        put32(&mut b, rec1 + 0x2c + 0x10, 0x2f0);
+        put32(&mut b, rec1 + 0x2c + 0x14, 2);
+        put32(&mut b, rec1 + 0x2c + 0x18, 0x300);
+        put32(&mut b, 0x2f4, 1000);
+        for (i, v) in [i16::MAX, i16::MAX, i16::MAX, -1].into_iter().enumerate() {
+            put16(&mut b, 0x300 + 2 * i, v); // identity
+        }
+        for (i, v) in [-9599i16, i16::MAX, i16::MAX, -9599]
+            .into_iter()
+            .enumerate()
+        {
+            put16(&mut b, 0x308 + 2 * i, v); // 90 degrees about x
+        }
+        // Bone 1: scale track @ +0x48: one key, three f32 at 0x320.
+        put32(&mut b, rec1 + 0x48 + 0x0c, 1);
+        put32(&mut b, rec1 + 0x48 + 0x10, 0x318);
+        put32(&mut b, rec1 + 0x48 + 0x14, 1);
+        put32(&mut b, rec1 + 0x48 + 0x18, 0x320);
+        for (i, v) in [2.0f32, 3.0, 4.0].into_iter().enumerate() {
+            b[0x320 + 4 * i..0x324 + 4 * i].copy_from_slice(&v.to_le_bytes());
+        }
+        let tracks = super::parse_m2_bone_tracks(&b);
+        assert_eq!(tracks.len(), 2);
+        assert!(tracks[0].1.keys.is_empty(), "bone 0 has no rotation keys");
+        let (_, rot, scale) = &tracks[1];
+        assert_eq!(rot.keys.len(), 2);
+        assert_eq!(rot.keys[1].0, 1000);
+        assert_eq!(rot.keys[0].1, [0.0, 0.0, 0.0, 1.0]);
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        for (got, want) in rot.keys[1].1.iter().zip([s, 0.0, 0.0, s]) {
+            assert!((got - want).abs() < 1e-3, "{:?}", rot.keys[1].1);
+        }
+        assert_eq!(scale.keys, vec![(0, [2.0, 3.0, 4.0])]);
     }
 }

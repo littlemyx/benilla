@@ -3,11 +3,15 @@
 //! Particle emitters and lights are not read here; benilla-formats reads them from the raw bytes.
 
 mod error;
+mod layout;
 mod model;
 mod skin;
 mod track;
 
 pub use error::Error;
+pub use layout::{
+    decode_comp_quat, decode_comp_quat_component, M2Layout, FIRST_TBC_VERSION, TRACK_SIZE,
+};
 pub use model::{
     M2ArrayString, M2Attachment, M2BlendMode, M2Bone, M2BoneFlags, M2Camera, M2EventMarker,
     M2Format, M2Header, M2Material, M2Model, M2PlayableAnim, M2RawData, M2RenderFlags, M2Texture,
@@ -215,7 +219,8 @@ pub fn parse_m2(cursor: &mut Cursor<&[u8]>) -> Result<M2Format> {
     // vanilla), three 28-byte tracks, pivot C3 @96. The reference zeroes a NaN pivot component.
     // From v260 a `boneNameCRC` u32 sits after `submesh`, so the record is 112 bytes and the pivot
     // @100 (measured: 108 fails the parent and track-pointer checks on every sampled 2.4.3 model).
-    let (bone_size, pivot_ofs) = if version < 260 { (108, 96) } else { (112, 100) };
+    let layout = M2Layout::for_version(version);
+    let (bone_size, pivot_ofs) = (layout.bone_size, layout.bone_pivot);
     let bones_avail = b.len().saturating_sub(bones.1 as usize);
     let mut bone_list = Vec::with_capacity(capped(bones.0 as usize, bone_size, bones_avail));
     for i in 0..bones.0 as usize {
