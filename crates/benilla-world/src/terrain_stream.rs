@@ -134,14 +134,33 @@ pub(crate) struct Placements {
 }
 
 impl Placements {
-    /// Registered placements as `(m2 doodads, wmo buildings)`, for the viewer's counters.
-    pub(crate) fn counts(&self) -> (usize, usize) {
+    /// Registered placements as `(m2 doodads, wmo buildings, still unspawned, with no entity,
+    /// WMO props still pending)`, for the viewer's counters.
+    pub(crate) fn counts(&self) -> (usize, usize, usize, usize, usize) {
         let m2 = self
             .by_id
             .values()
             .filter(|p| matches!(p.model, ModelHandle::M2(_)))
             .count();
-        (m2, self.by_id.len() - m2)
+        let unspawned = self.by_id.values().filter(|p| !p.spawned).count();
+        let no_entity = self
+            .by_id
+            .values()
+            .filter(|p| p.spawned && p.entities.is_empty())
+            .count();
+        let props_pending = self
+            .by_id
+            .values()
+            .flat_map(|p| p.doodads.iter())
+            .filter(|d| !d.spawned)
+            .count();
+        (
+            m2,
+            self.by_id.len() - m2,
+            unspawned,
+            no_entity,
+            props_pending,
+        )
     }
 
     /// Every entity a registered placement owns; a placed part outside it is a doubled prop.

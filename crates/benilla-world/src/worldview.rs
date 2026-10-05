@@ -392,7 +392,12 @@ fn print_counters(time: Res<Time>, mut done: Local<bool>, p: CounterParams) {
             );
         }
     }
-    let (m2_inst, wmo_inst) = p.placements.as_ref().map_or((0, 0), |p| p.counts());
+    let (m2_inst, wmo_inst, unspawned, no_entity, props_pending) = p
+        .placements
+        .as_ref()
+        .map_or((0, 0, 0, 0, 0), |p| p.counts());
+    let m2_empty = p.m2.iter().filter(|(_, m)| m.submeshes.is_empty()).count();
+    let m2_submeshes: usize = p.m2.iter().map(|(_, m)| m.submeshes.len()).sum();
     let wmo_groups: usize = p.wmo.iter().map(|(_, m)| m.group_nav.len()).sum();
     let map = p.map.as_ref().map_or(u32::MAX, |m| m.0);
     let failed_tiles = p.fails.0.keys().filter(|(k, _)| *k == "adt").count();
@@ -404,6 +409,11 @@ fn print_counters(time: Res<Time>, mut done: Local<bool>, p: CounterParams) {
     println!(
         "WV_COUNTERS terrain chunks={chunks} layer_slots={layer_slots} distinct_layer_textures={}",
         distinct_layers.len()
+    );
+    println!(
+        "WV_COUNTERS placements unspawned={unspawned} spawned_with_no_entity={no_entity} \
+         wmo_props_pending={props_pending} | m2 models_with_no_submesh={m2_empty} \
+         model_submeshes={m2_submeshes}"
     );
     println!(
         "WV_COUNTERS m2 models={} instances={m2_inst} | wmo roots={} groups={wmo_groups} \
