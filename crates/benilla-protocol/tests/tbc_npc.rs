@@ -150,3 +150,91 @@ fn the_quest_marker_is_a_byte_and_its_available_value_moved() {
         ));
     }
 }
+
+/// One 38-byte trainer row (cmangos-tbc `SendTrainerSpellHelper`): spell, state, cost, a zero word,
+/// the primary-profession word, level, skill, skill value, three required spells.
+fn trainer_row(spell: u32, state: u8, cost: u32, level: u8) -> Vec<u8> {
+    let mut b = u32b(spell);
+    b.push(state);
+    for v in [cost, 0, 0] {
+        b.extend(u32b(v));
+    }
+    b.push(level);
+    for v in [0u32, 0, 0, 0, 0] {
+        b.extend(u32b(v));
+    }
+    b
+}
+
+#[test]
+fn a_trainer_list_has_the_1_12_1_rows_and_the_buy_results_read() {
+    // A warrior trainer: Heroic Strike's row (spell 78, green, 10 copper, level 1) and a gray one.
+    let mut b = 0x71u64.to_le_bytes().to_vec();
+    b.extend(u32b(0)); // class trainer
+    b.extend(u32b(2));
+    b.extend(trainer_row(78, 0, 10, 1));
+    b.extend(trainer_row(772, 2, 100, 4));
+    b.extend(cstr("Hello, warrior."));
+    match tbc(t::SMSG_TRAINER_LIST, &b) {
+        ServerPacket::TrainerList {
+            trainer,
+            trainer_type,
+            services,
+            title,
+        } => {
+            assert_eq!(
+                (trainer, trainer_type, title.as_str()),
+                (0x71, 0, "Hello, warrior.")
+            );
+            assert_eq!(services.len(), 2);
+            assert_eq!(
+                (services[0].spell, services[0].state, services[0].cost),
+                (78, 0, 10)
+            );
+            assert_eq!(
+                (services[1].spell, services[1].state, services[1].req_level),
+                (772, 2, 4)
+            );
+        }
+        other => panic!("{}", other.name()),
+    }
+    let mut ok = 0x71u64.to_le_bytes().to_vec();
+    ok.extend(u32b(78));
+    assert!(matches!(
+        tbc(t::SMSG_TRAINER_BUY_SUCCEEDED, &ok),
+        ServerPacket::TrainerBuySucceeded {
+            trainer: 0x71,
+            spell_id: 78
+        }
+    ));
+    // Single-source (wow_messages): trainer, spell, error.
+    let mut fail = ok.clone();
+    fail.extend(u32b(1));
+    assert!(matches!(
+        tbc(t::SMSG_TRAINER_BUY_FAILED, &fail),
+        ServerPacket::TrainerBuyFailed {
+            trainer: 0x71,
+            spell_id: 78,
+            error: 1
+        }
+    ));
+}
+
+#[test]
+fn the_vendor_buy_and_sell_results_read_as_in_1_12_1() {
+    // `SMSG_BUY_ITEM`: vendor, slot, new stock, count. `SMSG_BUY_FAILED`: vendor, entry, reason.
+    // `SMSG_SELL_ITEM`: vendor, item guid, reason.
+    let mut buy = 0x66u64.to_le_bytes().to_vec();
+    for v in [1u32, 0xFFFF_FFFF, 1] {
+        buy.extend(u32b(v));
+    }
+    assert_eq!(tbc(0x01A4, &buy).name(), "SMSG_BUY_ITEM");
+    let mut failed = 0x66u64.to_le_bytes().to_vec();
+    failed.extend(u32b(159));
+    failed.push(2);
+    assert_eq!(tbc(0x01A5, &failed).name(), "SMSG_BUY_FAILED");
+    let mut sell = 0x66u64.to_le_bytes().to_vec();
+    sell.extend(0x4000_0000_0000_0123u64.to_le_bytes());
+    sell.push(1);
+    assert_eq!(tbc(0x01A1, &sell).name(), "SMSG_SELL_ITEM");
+}

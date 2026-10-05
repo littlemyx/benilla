@@ -155,3 +155,29 @@ fn the_cast_family_sends_the_2_4_3_form_with_a_counting_cast_count() {
     assert_eq!(t.tbc_state.cast_count, 4);
     assert_eq!(v.tbc_state.cast_count, 0);
 }
+
+#[test]
+fn a_repop_request_carries_one_trailing_byte_on_2_4_3_only() {
+    let (mut t, _a) = writer(true);
+    let (mut v, _b) = writer(false);
+    for w in [&mut t, &mut v] {
+        w.repop_request().unwrap();
+        w.corpse_query().unwrap();
+        w.reclaim_corpse(0x77).unwrap();
+        w.spirit_healer_activate(0x88).unwrap();
+        w.resurrect_response(0x99, true).unwrap();
+    }
+    // cmangos-tbc's repop handler skips one byte; every other death send is the 1.12.1 body.
+    let rest = [
+        (opcode::MSG_CORPSE_QUERY, 0),
+        (opcode::CMSG_RECLAIM_CORPSE, 8),
+        (opcode::CMSG_SPIRIT_HEALER_ACTIVATE, 8),
+        (opcode::CMSG_RESURRECT_RESPONSE, 9),
+    ];
+    let t_sent = sent(&t);
+    assert_eq!(t_sent[0], (opcode::CMSG_REPOP_REQUEST, 1));
+    assert_eq!(&t_sent[1..], &rest);
+    let v_sent = sent(&v);
+    assert_eq!(v_sent[0], (opcode::CMSG_REPOP_REQUEST, 0));
+    assert_eq!(&v_sent[1..], &rest);
+}

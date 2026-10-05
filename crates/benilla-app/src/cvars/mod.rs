@@ -32,7 +32,7 @@ mod table;
 use table::Reference;
 #[cfg(test)]
 pub(crate) use table::REGISTERED_243;
-pub(crate) use table::{registered_pairs, registered_pairs_for, REGISTERED};
+pub(crate) use table::{extra_pairs_for, registered_pairs, registered_pairs_for, REGISTERED};
 
 /// `config.toml`: a `[cvars]` table of `Name = "value"` strings, sorted so every save is stable.
 #[derive(serde::Serialize, serde::Deserialize, Default)]

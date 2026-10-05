@@ -12,6 +12,7 @@ pub(super) fn register(app: &mut App) {
     use SessionEventKind as K;
     app.net_handler(K::CorpseQuery, on_corpse_query)
         .net_handler(K::CorpseReclaimDelay, on_corpse_reclaim_delay)
+        .net_handler(K::DeathReleaseLoc, on_death_release_loc)
         .net_handler(K::ResurrectRequest, on_resurrect_request)
         .net_handler(K::SpiritHealerConfirm, on_spirit_healer_confirm)
         .net_handler(K::DurabilityDamageDeath, on_durability_damage_death)
@@ -28,6 +29,14 @@ fn on_corpse_query(In(ev): In<SessionEvent>, mut death_net: ResMut<DeathNet>) {
     } = ev
     {
         corpse_query(found, display_map, position, corpse_map, &mut death_net);
+    }
+}
+
+/// 2.4.3 `SMSG_DEATH_RELEASE_LOC`: the graveyard marker the world map draws while dead, removed by
+/// a map of `-1` on the resurrection.
+fn on_death_release_loc(In(ev): In<SessionEvent>, mut death_net: ResMut<DeathNet>) {
+    if let SessionEvent::DeathReleaseLoc { map, position } = ev {
+        death_net.release_loc = map.map(|map| (map, position));
     }
 }
 

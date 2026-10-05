@@ -67,3 +67,15 @@ pub(super) fn read_spell_dispel_log_tbc(r: &mut impl Read) -> io::Result<SpellDi
         spell_ids,
     })
 }
+
+/// `SMSG_LOG_XPGAIN` (2.4.3): the 1.12.1 body, then a `u8` refer-a-friend flag (dropped) when
+/// present. cmangos-tbc `SendLogXPGain` appends it (cmangos-classic does not); wow_messages' 2.4.3
+/// definition shares 1.12.1's and ends without it, so the byte is read when the body carries it and
+/// the other form still reads (single-source for the byte).
+pub(super) fn read_xp_gain_tbc(r: &mut &[u8]) -> io::Result<super::progression::XpGain> {
+    let gain = super::progression::read_xp_gain(r)?;
+    if !r.is_empty() {
+        let _refer_a_friend = read_u8(r)?;
+    }
+    Ok(gain)
+}

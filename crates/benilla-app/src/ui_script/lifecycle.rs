@@ -303,6 +303,9 @@ pub(crate) fn load_ingame_ui_on_world_entry(world: &mut World) {
         Some(cvars) => {
             script.set_cvar_saved_base(cvars.orphans());
             script.seed_cvars(cvars.vm_seed());
+            // 2.4.3's own CVars, which the live table does not hold: its stock options panels
+            // read them in their `OnLoad` (`guildRecruitmentChannel`, `targetOfTargetMode`).
+            script.register_cvars(crate::cvars::extra_pairs_for(script.dialect()));
         }
         None => script.register_cvars(crate::cvars::registered_pairs_for(script.dialect())),
     }
@@ -357,6 +360,8 @@ pub(crate) fn load_ingame_ui_on_world_entry(world: &mut World) {
     // seats either, and the load measures text (the stock tab template's `OnLoad` sizes from its
     // text width, `UIPanelTemplates.xml:370-373`), which answers 0 with no measurer.
     seat_raster_seam_for_load(world, &mut script);
+    // The display modes too: stock 2.4.3 reads them at file scope (`UIParent.lua:961`).
+    crate::video::seed_display_modes(world, &mut script);
     // Read out of the world first: the bracket below borrows `world` for the chat-cache restore.
     let zoom = {
         let z = world.resource::<crate::minimap::MinimapZoom>();

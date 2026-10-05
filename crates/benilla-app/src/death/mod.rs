@@ -50,6 +50,9 @@ pub(crate) struct DeathNet {
     pub(crate) reclaim_generation: u32,
     /// The last `MSG_CORPSE_QUERY` answer; a not-found drops it.
     pub(crate) corpse: Option<CorpsePoint>,
+    /// The spirit healer's graveyard `(map, raw position)` (2.4.3 `SMSG_DEATH_RELEASE_LOC`), which
+    /// `GetDeathReleasePosition` projects; cleared by the packet's own removal form.
+    pub(crate) release_loc: Option<(u32, [f32; 3])>,
     /// A pending resurrection offer; cleared when answered or when the popup times out.
     pub(crate) resurrect: Option<ResurrectOffer>,
     /// Bumped per `SMSG_RESURRECT_REQUEST`: the offer announces per message (`0x5e7bc0` through

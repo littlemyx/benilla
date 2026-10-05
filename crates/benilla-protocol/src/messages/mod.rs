@@ -67,6 +67,8 @@ mod tbc_items;
 pub use tbc_items::{repair_item_tbc, slot_to_tbc};
 mod tbc_npc;
 pub use tbc_npc::quest_status_from_tbc;
+mod tbc_quest;
+pub use tbc_quest::{quest_failed_reason_from_tbc, quest_invalid_reason_from_tbc};
 mod tbc_same;
 mod tbc_spells;
 pub use tbc_same::{same_reader_for, TBC_SAME_READERS};

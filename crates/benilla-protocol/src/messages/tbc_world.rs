@@ -160,6 +160,14 @@ pub enum TbcPacket {
         item_guid: u64,
         bag_slot: u8,
     },
+    /// `SMSG_DEATH_RELEASE_LOC`: where the spirit healer stands (the graveyard we release to), or
+    /// `map: None` (`-1`, position zero) when the marker is removed on a resurrection.
+    DeathReleaseLoc {
+        map: Option<u32>,
+        position: [f32; 3],
+    },
+    /// `SMSG_FORCED_DEATH_UPDATE`: empty; resets the release-spirit timer client side.
+    ForcedDeathUpdate,
 }
 
 impl TbcPacket {
@@ -223,6 +231,8 @@ impl TbcPacket {
             TbcPacket::ChannelUpdate { .. } => "MSG_CHANNEL_UPDATE",
             TbcPacket::InventoryChangeFailed { .. } => "SMSG_INVENTORY_CHANGE_FAILURE",
             TbcPacket::QuestGiverStatus { .. } => "SMSG_QUESTGIVER_STATUS",
+            TbcPacket::DeathReleaseLoc { .. } => "SMSG_DEATH_RELEASE_LOC",
+            TbcPacket::ForcedDeathUpdate => "SMSG_FORCED_DEATH_UPDATE",
         }
     }
 }
@@ -289,6 +299,17 @@ pub(super) fn read_set_dungeon_difficulty(r: &mut &[u8]) -> io::Result<TbcPacket
         difficulty: read_u32_le(r)?,
         unknown: read_u32_le(r)?,
         in_group: read_u32_le(r)? != 0,
+    })
+}
+
+/// `SMSG_DEATH_RELEASE_LOC`: a `u32` map (`-1` removes the marker) and the graveyard's x, y, z
+/// (cmangos-tbc `RepopAtGraveyard` and `ResurrectPlayer` = wow_messages 2.4.3).
+pub(super) fn read_death_release_loc(r: &mut &[u8]) -> io::Result<TbcPacket> {
+    let map = read_u32_le(r)?;
+    let position = [read_f32_le(r)?, read_f32_le(r)?, read_f32_le(r)?];
+    Ok(TbcPacket::DeathReleaseLoc {
+        map: (map != u32::MAX).then_some(map),
+        position,
     })
 }
 
