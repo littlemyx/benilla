@@ -131,99 +131,150 @@ impl Addon {
         files: &[String],
         toc: &mut Status,
     ) -> Vec<String> {
+        self.load_files_observed(script, files, toc, &mut |_, _| {})
+    }
+
+    /// [`Addon::load_files_into`], telling `observe` what each file did as it finishes.
+    pub(super) fn load_files_observed(
+        &self,
+        script: &UiScript,
+        files: &[String],
+        toc: &mut Status,
+        observe: &mut dyn FnMut(&str, FileOutcome),
+    ) -> Vec<String> {
         let mut failures = Vec::new();
-        // The `<Include>` / `<Script file=>` provider; `read` is the sandbox.
-        let provider = |req: &str| -> Option<Vec<u8>> { self.read(req) };
         for file in files {
-            // Resolved once into the source's path space, for `read` and the loader alike.
-            let path = benilla_ui::loader::join_ref(&self.prefix(), file);
-            let Some(bytes) = self.read(&path) else {
-                toc.report(status::FAILURE, status::missing(&path, is_lua(file)));
-                let e = format!("{}/{file}: not found", self.name);
-                // Severity follows whose manifest is wrong. Ours, or the core's (a shipped file, or
-                // a `FrameXML.toc` row the player's chain lacks), is an ERROR. A player's addon is
-                // the package's fault, which the reference skips silently, and an ERROR line fails
-                // `smoke.sh`.
-                match self.source {
-                    Source::Builtin | Source::Chain => error!("ui_script: {e}"),
-                    Source::Dir(_) => warn!("ui_script: {e}"),
-                }
-                // Retained for the player: the commonest way an addon fails with nothing on screen.
-                script.report_load_failure(&e);
-                failures.push(e);
-                continue;
-            };
-            if is_lua(file) {
-                // What `<Script file=>` gets: one chunk in the one global state, in manifest
-                // order, as `AddOn_Load 0x51f240` hands every listed file to `0x6edb90`.
-                match script.run_chunk_named(&bytes, &self.chunk_name(file, &path)) {
-                    Ok(()) => info!("ui_script: {}/{file} ran", self.name),
-                    Err(e) => {
-                        let e = format!("{}/{file}: {e}", self.name);
-                        error!("ui_script: {e}");
-                        // A script error: it reaches the player through the Lua error handler.
-                        script.report_script_error(&e);
-                        failures.push(e);
-                    }
-                }
-                continue;
-            }
-            let doc = match benilla_ui::framexml::parse(&benilla_ui::source::decode(&bytes)) {
-                Ok(d) => d,
-                Err(e) => {
-                    toc.report(status::FAILURE, status::unparsed(&path));
-                    let e = format!("{}/{file}: {e}", self.name);
-                    error!("ui_script: parsing {e}");
-                    // No dialog, as the reference only logs it (FrameXML.log); still retained.
-                    script.report_load_failure(&e);
-                    failures.push(e);
-                    continue;
-                }
-            };
-            // The loader resolves relative references against the document's own directory, and
-            // names the file a raise came from.
-            let mut report = benilla_ui::loader::load_in(script, &doc, &path, &provider);
-            std::mem::take(&mut report.status).close_into(
-                toc,
-                script.framexml_debug(),
-                status::file_banner(&path),
-            );
-            // `FrameXML_Debug` traces go to the log only: the reference files them at severity 0
-            // (`0x6ee2bc`) in a per-document record whose surface is untraced.
-            for t in &report.traces {
-                info!("ui_script({}/{file}): {t}", self.name);
-            }
-            for w in &report.warnings {
-                warn!("ui_script({}/{file}): {w}", self.name);
-                // Retained for `/errors` too, here because only this caller knows the file.
-                script.report_warning(&format!("{}/{file}: {w}", self.name));
-            }
-            // A file the document names and the provider lacks is a `.toc` line naming no file:
-            // never a script error, as the reference logs `Couldn't open %s` and carries on, but a
-            // `failures` entry, so our boot tests catch one in a core or layer document.
-            for m in &report.missing_files {
-                let e = format!("{}/{file}: {m}", self.name);
-                match self.source {
-                    Source::Builtin | Source::Chain => error!("ui_script: {e}"),
-                    Source::Dir(_) => warn!("ui_script: {e}"),
-                }
-                script.report_load_failure(&e);
-                failures.push(e);
-            }
-            for e in &report.errors {
-                error!("ui_script({}/{file}): {e}", self.name);
-                // A script error, as in the Lua arm; `_ERRORMESSAGE`'s IsVisible guard shows only
-                // a burst's first, as in the reference.
-                script.report_script_error(&format!("{}/{file}: {e}", self.name));
-                failures.push(format!("{}/{file}: {e}", self.name));
-            }
-            info!(
-                "ui_script: {}/{file} loaded ({} frames materialized)",
-                self.name, report.frames
-            );
+            let first = failures.len();
+            let (errors, warnings) = (script.errors().len(), script.warnings().len());
+            let mut out = FileOutcome::default();
+            self.load_file(script, file, toc, &mut failures, &mut out);
+            out.failures = failures[first..].to_vec();
+            out.vm_errors = script.errors().split_off(errors);
+            let mut host = script.warnings();
+            out.host_warnings = host.split_off(warnings.min(host.len()));
+            observe(file, out);
         }
         failures
     }
+
+    /// One manifest row: a `.lua` runs as a chunk, anything else parses as FrameXML and loads.
+    fn load_file(
+        &self,
+        script: &UiScript,
+        file: &str,
+        toc: &mut Status,
+        failures: &mut Vec<String>,
+        out: &mut FileOutcome,
+    ) {
+        // The `<Include>` / `<Script file=>` provider; `read` is the sandbox.
+        let provider = |req: &str| -> Option<Vec<u8>> { self.read(req) };
+        // Resolved once into the source's path space, for `read` and the loader alike.
+        let path = benilla_ui::loader::join_ref(&self.prefix(), file);
+        let Some(bytes) = self.read(&path) else {
+            toc.report(status::FAILURE, status::missing(&path, is_lua(file)));
+            let e = format!("{}/{file}: not found", self.name);
+            // Severity follows whose manifest is wrong. Ours, or the core's (a shipped file, or
+            // a `FrameXML.toc` row the player's chain lacks), is an ERROR. A player's addon is
+            // the package's fault, which the reference skips silently, and an ERROR line fails
+            // `smoke.sh`.
+            match self.source {
+                Source::Builtin | Source::Chain => error!("ui_script: {e}"),
+                Source::Dir(_) => warn!("ui_script: {e}"),
+            }
+            // Retained for the player: the commonest way an addon fails with nothing on screen.
+            script.report_load_failure(&e);
+            failures.push(e);
+            return;
+        };
+        if is_lua(file) {
+            // What `<Script file=>` gets: one chunk in the one global state, in manifest
+            // order, as `AddOn_Load 0x51f240` hands every listed file to `0x6edb90`.
+            match script.run_chunk_named(&bytes, &self.chunk_name(file, &path)) {
+                Ok(()) => info!("ui_script: {}/{file} ran", self.name),
+                Err(e) => {
+                    let e = format!("{}/{file}: {e}", self.name);
+                    error!("ui_script: {e}");
+                    // A script error: it reaches the player through the Lua error handler.
+                    script.report_script_error(&e);
+                    failures.push(e);
+                }
+            }
+            return;
+        }
+        let doc = match benilla_ui::framexml::parse(&benilla_ui::source::decode(&bytes)) {
+            Ok(d) => d,
+            Err(e) => {
+                toc.report(status::FAILURE, status::unparsed(&path));
+                let e = format!("{}/{file}: {e}", self.name);
+                error!("ui_script: parsing {e}");
+                // No dialog, as the reference only logs it (FrameXML.log); still retained.
+                script.report_load_failure(&e);
+                failures.push(e);
+                return;
+            }
+        };
+        // The loader resolves relative references against the document's own directory, and
+        // names the file a raise came from.
+        let mut report = benilla_ui::loader::load_in(script, &doc, &path, &provider);
+        std::mem::take(&mut report.status).close_into(
+            toc,
+            script.framexml_debug(),
+            status::file_banner(&path),
+        );
+        // `FrameXML_Debug` traces go to the log only: the reference files them at severity 0
+        // (`0x6ee2bc`) in a per-document record whose surface is untraced.
+        for t in &report.traces {
+            info!("ui_script({}/{file}): {t}", self.name);
+        }
+        out.warnings.clone_from(&report.warnings);
+        out.unknown_elements.clone_from(&report.unknown_elements);
+        out.unknown_attributes
+            .clone_from(&report.unknown_attributes);
+        for w in &report.warnings {
+            warn!("ui_script({}/{file}): {w}", self.name);
+            // Retained for `/errors` too, here because only this caller knows the file.
+            script.report_warning(&format!("{}/{file}: {w}", self.name));
+        }
+        // A file the document names and the provider lacks is a `.toc` line naming no file:
+        // never a script error, as the reference logs `Couldn't open %s` and carries on, but a
+        // `failures` entry, so our boot tests catch one in a core or layer document.
+        for m in &report.missing_files {
+            let e = format!("{}/{file}: {m}", self.name);
+            match self.source {
+                Source::Builtin | Source::Chain => error!("ui_script: {e}"),
+                Source::Dir(_) => warn!("ui_script: {e}"),
+            }
+            script.report_load_failure(&e);
+            failures.push(e);
+        }
+        for e in &report.errors {
+            error!("ui_script({}/{file}): {e}", self.name);
+            // A script error, as in the Lua arm; `_ERRORMESSAGE`'s IsVisible guard shows only
+            // a burst's first, as in the reference.
+            script.report_script_error(&format!("{}/{file}: {e}", self.name));
+            failures.push(format!("{}/{file}: {e}", self.name));
+        }
+        info!(
+            "ui_script: {}/{file} loaded ({} frames materialized)",
+            self.name, report.frames
+        );
+    }
+}
+
+/// What one manifest row did to the VM, as [`Addon::load_files_observed`] reports it.
+#[derive(Default)]
+pub(super) struct FileOutcome {
+    /// The row's load failures, tagged `"<Addon>/<file>: <error>"`.
+    pub(super) failures: Vec<String>,
+    /// The loader's warnings for the document.
+    pub(super) warnings: Vec<String>,
+    /// Elements and attributes the document has that the loader does not read.
+    pub(super) unknown_elements: Vec<String>,
+    pub(super) unknown_attributes: Vec<String>,
+    /// Errors the VM collected while the row loaded: a handler that raised below the loader.
+    pub(super) vm_errors: Vec<String>,
+    /// Warnings the VM collected while the row loaded: a `CreateFrame` that named no template.
+    pub(super) host_warnings: Vec<String>,
 }
 
 /// Whether a manifest entry is a Lua chunk: by extension, case-insensitively, with `\` a

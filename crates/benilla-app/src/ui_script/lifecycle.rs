@@ -32,7 +32,7 @@ fn install_boot_vm(world: &mut World) {
 /// A fresh VM on the process clock with the addon asset probes wired, or `None` (the world's VM
 /// removed) when the VM cannot start.
 fn new_vm(world: &mut World) -> Option<UiScript> {
-    let mut script = match UiScript::new() {
+    let mut script = match super::reference_ui::new_script() {
         Ok(s) => s,
         Err(e) => {
             error!("ui_script: VM init failed: {e}");

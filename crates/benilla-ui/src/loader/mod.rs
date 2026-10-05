@@ -18,6 +18,7 @@ use crate::status;
 
 mod backdrop;
 mod geometry;
+mod known;
 mod regions;
 mod scripts;
 mod widgets;
@@ -35,6 +36,11 @@ pub struct LoadReport {
     /// `"Couldn't open %s"` (`0x6edaa0`, `0x846ff4`) or `"Error loading %s"` (`0x872e50`) and goes
     /// on (`0x6ee00d`); kept apart from `warnings` so a load that resolved nothing is not clean.
     pub missing_files: Vec<String>,
+    /// Element tags the loader never reads, one `<Parent><Child>` per distinct pair per document:
+    /// parsed and ignored, which nothing in the reference's own walk reports. Counted, not fatal.
+    pub unknown_elements: Vec<String>,
+    /// Attributes the loader never reads, one `<Tag attribute>` per distinct pair per document.
+    pub unknown_attributes: Vec<String>,
     /// Frame instances `CreateFrame` built.
     pub frames: usize,
     /// Trace lines, only while `FrameXML_Debug` is on: the reference's flag (`[0xceea30]`) boots 0
@@ -339,6 +345,20 @@ impl Loader<'_> {
     /// Walk one document's top-level items in order (`0x6ede10`).
     pub(super) fn load_doc(&mut self, doc: &ParsedDocument) {
         for item in &doc.items {
+            if let TopLevel::Template(el) | TopLevel::Instance(el) | TopLevel::Font(el) = item {
+                let mut audit = known::Audit::default();
+                audit.top_level(el);
+                for e in audit.elements {
+                    if !self.report.unknown_elements.contains(&e) {
+                        self.report.unknown_elements.push(e);
+                    }
+                }
+                for a in audit.attributes {
+                    if !self.report.unknown_attributes.contains(&a) {
+                        self.report.unknown_attributes.push(a);
+                    }
+                }
+            }
             match item {
                 TopLevel::Include(path) => self.do_include(path),
                 // Deviation: a `<Script file=>` value with a separator joins the including

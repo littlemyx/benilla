@@ -165,6 +165,14 @@ pub(crate) fn load_default_ui(script: &UiScript) -> Vec<String> {
 /// `UI_Init` never reads (`0x48fff2`), going on to `Bindings.xml` and the addons. benilla goes on
 /// the same way and reports it as a load failure, an `ERROR` line and a row in `/errors`.
 pub(super) fn load_core(script: &UiScript) -> Vec<String> {
+    load_core_observed(script, &mut |_, _| {})
+}
+
+/// [`load_core`], telling `observe` what each `FrameXML.toc` row did as it finishes.
+pub(super) fn load_core_observed(
+    script: &UiScript,
+    observe: &mut dyn FnMut(&str, super::addons::FileOutcome),
+) -> Vec<String> {
     let Some(core) = reference_ui::core() else {
         let e = format!(
             "{}: not found — the stock interface is not built",
@@ -184,7 +192,15 @@ pub(super) fn load_core(script: &UiScript) -> Vec<String> {
         return failures;
     };
     let mut toc = benilla_ui::status::Status::default();
-    let mut failures = core.load_files_into(script, &core.toc.files, &mut toc);
+    let mut failures = Vec::new();
+    for file in &core.toc.files {
+        failures.extend(core.load_files_observed(
+            script,
+            std::slice::from_ref(file),
+            &mut toc,
+            observe,
+        ));
+    }
     let mut log = benilla_ui::status::Status::default();
     let banner = benilla_ui::status::toc_banner(reference_ui::TOC);
     toc.close_into(&mut log, script.framexml_debug(), banner);
@@ -294,10 +310,29 @@ pub(super) fn load_ingame_ui_with(
     version_check: bool,
     layer: bool,
 ) -> Vec<String> {
+    load_ingame_ui_observed(
+        script,
+        identity,
+        roster,
+        version_check,
+        layer,
+        &mut |_, _| {},
+    )
+}
+
+/// [`load_ingame_ui_with`], telling `observe` what each core row did as it finishes.
+pub(super) fn load_ingame_ui_observed(
+    script: &mut UiScript,
+    identity: Option<&(String, String)>,
+    roster: &[String],
+    version_check: bool,
+    layer: bool,
+    observe: &mut dyn FnMut(&str, super::addons::FileOutcome),
+) -> Vec<String> {
     // Bounded, addons included: a chunk that never returns fails as a load error instead of
     // freezing the loading screen. The caller disarms the budget once the edge is done.
     script.set_instruction_budget(super::addons::LOAD_INSTRUCTION_BUDGET);
-    let mut failures = load_core(script);
+    let mut failures = load_core_observed(script, observe);
     if layer {
         failures.extend(load_layer(script));
     }
