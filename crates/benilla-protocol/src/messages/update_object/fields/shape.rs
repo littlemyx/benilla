@@ -1,7 +1,7 @@
 //! The structure of the update-field groups a build lays out in its own way: counts, strides and
 //! packing, which sit next to the indices in the [`FieldTable`](super::FieldTable) so that no
-//! accessor computes from a literal. The values of 2.4.3 are single-source (cmangos-tbc, digest
-//! `tbc-login-wire.md` section 11) and were checked live against a 2.4.3 server.
+//! accessor computes from a literal. The values of 2.4.3 are single-source (cmangos-tbc) and were
+//! checked live against a 2.4.3 server.
 
 use super::table::FieldTable;
 
@@ -154,8 +154,8 @@ pub const SHAPE_5875: FieldShape = FieldShape {
     honor_rank_bar: ByteAt::new(1260, 0),
 };
 
-/// 2.4.3 (8606), cmangos-tbc `UpdateFields.h` and the code that writes each field (digest
-/// section 11); a sub-field the build dropped is [`ByteAt::NONE`].
+/// 2.4.3 (8606), cmangos-tbc `UpdateFields.h` and the code that writes each field; a sub-field
+/// the build dropped is [`ByteAt::NONE`].
 pub const SHAPE_8606: FieldShape = FieldShape {
     // 56 slots (`MAX_AURAS`), a byte of flags per slot (`SetAuraFlag`): effect bits 0x01..0x04,
     // cancelable 0x10, not cancelable 0x20 (`AuraFlags`)
