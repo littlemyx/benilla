@@ -230,6 +230,21 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
             ServerPacket::ItemPushResult(super::tbc_items::read_item_push_result(r)?)
         }
         t::SMSG_INVENTORY_CHANGE_FAILURE => super::tbc_items::read_inventory_change_failure(r)?,
+        // --- NPC interaction (`tbc_npc`) ----------------------------------------------------
+        t::SMSG_GOSSIP_MESSAGE => {
+            let (npc, text_id, options, quests) = super::tbc_npc::read_gossip_message(r)?;
+            ServerPacket::GossipMessage {
+                npc,
+                text_id,
+                options,
+                quests,
+            }
+        }
+        t::SMSG_LIST_INVENTORY => {
+            let (vendor, items) = super::tbc_npc::read_list_inventory(r)?;
+            ServerPacket::VendorList { vendor, items }
+        }
+        t::SMSG_QUESTGIVER_STATUS => super::tbc_npc::read_questgiver_status(r)?,
         // --- Combat readout: values or bytes that differ from 1.12.1 (`tbc_combat`) -----------
         t::SMSG_ATTACKERSTATEUPDATE => {
             ServerPacket::AttackerState(super::attack::read_attacker_state_in(r, true)?)

@@ -152,6 +152,8 @@ pub enum TbcPacket {
     },
     /// `MSG_CHANNEL_UPDATE`: `caster`'s channel has `remaining_ms` left (0 ends it).
     ChannelUpdate { caster: u64, remaining_ms: u32 },
+    /// `SMSG_QUESTGIVER_STATUS` with a status 1.12.1 has no entry for (`status` is 2.4.3's number).
+    QuestGiverStatus { npc: u64, status: u8 },
     /// `SMSG_INVENTORY_CHANGE_FAILURE` with an `InventoryResult` 1.12.1 lacks (67 and up).
     InventoryChangeFailed {
         result: u8,
@@ -220,6 +222,7 @@ impl TbcPacket {
             TbcPacket::ChannelStart { .. } => "MSG_CHANNEL_START",
             TbcPacket::ChannelUpdate { .. } => "MSG_CHANNEL_UPDATE",
             TbcPacket::InventoryChangeFailed { .. } => "SMSG_INVENTORY_CHANGE_FAILURE",
+            TbcPacket::QuestGiverStatus { .. } => "SMSG_QUESTGIVER_STATUS",
         }
     }
 }

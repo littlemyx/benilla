@@ -126,9 +126,12 @@ pub mod tbc_opcode {
     pub const SMSG_BINDPOINTUPDATE: u16 = 0x0155;
     pub const SMSG_CLIENT_CONTROL_UPDATE: u16 = 0x0159;
     pub const SMSG_ITEM_PUSH_RESULT: u16 = 0x0166;
+    pub const CMSG_GOSSIP_SELECT_OPTION: u16 = 0x017c;
+    pub const SMSG_GOSSIP_MESSAGE: u16 = 0x017d;
     pub const CMSG_NPC_TEXT_QUERY: u16 = 0x017f;
     pub const SMSG_NPC_TEXT_UPDATE: u16 = 0x0180;
     pub const SMSG_QUESTGIVER_STATUS: u16 = 0x0183;
+    pub const SMSG_LIST_INVENTORY: u16 = 0x019f;
     pub const SMSG_NOTIFICATION: u16 = 0x01cb;
     pub const CMSG_QUERY_TIME: u16 = 0x01ce;
     pub const SMSG_QUERY_TIME_RESPONSE: u16 = 0x01cf;
@@ -393,6 +396,8 @@ static NAMES: &[(u16, &str)] = &[
     (0x0173, "SMSG_PET_TAME_FAILURE"),
     (0x0179, "SMSG_PET_SPELLS"),
     (0x017a, "SMSG_PET_MODE"),
+    (0x017c, "CMSG_GOSSIP_SELECT_OPTION"),
+    (0x017d, "SMSG_GOSSIP_MESSAGE"),
     (0x017e, "SMSG_GOSSIP_COMPLETE"),
     (0x017f, "CMSG_NPC_TEXT_QUERY"),
     (0x0180, "SMSG_NPC_TEXT_UPDATE"),
@@ -404,6 +409,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x0199, "SMSG_QUESTUPDATE_ADD_KILL"),
     (0x019a, "SMSG_QUESTUPDATE_ADD_ITEM"),
     (0x019c, "SMSG_QUEST_CONFIRM_ACCEPT"),
+    (0x019f, "SMSG_LIST_INVENTORY"),
     (0x01a1, "SMSG_SELL_ITEM"),
     (0x01a4, "SMSG_BUY_ITEM"),
     (0x01a5, "SMSG_BUY_FAILED"),
