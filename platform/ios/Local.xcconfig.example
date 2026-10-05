@@ -3,3 +3,6 @@
 DEVELOPMENT_TEAM = XXXXXXXXXX
 // Must be unique to your team.
 PRODUCT_BUNDLE_IDENTIFIER = org.benilla.client
+// Optional: a second app beside the first, e.g. a development build for another client version.
+// BENILLA_DISPLAY_NAME = benilla 2.4.3
+// BENILLA_CARGO_FEATURES = dev

@@ -19,6 +19,16 @@ fn main() -> benilla_app::AppExit {
                 std::env::set_var(key, format!("{home}/{tail}"));
             }
         }
+        // A relative `WOW_SESSION_RECORD` (devicectl cannot know the container path) names a
+        // folder under `Documents`, which Files shows and `devicectl` can copy from.
+        if let Some(rel) = std::env::var_os("WOW_SESSION_RECORD").filter(|v| !v.is_empty()) {
+            if std::path::Path::new(&rel).is_relative() {
+                let mut full = std::path::PathBuf::from(&home);
+                full.push("Documents");
+                full.push(rel);
+                std::env::set_var("WOW_SESSION_RECORD", full);
+            }
+        }
     }
     benilla_app::run(BuildId {
         version: env!("CARGO_PKG_VERSION"),

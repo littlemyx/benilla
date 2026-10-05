@@ -72,3 +72,11 @@ input trace, so the checks are behavioural.
     a picked-up item's icon follows it, and the system arrow is hidden over the game. The log has
     `system pointer hidden over the view`; hover still moves the cursor, and it vanishes in a
     right-button look.
+
+## A development build beside the player one
+
+`BENILLA_CARGO_FEATURES = dev` in `Local.xcconfig` builds with the `dev` feature, which honours the
+development switches (`WOW_ALLOW_UNPLAYABLE=1`, `WOW_SESSION_RECORD`); a different
+`PRODUCT_BUNDLE_IDENTIFIER` and `BENILLA_DISPLAY_NAME` install it beside the first app with its own
+container. A relative `WOW_SESSION_RECORD` is a folder under `Documents`. Environment variables go
+in with `xcrun devicectl device process launch --environment-variables '{"K":"V"}'`.

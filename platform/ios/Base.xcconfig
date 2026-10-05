@@ -1,4 +1,8 @@
 // The bundle id, overridden by the optional, gitignored Local.xcconfig below, which also
 // carries DEVELOPMENT_TEAM. A project-level setting would outrank an xcconfig, so it lives here.
 PRODUCT_BUNDLE_IDENTIFIER = org.benilla.client
+// The home-screen name, and the cargo features of the Rust build ("dev" honours the development
+// switches such as WOW_ALLOW_UNPLAYABLE; empty is the player build).
+BENILLA_DISPLAY_NAME = benilla
+BENILLA_CARGO_FEATURES =
 #include? "Local.xcconfig"

@@ -18,7 +18,14 @@ else
     profile=dev; dir=debug
 fi
 
-cargo build --target "$triple" --profile "$profile" -p benilla --no-default-features
+# BENILLA_CARGO_FEATURES (an xcconfig build setting, empty by default) adds cargo features, e.g.
+# `dev` for a development device build that honours the dev switches; a player build leaves it empty.
+features=()
+if [ -n "${BENILLA_CARGO_FEATURES:-}" ]; then
+    features=(--features "$BENILLA_CARGO_FEATURES")
+fi
+
+cargo build --target "$triple" --profile "$profile" -p benilla --no-default-features ${features[@]+"${features[@]}"}
 
 out="$TARGET_BUILD_DIR/$EXECUTABLE_PATH"
 mkdir -p "$(dirname "$out")"
