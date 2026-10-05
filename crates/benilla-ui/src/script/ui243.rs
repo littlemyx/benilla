@@ -26,6 +26,42 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     super::ui243_verbs::install(lua)
 }
 
+/// The 2.4.3 name and argument list of a 1.12.1 event whose trigger the engine already has: the
+/// cast events moved to `UNIT_SPELLCAST_*` and take the unit first (`CastingBarFrame.lua` reads
+/// `arg1` as the unit and asks `UnitCastingInfo` / `UnitChannelInfo` for the rest; `ChatFrame.lua`
+/// reads `unit, spellName, rank`). Only the player casts here, so the unit is `"player"`; the rank
+/// is not carried, `""`; the 1.12.1 millisecond arguments are state the info verbs answer.
+pub(super) fn renamed_event(
+    event: &str,
+    args: &[super::ScriptValue],
+) -> Option<(&'static str, Vec<super::ScriptValue>)> {
+    use super::ScriptValue::Str;
+    let player = || Str("player".into());
+    let spell = |i: usize| match args.get(i) {
+        Some(Str(name)) => Some(Str(name.clone())),
+        _ => None,
+    };
+    Some(match event {
+        // `SPELLCAST_START(name, ms)`.
+        "SPELLCAST_START" => (
+            "UNIT_SPELLCAST_START",
+            vec![player(), spell(0)?, Str(String::new())],
+        ),
+        // `SPELLCAST_CHANNEL_START(ms, name)`.
+        "SPELLCAST_CHANNEL_START" => (
+            "UNIT_SPELLCAST_CHANNEL_START",
+            vec![player(), spell(1)?, Str(String::new())],
+        ),
+        "SPELLCAST_STOP" => ("UNIT_SPELLCAST_STOP", vec![player()]),
+        "SPELLCAST_FAILED" => ("UNIT_SPELLCAST_FAILED", vec![player()]),
+        "SPELLCAST_INTERRUPTED" => ("UNIT_SPELLCAST_INTERRUPTED", vec![player()]),
+        "SPELLCAST_DELAYED" => ("UNIT_SPELLCAST_DELAYED", vec![player()]),
+        "SPELLCAST_CHANNEL_UPDATE" => ("UNIT_SPELLCAST_CHANNEL_UPDATE", vec![player()]),
+        "SPELLCAST_CHANNEL_STOP" => ("UNIT_SPELLCAST_CHANNEL_STOP", vec![player()]),
+        _ => return None,
+    })
+}
+
 /// Run `f` over a frame's Cooldown state; errors unless `this` is a live Cooldown.
 fn with_cooldown<T>(
     lua: &Lua,
@@ -628,6 +664,46 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("Unknown attributes element Other")));
+    }
+
+    /// The cast events of the engine reach a 2.4.3 listener under their `UNIT_SPELLCAST_*` names,
+    /// the unit first, and a 1.12.1 listener under the old ones with the old arguments.
+    #[test]
+    fn the_cast_events_are_signalled_under_the_names_each_build_registers() {
+        use crate::script::ScriptValue::{Int, Str};
+        let mut s = s51();
+        s.run(
+            "seen = {} f = CreateFrame('Frame') \
+             for _, e in ipairs({'UNIT_SPELLCAST_START', 'UNIT_SPELLCAST_CHANNEL_START', \
+                 'UNIT_SPELLCAST_STOP', 'UNIT_SPELLCAST_DELAYED', 'SPELLCAST_START'}) do f:RegisterEvent(e) end \
+             f:SetScript('OnEvent', function(self, event, ...) \
+                 table.insert(seen, event .. ':' .. table.concat({tostring((...)), tostring((select(2, ...))), tostring((select(3, ...)))}, ',')) end)",
+        )
+        .unwrap();
+        s.fire_event("SPELLCAST_START", vec![Str("Fireball".into()), Int(3000)]);
+        s.fire_event("SPELLCAST_CHANNEL_START", vec![Int(8000), Str("Blizzard".into())]);
+        s.fire_event("SPELLCAST_STOP", vec![]);
+        s.fire_event("SPELLCAST_DELAYED", vec![Int(500)]);
+        assert_eq!(
+            s.eval::<Vec<String>>("return seen").unwrap(),
+            [
+                "UNIT_SPELLCAST_START:player,Fireball,",
+                "UNIT_SPELLCAST_CHANNEL_START:player,Blizzard,",
+                "UNIT_SPELLCAST_STOP:player,nil,nil",
+                "UNIT_SPELLCAST_DELAYED:player,nil,nil",
+            ]
+        );
+        let mut old = UiScript::new().unwrap();
+        old.run(
+            "seen = {} f = CreateFrame('Frame') f:RegisterEvent('SPELLCAST_START') \
+             f:SetScript('OnEvent', function() table.insert(seen, event .. ':' .. arg1 .. ':' .. arg2) end)",
+        )
+        .unwrap();
+        old.fire_event("SPELLCAST_START", vec![Str("Fireball".into()), Int(3000)]);
+        assert_eq!(
+            old.eval::<Vec<String>>("return seen").unwrap(),
+            ["SPELLCAST_START:Fireball:3000"]
+        );
     }
 
     #[test]

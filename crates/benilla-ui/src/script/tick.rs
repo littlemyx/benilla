@@ -35,6 +35,17 @@ impl UiScript {
 
 /// [`UiScript::fire_event`] for a caller holding `&Lua`, such as a Lua binding.
 pub(crate) fn fire_event_into(lua: &Lua, event: &str, args: Vec<ScriptValue>) {
+    // The 2.4.3 interface registers the renamed events (`SPELLCAST_*` became `UNIT_SPELLCAST_*`,
+    // the unit first), so the same trigger is signalled under its 2.4.3 name and argument list.
+    if super::ScriptDialect::of(lua) == super::ScriptDialect::Lua51 {
+        if let Some((event, args)) = super::ui243::renamed_event(event, &args) {
+            return fire_event_into_as_is(lua, event, args);
+        }
+    }
+    fire_event_into_as_is(lua, event, args)
+}
+
+fn fire_event_into_as_is(lua: &Lua, event: &str, args: Vec<ScriptValue>) {
     let model_mut = || lua.app_data_mut::<Model>().expect("model app_data set");
     {
         let mut at = {
