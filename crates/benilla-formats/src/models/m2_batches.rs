@@ -86,7 +86,7 @@ fn normalize_weights(w: [u8; 4]) -> [f32; 4] {
     ]
 }
 
-/// Bone `bone_idx`'s scale track (`+0x44`) as a global-sequence [`BoneScaleAnim`], at the offsets
+/// Bone `bone_idx`'s scale track (`+0x44`, `+0x48` from 2.x) as a global-sequence [`BoneScaleAnim`], at the offsets
 /// `0x714260` reads; `None` for a sequence track or fewer than two keys.
 fn parse_bone_scale_anim(bytes: &[u8], bone_idx: usize) -> Option<BoneScaleAnim> {
     let bone_count = bytes.u32_at(0x34)? as usize;
@@ -94,7 +94,10 @@ fn parse_bone_scale_anim(bytes: &[u8], bone_idx: usize) -> Option<BoneScaleAnim>
     if bone_idx >= bone_count {
         return None;
     }
-    let track = bones_ofs.checked_add(bone_idx * 0x6c)?.checked_add(0x44)?;
+    let layout = benilla_m2::M2Layout::of(bytes);
+    let track = bones_ofs
+        .checked_add(bone_idx * layout.bone_size)?
+        .checked_add(layout.bone_scale)?;
     let interp = bytes.u16_at(track)? != 0;
     let gseq = bytes.u16_at(track + 0x02)?;
     if gseq == 0xffff {
@@ -133,7 +136,7 @@ fn parse_bone_scale_anim(bytes: &[u8], bone_idx: usize) -> Option<BoneScaleAnim>
     })
 }
 
-/// Bone `bone_idx`'s translation track (`+0x0c`) cut to one sequence's `band` as a loop (the
+/// Bone `bone_idx`'s translation track (`+0x0c`, `+0x10` from 2.x) cut to one sequence's `band` as a loop (the
 /// questgiver bob: anim 0 on load, 190 raised, `0x6076c0`); `None` under two keys in the band.
 fn parse_bone_seq_translation(
     bytes: &[u8],
@@ -147,7 +150,10 @@ fn parse_bone_seq_translation(
     if bone_idx >= bone_count {
         return None;
     }
-    let track = bones_ofs.checked_add(bone_idx * 0x6c)?.checked_add(0x0c)?;
+    let layout = benilla_m2::M2Layout::of(bytes);
+    let track = bones_ofs
+        .checked_add(bone_idx * layout.bone_size)?
+        .checked_add(layout.bone_translation)?;
     let interp = bytes.u16_at(track)? != 0;
     if bytes.u16_at(track + 0x02)? != 0xffff {
         return None; // a global-sequence loop
