@@ -164,6 +164,115 @@ pub(super) fn read_message_chat(r: &mut &[u8]) -> io::Result<ChatMessage> {
     })
 }
 
+/// The 1.12.1 `ChatMsg` number for a 2.4.3 chat type, by entry name (cmangos-tbc `ChatMsg`
+/// against cmangos-classic's, two sources): 2.4.3 inserts SYSTEM at 0 and renumbers the rest.
+/// `None` for a type 1.12.1 has no number for (whisper-foreign, monster-party, the channel notices,
+/// money, combat lines, restricted, ...).
+pub fn chat_type_from_tbc(tbc: u8) -> Option<u8> {
+    Some(match tbc {
+        0x00 => CHAT_MSG_SYSTEM,
+        0x01 => CHAT_MSG_SAY,
+        0x02 => CHAT_MSG_PARTY,
+        0x03 => CHAT_MSG_RAID,
+        0x04 => CHAT_MSG_GUILD,
+        0x05 => CHAT_MSG_OFFICER,
+        0x06 => CHAT_MSG_YELL,
+        0x07 => CHAT_MSG_WHISPER,
+        0x09 => CHAT_MSG_WHISPER_INFORM,
+        0x0A => CHAT_MSG_EMOTE,
+        0x0B => 0x09, // TEXT_EMOTE
+        0x0C => CHAT_MSG_MONSTER_SAY,
+        0x0E => CHAT_MSG_MONSTER_YELL,
+        0x0F => CHAT_MSG_MONSTER_WHISPER,
+        0x10 => CHAT_MSG_MONSTER_EMOTE,
+        0x11 => CHAT_MSG_CHANNEL,
+        0x17 => CHAT_MSG_AFK,
+        0x18 => CHAT_MSG_DND,
+        0x19 => CHAT_MSG_IGNORED,
+        0x1A => 0x17, // SKILL
+        0x1B => 0x18, // LOOT
+        0x24 => CHAT_MSG_BG_SYSTEM_NEUTRAL,
+        0x25 => CHAT_MSG_BG_SYSTEM_ALLIANCE,
+        0x26 => CHAT_MSG_BG_SYSTEM_HORDE,
+        0x27 => CHAT_MSG_RAID_LEADER,
+        0x28 => CHAT_MSG_RAID_WARNING,
+        0x29 => CHAT_MSG_RAID_BOSS_EMOTE,
+        0x2A => CHAT_MSG_RAID_BOSS_WHISPER,
+        0x2B => CHAT_MSG_FILTERED,
+        0x2C => CHAT_MSG_BATTLEGROUND,
+        0x2D => CHAT_MSG_BATTLEGROUND_LEADER,
+        _ => return None,
+    })
+}
+
+/// Whether a guid's high part is a creature, not a player or a pet (2.4.3 `ObjectGuid`: player 0,
+/// pet 0xF140): the cases where a monster line carries the target's name.
+fn is_creature_target(guid: u64) -> bool {
+    let high = (guid >> 48) as u16;
+    guid != 0 && high != 0x0000 && high != 0xF140
+}
+
+/// Read a 2.4.3 `SMSG_MESSAGECHAT` (cmangos-tbc `BuildChatPacket`, wow_messages): `u8 type`,
+/// `u32 language`, `u64 sender guid`, a `u32` 0, then a per-type body and the text. The type is
+/// returned in 1.12.1's numbering and the tag in 1.12.1's (GM 3, DND 2, AFK 1); `None` for a type
+/// with no 1.12.1 number, whose shape the caller leaves unread.
+pub(super) fn read_message_chat_tbc(r: &mut &[u8]) -> io::Result<Option<ChatMessage>> {
+    // Monster say/yell/whisper/emote and the raid-boss lines: a sender name before the target.
+    const MONSTER_NAMED: [u8; 6] = [0x0C, 0x0E, 0x0F, 0x10, 0x29, 0x2A];
+    let tbc_type = read_u8(r)?;
+    let Some(chat_type) = chat_type_from_tbc(tbc_type) else {
+        return Ok(None);
+    };
+    let language = read_u32_le(r)?;
+    let sender_guid = read_u64_le(r)?;
+    let _unknown = read_u32_le(r)?;
+    let target_guid;
+    let mut sender_name = None;
+    let mut channel = None;
+    if MONSTER_NAMED.contains(&tbc_type) {
+        sender_name = Some(read_len_string(r)?);
+        target_guid = read_u64_le(r)?;
+        if is_creature_target(target_guid) {
+            let _target_name = read_len_string(r)?;
+        }
+    } else if matches!(tbc_type, 0x24..=0x26) {
+        target_guid = read_u64_le(r)?;
+        if target_guid != 0 && (target_guid >> 48) != 0 {
+            let _target_name = read_len_string(r)?;
+        }
+    } else {
+        if tbc_type == 0x11 {
+            channel = Some(read_cstring(r)?);
+        }
+        target_guid = read_u64_le(r)?;
+    }
+    let text = read_len_string(r)?;
+    let tag = read_u8(r)?;
+    // GM is a flag in 2.4.3 (0x04) and a value in 1.12.1; the server shows GM over DND over AFK.
+    let chat_tag = if tag & 0x04 != 0 {
+        chat_tag::GM
+    } else if tag & 0x02 != 0 {
+        chat_tag::DND
+    } else if tag & 0x01 != 0 {
+        chat_tag::AFK
+    } else {
+        tag
+    };
+    if tag & 0x04 != 0 && !MONSTER_NAMED.contains(&tbc_type) && !matches!(tbc_type, 0x24..=0x26) {
+        sender_name = Some(read_len_string(r)?);
+    }
+    Ok(Some(ChatMessage {
+        chat_type,
+        language,
+        sender_guid,
+        target_guid,
+        sender_name,
+        channel,
+        text,
+        chat_tag,
+    }))
+}
+
 /// Read `SMSG_CHAT_PLAYER_NOT_FOUND`: one cstring, the unnormalized name of an offline or
 /// misspelled whisper target (vmangos `Server/Packets/Chat.cpp:26-29`).
 pub(super) fn read_chat_player_not_found(r: &mut &[u8]) -> io::Result<String> {

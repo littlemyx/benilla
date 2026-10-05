@@ -176,6 +176,15 @@ pub fn played_time() -> Vec<u8> {
     Vec::new()
 }
 
+/// Body of the 2.4.3 `CMSG_TIME_SYNC_RESP`: the request's counter echoed, then the client's tick
+/// count in ms (cmangos-tbc `HandleTimeSyncResp`, wow_messages).
+pub fn time_sync_response(counter: u32, client_ticks: u32) -> Vec<u8> {
+    let mut body = Vec::with_capacity(8);
+    body.extend_from_slice(&counter.to_le_bytes());
+    body.extend_from_slice(&client_ticks.to_le_bytes());
+    body
+}
+
 /// `CMSG_QUERY_TIME` body: empty (`Handlers/QueryHandler.cpp:107`). The answer is the server's
 /// clock in unix seconds, the epoch timed-quest deadlines are stamped in.
 pub fn query_time() -> Vec<u8> {

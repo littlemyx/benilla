@@ -31,6 +31,7 @@ mod monster_move;
 mod movement;
 pub mod opcode;
 mod opcode_names;
+mod opcode_names_tbc;
 mod packet;
 mod page_text;
 mod parse;
@@ -52,6 +53,8 @@ mod tabard;
 mod taxi;
 mod tbc;
 pub use tbc::{char_create_result, read_char_enum_records};
+mod tbc_world;
+pub use tbc_world::{Contact, ExtraAura, TbcPacket};
 mod trade;
 mod trainer;
 mod tutorial;
@@ -82,12 +85,12 @@ pub use battlefield::{
 pub use binder::{binder_activate, PlayerBound};
 pub use channel::{channel_notice, ChannelNoticeTail, ChannelNotify};
 pub use chat::{
-    chat_tag, ChatMessage, CHAT_MSG_AFK, CHAT_MSG_BATTLEGROUND, CHAT_MSG_BATTLEGROUND_LEADER,
-    CHAT_MSG_BG_SYSTEM_ALLIANCE, CHAT_MSG_BG_SYSTEM_HORDE, CHAT_MSG_BG_SYSTEM_NEUTRAL,
-    CHAT_MSG_CHANNEL, CHAT_MSG_DND, CHAT_MSG_EMOTE, CHAT_MSG_FILTERED, CHAT_MSG_GUILD,
-    CHAT_MSG_IGNORED, CHAT_MSG_MONSTER_EMOTE, CHAT_MSG_MONSTER_SAY, CHAT_MSG_MONSTER_WHISPER,
-    CHAT_MSG_MONSTER_YELL, CHAT_MSG_OFFICER, CHAT_MSG_PARTY, CHAT_MSG_RAID,
-    CHAT_MSG_RAID_BOSS_EMOTE, CHAT_MSG_RAID_BOSS_WHISPER, CHAT_MSG_RAID_LEADER,
+    chat_tag, chat_type_from_tbc, ChatMessage, CHAT_MSG_AFK, CHAT_MSG_BATTLEGROUND,
+    CHAT_MSG_BATTLEGROUND_LEADER, CHAT_MSG_BG_SYSTEM_ALLIANCE, CHAT_MSG_BG_SYSTEM_HORDE,
+    CHAT_MSG_BG_SYSTEM_NEUTRAL, CHAT_MSG_CHANNEL, CHAT_MSG_DND, CHAT_MSG_EMOTE, CHAT_MSG_FILTERED,
+    CHAT_MSG_GUILD, CHAT_MSG_IGNORED, CHAT_MSG_MONSTER_EMOTE, CHAT_MSG_MONSTER_SAY,
+    CHAT_MSG_MONSTER_WHISPER, CHAT_MSG_MONSTER_YELL, CHAT_MSG_OFFICER, CHAT_MSG_PARTY,
+    CHAT_MSG_RAID, CHAT_MSG_RAID_BOSS_EMOTE, CHAT_MSG_RAID_BOSS_WHISPER, CHAT_MSG_RAID_LEADER,
     CHAT_MSG_RAID_WARNING, CHAT_MSG_SAY, CHAT_MSG_SYSTEM, CHAT_MSG_WHISPER,
     CHAT_MSG_WHISPER_INFORM, CHAT_MSG_YELL, MACRO_EXPANDED_TYPES,
 };
@@ -98,7 +101,7 @@ pub use client::{
     creature_query, force_speed_ack, full_guid, join_channel, knock_back_ack, leave_channel,
     messagechat, messagechat_channel, messagechat_kind, messagechat_whisper, move_flag_ack,
     move_spline_done, move_time_skipped, movement, pet_name_query, ping, played_time, query_time,
-    random_roll, teleport_ack, text_emote,
+    random_roll, teleport_ack, text_emote, time_sync_response,
 };
 pub use combat_log::{
     DamageShield, DispelFailed, EnchantmentLog, EnvironmentalDamageLog, ExecuteLog, PartyKillLog,
@@ -146,8 +149,8 @@ pub use instance::{
     RaidInstanceWarning,
 };
 pub use items::{
-    auto_equip_item, auto_store_bag_item, destroy_item, item_query, open_item, set_ammo,
-    split_item, swap_inv_item, swap_item, use_item, wrap_item, ItemDamage, ItemInfo,
+    auto_equip_item, auto_store_bag_item, destroy_item, item_query, item_query_tbc, open_item,
+    set_ammo, split_item, swap_inv_item, swap_item, use_item, wrap_item, ItemDamage, ItemInfo,
     ItemSpellEntry, ItemUseSpell, UseItemTarget, BAG_PLAYER_INVENTORY, ITEM_DYNFLAG_UNLOCKED,
     ITEM_DYNFLAG_WRAPPED, ITEM_FLAG_LOOTABLE, ITEM_FLAG_WRAPPER, SLOT_BAG_FIRST, SLOT_PACK_FIRST,
 };
@@ -172,6 +175,7 @@ pub use movement::{
     JumpInfo, MoveMode, MovementInfo, RelayVerb, SpeedKind, SplineMode, TransportPose,
 };
 pub use opcode_names::opcode_name;
+pub use opcode_names_tbc::{tbc_opcode, tbc_opcode_name};
 pub use packet::{CreatureQueryInfo, MonsterMoveFacing, ServerPacket};
 pub use page_text::page_text_query;
 pub use parse::{

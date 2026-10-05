@@ -66,8 +66,14 @@ pub struct SpellCastTargets {
     pub dest: Option<Vector3d>,
 }
 
-fn read_spell_cast_targets(r: &mut impl Read) -> io::Result<SpellCastTargets> {
-    let mask = read_u16_le(r)?;
+/// `wide_mask` reads the 2.4.3 `u32` target mask (cmangos-tbc `SpellCastTargets::write`), whose
+/// bits above 15 (the minipet target) are dropped; the target body is the same as in 1.12.1.
+fn read_spell_cast_targets(r: &mut impl Read, wide_mask: bool) -> io::Result<SpellCastTargets> {
+    let mask = if wide_mask {
+        (read_u32_le(r)? & 0xFFFF) as u16
+    } else {
+        read_u16_le(r)?
+    };
     let mut unit_target = None;
     let mut go_target = None;
     if mask
@@ -133,12 +139,24 @@ pub struct SpellStart {
 }
 
 pub(super) fn read_spell_start(r: &mut impl Read) -> io::Result<SpellStart> {
+    read_spell_start_in(r, false)
+}
+
+/// The 2.4.3 `SMSG_SPELL_START`: a `u8` cast count after the spell id, and a `u32` target mask.
+pub(super) fn read_spell_start_tbc(r: &mut impl Read) -> io::Result<SpellStart> {
+    read_spell_start_in(r, true)
+}
+
+fn read_spell_start_in(r: &mut impl Read, tbc: bool) -> io::Result<SpellStart> {
     let item_or_caster = read_packed_guid(r)?;
     let caster = read_packed_guid(r)?;
     let spell_id = read_u32_le(r)?;
+    if tbc {
+        let _cast_count = read_u8(r)?;
+    }
     let cast_flags = read_u16_le(r)?;
     let cast_time_ms = read_u32_le(r)?;
-    let targets = read_spell_cast_targets(r)?;
+    let targets = read_spell_cast_targets(r, tbc)?;
     let ammo_display_id = if cast_flags & CAST_FLAG_AMMO != 0 {
         Some(read_ammo(r)?)
     } else {
@@ -177,10 +195,22 @@ pub struct SpellGo {
 }
 
 pub(super) fn read_spell_go(r: &mut impl Read) -> io::Result<SpellGo> {
+    read_spell_go_in(r, false)
+}
+
+/// The 2.4.3 `SMSG_SPELL_GO`: a `u32` timestamp after the flags, and a `u32` target mask.
+pub(super) fn read_spell_go_tbc(r: &mut impl Read) -> io::Result<SpellGo> {
+    read_spell_go_in(r, true)
+}
+
+fn read_spell_go_in(r: &mut impl Read, tbc: bool) -> io::Result<SpellGo> {
     let item_or_caster = read_packed_guid(r)?;
     let caster = read_packed_guid(r)?;
     let spell_id = read_u32_le(r)?;
     let cast_flags = read_u16_le(r)?;
+    if tbc {
+        let _timestamp_ms = read_u32_le(r)?;
+    }
 
     // Both counts are `u8`s the server backfills (`Spell.cpp:4657-4658`); no tighter bound.
     let hit_count = read_u8(r)?;
@@ -199,7 +229,7 @@ pub(super) fn read_spell_go(r: &mut impl Read) -> io::Result<SpellGo> {
         misses.push((guid, reason));
     }
 
-    let targets = read_spell_cast_targets(r)?;
+    let targets = read_spell_cast_targets(r, tbc)?;
     let ammo_display_id = if cast_flags & CAST_FLAG_AMMO != 0 {
         Some(read_ammo(r)?)
     } else {

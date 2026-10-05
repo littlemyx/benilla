@@ -23,6 +23,21 @@ const SPLINE_FLAG_RUNMODE: u32 = 0x100;
 /// A stop (`moveType` 1) ends after the head: the 1.12 client reads no spline block and implies
 /// `flags = 0x100, count = 1, duration = 0`. Otherwise the path runs `[start, …, endpoint]`.
 pub(super) fn read_monster_move(r: &mut &[u8], on_transport: bool) -> io::Result<ServerPacket> {
+    read_monster_move_in(r, on_transport, false)
+}
+
+/// The 2.4.3 `SMSG_MONSTER_MOVE`: the 1.12.1 head and spline block, but a linear path's packed
+/// offsets are taken from the midpoint of the start and the endpoint (cmangos-tbc
+/// `WriteLinearPath`, one source), not from the endpoint.
+pub(super) fn read_monster_move_tbc(r: &mut &[u8], on_transport: bool) -> io::Result<ServerPacket> {
+    read_monster_move_in(r, on_transport, true)
+}
+
+fn read_monster_move_in(
+    r: &mut &[u8],
+    on_transport: bool,
+    midpoint_offsets: bool,
+) -> io::Result<ServerPacket> {
     let guid = read_packed_guid(r)?;
     let transport = on_transport.then(|| read_packed_guid(r)).transpose()?;
     let start = Vector3d::read(r)?;
@@ -60,7 +75,7 @@ pub(super) fn read_monster_move(r: &mut &[u8], on_transport: bool) -> io::Result
         let flying = spline_flags & SPLINE_FLAG_FLYING != 0;
         let run_mode = spline_flags & SPLINE_FLAG_RUNMODE != 0;
         // Both layouts ship only the points after the start, so the head's `start` leads the path.
-        let tail = read_monster_move_spline(r, flying)?;
+        let tail = read_monster_move_spline(r, flying, start, midpoint_offsets)?;
         let path = if tail.is_empty() {
             Vec::new()
         } else {
@@ -87,7 +102,12 @@ pub(super) fn read_monster_move(r: &mut &[u8], on_transport: bool) -> io::Result
 /// `endpoint - waypoint` offsets. The start is not among them: vmangos writes from
 /// `firstPoint = 1` (`MoveSplineInit.cpp:169`), and the reference decoder (`0x6018f0`) reads
 /// the same `count - 1`.
-fn read_monster_move_spline(r: &mut &[u8], catmull_rom: bool) -> io::Result<Vec<Vector3d>> {
+fn read_monster_move_spline(
+    r: &mut &[u8],
+    catmull_rom: bool,
+    start: Vector3d,
+    midpoint_offsets: bool,
+) -> io::Result<Vec<Vector3d>> {
     let count = read_u32_le(r)?;
     // 0xFFFF bounds only the pre-allocation against a corrupt `count`.
     if catmull_rom {
@@ -101,14 +121,25 @@ fn read_monster_move_spline(r: &mut &[u8], catmull_rom: bool) -> io::Result<Vec<
         return Ok(Vec::new());
     }
     let endpoint = Vector3d::read(r)?;
+    // The point the offsets are measured from: the endpoint in 1.12.1, the start-to-endpoint
+    // midpoint in 2.4.3.
+    let base = if midpoint_offsets {
+        Vector3d {
+            x: (start.x + endpoint.x) / 2.0,
+            y: (start.y + endpoint.y) / 2.0,
+            z: (start.z + endpoint.z) / 2.0,
+        }
+    } else {
+        endpoint
+    };
     let mut points = Vec::with_capacity(capacity_hint(count, 0xFFFF));
     // `count == 1` is a straight hop: no offsets (vmangos: `if (last_idx > 1)`).
     for _ in 1..count {
         let off = packed_to_vector3d(read_i32_le(r)?);
         points.push(Vector3d {
-            x: endpoint.x - off.x,
-            y: endpoint.y - off.y,
-            z: endpoint.z - off.z,
+            x: base.x - off.x,
+            y: base.y - off.y,
+            z: base.z - off.z,
         });
     }
     points.push(endpoint);

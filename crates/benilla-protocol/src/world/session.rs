@@ -54,6 +54,17 @@ impl std::fmt::Display for WardenRequired {
 
 impl std::error::Error for WardenRequired {}
 
+/// One server packet as [`WorldSession::recv_detailed`] read it.
+pub struct PacketRead {
+    pub packet: ServerPacket,
+    pub opcode: u16,
+    /// The body as it came off the wire, before any parse.
+    pub body: Vec<u8>,
+    /// Body bytes the parse left unread; a non-zero tail is a layout error. Always 0 for
+    /// [`ServerPacket::Other`], which reads nothing.
+    pub tail: usize,
+}
+
 /// An authenticated world-server session with 1.12 header obfuscation active.
 pub struct WorldSession {
     stream: TcpStream,
@@ -249,7 +260,13 @@ impl WorldSession {
 
     /// Read + decrypt + parse one server packet.
     pub fn recv(&mut self) -> Result<ServerPacket> {
-        let (packet, op, body) = recv_packet_raw(
+        self.recv_detailed().map(|read| read.packet)
+    }
+
+    /// [`Self::recv`], also giving the opcode, the undecoded body and the unread tail of the parse,
+    /// for probes that check a layout byte for byte.
+    pub fn recv_detailed(&mut self) -> Result<PacketRead> {
+        let (packet, op, body, tail) = recv_packet_raw(
             &mut self.stream,
             Some(self.crypto.decrypter()),
             &self.build,
@@ -257,14 +274,19 @@ impl WorldSession {
         )?;
         match op {
             opcode::SMSG_CHAR_CREATE => self.char_create_code = body.first().copied(),
-            opcode::SMSG_CHAR_ENUM => self.char_enum_body = Some(body),
+            opcode::SMSG_CHAR_ENUM => self.char_enum_body = Some(body.clone()),
             _ => {}
         }
         // `SMSG_ADDON_INFO` can reach any of the handshake's read loops, so it is caught here.
         if let ServerPacket::AddonInfo { statuses } = &packet {
             self.addon_info = Some(statuses.clone());
         }
-        Ok(packet)
+        Ok(PacketRead {
+            packet,
+            opcode: op,
+            body,
+            tail,
+        })
     }
 
     /// The `SMSG_CHAR_CREATE` result byte exactly as the server sent it. [`Self::create_character`]
@@ -459,9 +481,21 @@ impl WorldSession {
 
     /// Ask an item template (`CMSG_ITEM_QUERY_SINGLE`).
     pub fn item_query(&mut self, entry: u32, guid: u64) -> Result<()> {
+        // 2.4.3 sends the entry alone; 1.12.1 appends a guid.
+        let body = if matches!(self.build.expansion, benilla_build::Expansion::Tbc) {
+            messages::item_query_tbc(entry)
+        } else {
+            messages::item_query(entry, guid)
+        };
+        self.send(opcode::CMSG_ITEM_QUERY_SINGLE, &body)
+    }
+
+    /// Answer a 2.4.3 `SMSG_TIME_SYNC_REQ` (`CMSG_TIME_SYNC_RESP`): its counter echoed, then the
+    /// client's tick count in ms. The server estimates the clock offset and latency from the pair.
+    pub fn time_sync_response(&mut self, counter: u32) -> Result<()> {
         self.send(
-            opcode::CMSG_ITEM_QUERY_SINGLE,
-            &messages::item_query(entry, guid),
+            messages::tbc_opcode::CMSG_TIME_SYNC_RESP,
+            &messages::time_sync_response(counter, client_uptime_ms()),
         )
     }
 

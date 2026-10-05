@@ -5,10 +5,13 @@
 
 use std::io::{self, Read};
 
-use crate::wire::{capacity_hint, read_f32_le, read_u32_le, read_u8, Vector3d};
+use crate::wire::{
+    capacity_hint, read_cstring, read_f32_le, read_i32_le, read_u16_le, read_u32_le, read_u64_le,
+    read_u8, Vector3d,
+};
 
 use super::parse::read_addon_info;
-use super::{opcode, update_object, Character, ServerPacket};
+use super::{opcode, tbc_opcode, tbc_world, update_object, Character, ServerPacket};
 
 /// The billing group of an `AUTH_OK`: `u32` time remaining, `u8` plan flags, `u32` time rested.
 const BILLING_GROUP: usize = 9;
@@ -74,10 +77,267 @@ pub(super) fn parse_tbc_body(
             *inner_tail = dr.len();
             ServerPacket::UpdateObject { objects }
         }
-        other => ServerPacket::Other { opcode: other },
+        other => parse_tbc_entry_body(other, &mut r)?,
     };
     *cursor = r;
     Ok(packet)
+}
+
+/// The 2.4.3 arms of world entry, the queries and time sync. Every arm is named by
+/// the 2.4.3 opcode; a number whose 1.12.1 meaning differs (0x67, 0x33A, 0x33B) is read by its
+/// 2.4.3 meaning, and one this table does not hold is `Other`.
+fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
+    use tbc_opcode as t;
+    Ok(match op {
+        // --- Login state -------------------------------------------------------------------
+        // Same bytes as 1.12.1 (cmangos-tbc `SendInitialPacketsAfterAddToMap`, wow_messages).
+        t::SMSG_LOGIN_SETTIMESPEED => read_time_speed(r)?,
+        t::SMSG_ACCOUNT_DATA_TIMES => ServerPacket::Tbc(tbc_world::read_account_data_times(r)?),
+        t::SMSG_FEATURE_SYSTEM_STATUS => {
+            ServerPacket::Tbc(tbc_world::read_feature_system_status(r)?)
+        }
+        t::SMSG_EXPECTED_SPAM_RECORDS => {
+            ServerPacket::Tbc(tbc_world::read_expected_spam_records(r)?)
+        }
+        t::SMSG_MOTD => ServerPacket::Tbc(tbc_world::read_motd(r)?),
+        // Eight `u32`s, every remaining byte as in 1.12.1.
+        t::SMSG_TUTORIAL_FLAGS => {
+            ServerPacket::TutorialFlags(super::tutorial::read_tutorial_flags(r)?)
+        }
+        // x, y, z, map, area: the 1.12.1 bytes.
+        t::SMSG_BINDPOINTUPDATE => ServerPacket::BindPoint {
+            position: Vector3d::read(r)?,
+            map: read_u32_le(r)?,
+            area: read_u32_le(r)?,
+        },
+        t::SMSG_INSTANCE_DIFFICULTY => ServerPacket::Tbc(tbc_world::read_instance_difficulty(r)?),
+        t::MSG_SET_DUNGEON_DIFFICULTY => {
+            ServerPacket::Tbc(tbc_world::read_set_dungeon_difficulty(r)?)
+        }
+        t::SMSG_SET_REST_START => ServerPacket::Tbc(tbc_world::read_set_rest_start(r)?),
+        // 2.4.3 meaning of 0x33A; 1.12.1 carries it at 0x33B.
+        t::SMSG_DEFENSE_MESSAGE => {
+            let (zone_id, text) = super::broadcast::read_defense_message(r)?;
+            ServerPacket::DefenseMessage { zone_id, text }
+        }
+        // --- Character state ----------------------------------------------------------------
+        t::SMSG_INITIAL_SPELLS => {
+            let (spell_ids, cooldowns) = super::spellbook::read_initial_spells(r)?;
+            ServerPacket::InitialSpells {
+                spell_ids,
+                cooldowns,
+            }
+        }
+        t::SMSG_SEND_UNLEARN_SPELLS => ServerPacket::Tbc(tbc_world::read_send_unlearn_spells(r)?),
+        // 132 words to the end of the body; 1.12.1 sends 120 in the same packing.
+        t::SMSG_ACTION_BUTTONS => ServerPacket::ActionButtons {
+            buttons: super::action_bar::read_action_buttons(r)?,
+        },
+        // `count` is 128 here, 64 in 1.12.1; the entry shape is the same.
+        t::SMSG_INITIALIZE_FACTIONS => {
+            let count = read_u32_le(r)?;
+            let mut standings = Vec::with_capacity(capacity_hint(count, 128));
+            for _ in 0..count {
+                let flags = read_u8(r)?;
+                standings.push((flags, read_u32_le(r)? as i32));
+            }
+            ServerPacket::InitializeFactions { standings }
+        }
+        t::SMSG_SET_PROFICIENCY => ServerPacket::SetProficiency {
+            item_class: read_u8(r)?,
+            subclass_mask: read_u32_le(r)?,
+        },
+        // 0x67 was `SMSG_FRIEND_LIST` in 1.12.1; 2.4.3 sends all three lists here.
+        t::SMSG_CONTACT_LIST => ServerPacket::Tbc(tbc_world::read_contact_list(r)?),
+        // --- Chat and world ----------------------------------------------------------------
+        t::SMSG_MESSAGECHAT => match super::chat::read_message_chat_tbc(r)? {
+            Some(message) => ServerPacket::MessageChat(message),
+            // A chat type 1.12.1 has no number for: its bytes are left unread, never guessed at.
+            None => return Ok(ServerPacket::Other { opcode: op }),
+        },
+        t::SMSG_NOTIFICATION => ServerPacket::Notification {
+            text: read_cstring(r)?,
+        },
+        t::SMSG_WEATHER => {
+            let (weather_type, grade, instant) = tbc_world::read_weather(r)?;
+            // 2.4.3 carries no sound id (1.12.1 has a `u32` before the flag).
+            ServerPacket::Weather {
+                weather_type,
+                grade,
+                sound_id: 0,
+                instant,
+            }
+        }
+        t::SMSG_INIT_WORLD_STATES => {
+            let map = read_u32_le(r)?;
+            let zone = read_u32_le(r)?;
+            let _area = read_u32_le(r)?; // new in 2.4.3
+            let count = read_u16_le(r)?;
+            let mut states = Vec::with_capacity(capacity_hint(count, r.len() / 8));
+            for _ in 0..count {
+                states.push((read_u32_le(r)?, read_u32_le(r)?));
+            }
+            ServerPacket::InitWorldStates(super::InitWorldStates { map, zone, states })
+        }
+        t::SMSG_LFG_UPDATE => ServerPacket::Tbc(tbc_world::read_lfg_update(r)?),
+        // --- Auras and spells ---------------------------------------------------------------
+        t::SMSG_UPDATE_AURA_DURATION => {
+            let (slot, remaining_ms) = super::spells::read_update_aura_duration(r)?;
+            ServerPacket::UpdateAuraDuration { slot, remaining_ms }
+        }
+        t::SMSG_INIT_EXTRA_AURA_INFO => ServerPacket::Tbc(tbc_world::read_init_extra_aura_info(r)?),
+        t::SMSG_SET_EXTRA_AURA_INFO => {
+            ServerPacket::Tbc(tbc_world::read_set_extra_aura_info(r, false)?)
+        }
+        t::SMSG_SET_EXTRA_AURA_INFO_NEED_UPDATE => {
+            ServerPacket::Tbc(tbc_world::read_set_extra_aura_info(r, true)?)
+        }
+        t::SMSG_CLEAR_EXTRA_AURA_INFO => {
+            ServerPacket::Tbc(tbc_world::read_clear_extra_aura_info(r)?)
+        }
+        t::SMSG_SPELL_START => ServerPacket::SpellStart(super::spells::read_spell_start_tbc(r)?),
+        t::SMSG_SPELL_GO => ServerPacket::SpellGo(super::spells::read_spell_go_tbc(r)?),
+        // --- Movement and objects -----------------------------------------------------------
+        t::SMSG_MONSTER_MOVE => super::monster_move::read_monster_move_tbc(r, false)?,
+        t::SMSG_MONSTER_MOVE_TRANSPORT => super::monster_move::read_monster_move_tbc(r, true)?,
+        t::SMSG_DESTROY_OBJECT => ServerPacket::DestroyObject {
+            guid: read_u64_le(r)?,
+        },
+        // Empty in both builds; sent when the player logs out or leaves combat.
+        t::SMSG_CANCEL_COMBAT => ServerPacket::CancelCombat,
+        t::SMSG_TIME_SYNC_REQ => ServerPacket::Tbc(tbc_world::read_time_sync_request(r)?),
+        // --- Queries ----------------------------------------------------------------------
+        t::SMSG_NAME_QUERY_RESPONSE => {
+            let guid = read_u64_le(r)?;
+            let name = read_cstring(r)?;
+            let _realm = read_cstring(r)?;
+            let (race, gender, class) = (read_u32_le(r)?, read_u32_le(r)?, read_u32_le(r)?);
+            // The declined-names tail: a flag, then five cases when set.
+            if read_u8(r)? != 0 {
+                for _ in 0..5 {
+                    let _ = read_cstring(r)?;
+                }
+            }
+            ServerPacket::NameQueryResponse {
+                guid,
+                name,
+                race,
+                gender,
+                class,
+            }
+        }
+        t::SMSG_CREATURE_QUERY_RESPONSE => read_creature_query_response(r)?,
+        t::SMSG_GAMEOBJECT_QUERY_RESPONSE => read_gameobject_query_response(r)?,
+        t::SMSG_ITEM_QUERY_SINGLE_RESPONSE => {
+            let (entry, info) = super::items::read_item_query_response_tbc(r)?;
+            ServerPacket::ItemQueryResponse {
+                entry,
+                info: info.map(Box::new),
+            }
+        }
+        other => ServerPacket::Other { opcode: other },
+    })
+}
+
+/// The packed game time and speed (min:6, hour:5, weekday:3, day:6, month:4, year:5, LSB first):
+/// the bytes and the decoding of 1.12.1's `SMSG_LOGIN_SETTIMESPEED`.
+fn read_time_speed(r: &mut &[u8]) -> io::Result<ServerPacket> {
+    let datetime = read_u32_le(r)?;
+    let timescale = read_f32_le(r)?;
+    let (day, month, year) = (
+        (datetime >> 14) & 0x3F,
+        (datetime >> 20) & 0x0F,
+        (datetime >> 24) & 0x1F,
+    );
+    Ok(ServerPacket::TimeSpeed {
+        hours: ((datetime >> 6) & 0x1F) as u8,
+        minutes: (datetime & 0x3F) as u8,
+        day_serial: year * 372 + month * 31 + day,
+        timescale,
+    })
+}
+
+/// The 2.4.3 creature template: names, an icon name, the four type words, two `u32`s, four display
+/// ids, two multipliers and the racial-leader byte (cmangos-tbc `HandleCreatureQueryOpcode`). A
+/// miss is the entry with its top bit set.
+fn read_creature_query_response(r: &mut &[u8]) -> io::Result<ServerPacket> {
+    let entry = read_u32_le(r)?;
+    if entry & 0x8000_0000 != 0 {
+        return Ok(ServerPacket::CreatureQueryResponse {
+            entry: entry & 0x7FFF_FFFF,
+            info: None,
+        });
+    }
+    let name = read_cstring(r)?;
+    for _ in 0..3 {
+        let _ = read_cstring(r)?; // name2..name4, always empty
+    }
+    let subname = read_cstring(r)?;
+    let _icon_name = read_cstring(r)?;
+    let type_flags = read_u32_le(r)?;
+    let creature_type = read_u32_le(r)?;
+    let pet_family = read_u32_le(r)?;
+    let rank = read_u32_le(r)?;
+    let _unknown = read_u32_le(r)?;
+    let _pet_spell_data_id = read_u32_le(r)?;
+    // Four display ids; the first is the template's primary one, as in 1.12.1's single id.
+    let display_id = read_u32_le(r)?;
+    for _ in 0..3 {
+        let _ = read_u32_le(r)?;
+    }
+    let _health_multiplier = read_f32_le(r)?;
+    let _mana_multiplier = read_f32_le(r)?;
+    let racial_leader = read_u8(r)? != 0;
+    Ok(ServerPacket::CreatureQueryResponse {
+        entry,
+        info: Some(super::CreatureQueryInfo {
+            name,
+            subname,
+            creature_type,
+            pet_family,
+            rank,
+            type_flags,
+            display_id,
+            // 2.4.3 has no civilian byte.
+            civilian: false,
+            racial_leader,
+        }),
+    })
+}
+
+/// The 2.4.3 game-object template: type, display id, four names, icon name, cast-bar caption, one
+/// more string, 24 data words and the size (cmangos-tbc `HandleGameObjectQueryOpcode`).
+fn read_gameobject_query_response(r: &mut &[u8]) -> io::Result<ServerPacket> {
+    let entry = read_u32_le(r)?;
+    if entry & 0x8000_0000 != 0 {
+        return Ok(ServerPacket::GameObjectQueryResponse {
+            entry: entry & 0x7FFF_FFFF,
+            info: None,
+        });
+    }
+    let type_id = read_u32_le(r)?;
+    let display_id = read_u32_le(r)?;
+    let name = read_cstring(r)?;
+    for _ in 0..3 {
+        let _ = read_cstring(r)?; // name2..name4
+    }
+    let _icon_name = read_cstring(r)?;
+    let _cast_bar_caption = read_cstring(r)?;
+    let _unknown = read_cstring(r)?;
+    let mut data = [0i32; 24];
+    for slot in &mut data {
+        *slot = read_i32_le(r)?;
+    }
+    let _size = read_f32_le(r)?;
+    Ok(ServerPacket::GameObjectQueryResponse {
+        entry,
+        info: Some(super::GameObjectQueryInfo {
+            type_id,
+            display_id,
+            name,
+            data,
+        }),
+    })
 }
 
 /// The 1.12.1 `WorldResult` for the 2.4.3 `SMSG_CHAR_CREATE` result `code`, so the typed result
@@ -328,10 +588,10 @@ mod tests {
     }
 
     /// The 1.12.1 parser is not reachable from 2.4.3: a number whose meaning changed (0x6B was
-    /// `SMSG_IGNORE_LIST`) and an opcode only 1.12.1 reads both come back as `Other`.
+    /// `SMSG_IGNORE_LIST`) comes back as `Other`.
     #[test]
     fn everything_off_the_allow_list_is_other() {
-        for op in [0x006B, opcode::SMSG_DESTROY_OBJECT, 0x014F, 0x0293] {
+        for op in [0x006B, 0x014F, 0x0293] {
             match parse(op, &[0xff; 16]).unwrap() {
                 ServerPacket::Other { opcode } => assert_eq!(opcode, op),
                 other => panic!("{:#x} read as {}", op, other.name()),
