@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use benilla_assets::coords::{bevy_to_wow, placement_rotation, wow_to_bevy};
-use benilla_assets::{AdtTile, M2Model, WdtIndex, WmoModel};
+use benilla_assets::{AdtSettings, AdtTile, M2Model, WdtIndex, WmoModel};
 use benilla_formats::{Doodad, WmoInstance};
 use bevy::pbr::ExtendedMaterial;
 use bevy::prelude::*;
@@ -671,13 +671,17 @@ fn stream_terrain(
             fresh.sort_by_key(|&(tx, ty)| (tx - cx).abs().max((ty - cy).abs()));
             fresh.truncate(1);
         }
+        // The map's `MPHD` bit 2 (a 2.4.3 map), which the ADT's alpha layers follow.
+        let big_alpha = wdt_index.is_some_and(|w| w.has_big_alpha());
         for (tx, ty) in fresh {
             activity.tiles_requested += 1;
             state.tiles.insert(
                 (tx, ty),
                 TileState {
-                    handle: asset_server
-                        .load(format!("mpq://World/Maps/{dir}/{dir}_{tx}_{ty}.adt")),
+                    handle: asset_server.load_with_settings(
+                        format!("mpq://World/Maps/{dir}/{dir}_{tx}_{ty}.adt"),
+                        move |s: &mut AdtSettings| s.big_alpha = big_alpha,
+                    ),
                     entity: None,
                     material: None,
                     next_cell: 0,

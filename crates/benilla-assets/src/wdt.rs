@@ -20,6 +20,11 @@ impl WdtIndex {
             .is_some_and(|t| t.has_adt)
     }
 
+    /// Whether the map's ADTs store 8-bit uncompressed alpha layers (`MPHD` bit 2).
+    pub fn has_big_alpha(&self) -> bool {
+        self.0.has_big_alpha()
+    }
+
     /// The single global building of a map with no terrain (`MPHD` bit 0); `None` on an ADT map.
     pub fn global_wmo(&self) -> Option<&GlobalWmo> {
         self.0.global_wmo()

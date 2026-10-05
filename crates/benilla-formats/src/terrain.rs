@@ -292,8 +292,15 @@ pub(crate) fn snap_to_lattice(coord: f32) -> f32 {
     (map_center - idx * unit) as f32
 }
 
-/// Build per-chunk meshes from one vanilla (monolithic) ADT file's bytes.
+/// Build per-chunk meshes from one vanilla (monolithic) ADT file's bytes, on a map without the big
+/// alpha bit (every 1.12.1 map).
 pub fn adt_to_tile_mesh(adt_bytes: &[u8]) -> Result<TileMesh> {
+    adt_to_tile_mesh_with_alpha(adt_bytes, false)
+}
+
+/// [`adt_to_tile_mesh`] on a map whose WDT sets (`big_alpha`) or clears `MPHD` bit 2
+/// ([`WdtFile::has_big_alpha`]): set, uncompressed alpha layers are 4096 bytes, 8 bits a texel.
+pub fn adt_to_tile_mesh_with_alpha(adt_bytes: &[u8], big_alpha: bool) -> Result<TileMesh> {
     let mut cursor = Cursor::new(adt_bytes);
     let parsed = parse_adt(&mut cursor).map_err(|e| anyhow::anyhow!("parsing ADT: {e}"))?;
     // A vanilla ADT is always one monolithic root.
@@ -399,11 +406,9 @@ pub fn adt_to_tile_mesh(adt_bytes: &[u8]) -> Result<TileMesh> {
 
         // Layers 1..3 into one RGBA map; 1.12 alpha is 4-bit, last row and column duplicated.
         let alpha_map = (layer_textures.len() > 1).then(|| {
-            CombinedAlphaMap::new(
-                mcnk, /* has_big_alpha */ false, /* fix_alpha */ true,
-            )
-            .as_slice()
-            .to_vec()
+            CombinedAlphaMap::new(mcnk, big_alpha, /* fix_alpha */ true)
+                .as_slice()
+                .to_vec()
         });
 
         let shadow = mcnk.shadow.as_ref().map(|sh| {
@@ -573,6 +578,11 @@ impl MapTiles {
         })
     }
 
+    /// Whether the map's ADTs store 8-bit uncompressed alpha layers (`MPHD` bit 2).
+    pub fn has_big_alpha(&self) -> bool {
+        self.wdt.has_big_alpha()
+    }
+
     /// The map name (for `load_tile_mesh`).
     pub fn map(&self) -> &str {
         &self.map
@@ -606,11 +616,22 @@ impl MapTiles {
 
 /// Read and mesh one ADT tile from the chain.
 pub fn load_tile_mesh(chain: &mut Chain, map: &str, tile_x: u32, tile_y: u32) -> Result<TileMesh> {
+    let big_alpha = read_wdt(chain, map)?.has_big_alpha();
+    load_tile_mesh_in(chain, map, tile_x, tile_y, big_alpha)
+}
+
+fn load_tile_mesh_in(
+    chain: &mut Chain,
+    map: &str,
+    tile_x: u32,
+    tile_y: u32,
+    big_alpha: bool,
+) -> Result<TileMesh> {
     let path = format!("World\\Maps\\{map}\\{map}_{tile_x}_{tile_y}.adt");
     let bytes = chain
         .read_file(&path)
         .with_context(|| format!("reading {path}"))?;
-    adt_to_tile_mesh(&bytes)
+    adt_to_tile_mesh_with_alpha(&bytes, big_alpha)
 }
 
 /// Load every existing ADT tile within `radius` tiles of the world (x, y) on `map`.
@@ -637,7 +658,7 @@ pub fn load_tiles_around(
                 continue;
             }
             // An unparseable tile is skipped, not fatal.
-            if let Ok(mesh) = load_tile_mesh(chain, map, tx, ty) {
+            if let Ok(mesh) = load_tile_mesh_in(chain, map, tx, ty, wdt.has_big_alpha()) {
                 out.push(((tx, ty), mesh));
             }
         }

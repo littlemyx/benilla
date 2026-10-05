@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use benilla_formats::{
-    adt_to_tile_mesh, blp_bytes_to_native_chain, ChunkMesh, Doodad, WmoInstance, ALPHA_MAP_SIZE,
-    SHADOW_MAP_SIZE,
+    adt_to_tile_mesh_with_alpha, blp_bytes_to_native_chain, ChunkMesh, Doodad, WmoInstance,
+    ALPHA_MAP_SIZE, SHADOW_MAP_SIZE,
 };
 use bevy::asset::io::Reader;
 use bevy::asset::{Asset, AssetLoader, LoadContext, RenderAssetUsages};
@@ -125,25 +125,32 @@ pub fn chunks_to_mesh(parts: &[(&ChunkMesh, &ChunkShading)]) -> Option<Mesh> {
     Some(mesh)
 }
 
+/// Per-load settings of [`AdtLoader`]: the map's `MPHD` big-alpha bit, which lives in the WDT.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub struct AdtSettings {
+    /// 8-bit uncompressed alpha layers (`WdtIndex::has_big_alpha`); every 1.12.1 map clears it.
+    pub big_alpha: bool,
+}
+
 /// Loads a `*.adt` tile into an [`AdtTile`].
 #[derive(Default, TypePath)]
 pub struct AdtLoader;
 
 impl AssetLoader for AdtLoader {
     type Asset = AdtTile;
-    type Settings = ();
+    type Settings = AdtSettings;
     type Error = std::io::Error;
 
     async fn load(
         &self,
         reader: &mut dyn Reader,
-        _settings: &(),
+        settings: &AdtSettings,
         ctx: &mut LoadContext<'_>,
     ) -> Result<AdtTile, Self::Error> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
         let to_io = |e: anyhow::Error| std::io::Error::other(format!("{e:#}"));
-        let tile = adt_to_tile_mesh(&bytes).map_err(to_io)?;
+        let tile = adt_to_tile_mesh_with_alpha(&bytes, settings.big_alpha).map_err(to_io)?;
 
         // Layer array: a solid-green fallback at index 0, then each unique layer texture, packed
         // once the whole tile is read.
