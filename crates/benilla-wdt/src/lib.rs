@@ -88,9 +88,18 @@ pub struct WdtFile {
     /// `has_adt` per tile, indexed `y * 64 + x` (the on-disk MAIN order).
     has_adt: Vec<bool>,
     global_wmo: Option<GlobalWmo>,
+    /// `MPHD` dword 0, raw.
+    mphd_flags: u32,
 }
 
 impl WdtFile {
+    /// Whether the map's ADTs store 8-bit, uncompressed alpha layers (`MPHD` bit 2). Only
+    /// `Sunwell5ManFix` sets it among the 2.4.3 WDTs, and its tiles alone hold 4096-byte
+    /// uncompressed layers (read from the bytes); 1.12.1 never sets it.
+    pub fn has_big_alpha(&self) -> bool {
+        self.mphd_flags & 0x4 != 0
+    }
+
     pub fn get_tile(&self, x: usize, y: usize) -> Option<TileInfo> {
         if x >= MAP_SIZE || y >= MAP_SIZE {
             return None;
@@ -143,6 +152,7 @@ impl<R: Read + Seek> WdtReader<R> {
         self.reader.seek(SeekFrom::Start(start))?;
         let mut has_adt: Option<Vec<bool>> = None;
         let mut wmo_only = false;
+        let mut mphd_flags = 0u32;
         let mut wmo_path: Option<String> = None;
         let mut modf: Option<Vec<u8>> = None;
         loop {
@@ -156,7 +166,8 @@ impl<R: Read + Seek> WdtReader<R> {
                 // MPHD: the reference reads only dword 0 bit 0, the no-terrain flag (`0x694810`).
                 b"DHPM" if size >= 4 => {
                     let buf = self.read_payload(size, stream_end)?;
-                    wmo_only = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) & 0x1 != 0;
+                    mphd_flags = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+                    wmo_only = mphd_flags & 0x1 != 0;
                 }
                 b"NIAM" => {
                     // 64×64 entries × 8 bytes (flags u32, area_id u32); bit 0 of flags = has_adt.
@@ -214,6 +225,7 @@ impl<R: Read + Seek> WdtReader<R> {
         Ok(WdtFile {
             has_adt,
             global_wmo,
+            mphd_flags,
         })
     }
 }
@@ -288,6 +300,20 @@ mod tests {
 
     fn parse(bytes: Vec<u8>) -> std::io::Result<WdtFile> {
         WdtReader::new(Cursor::new(bytes), WowVersion::Classic).read()
+    }
+
+    #[test]
+    fn mphd_bit_2_is_the_big_alpha_flag() {
+        let mut bytes = synth_wdt(&[], false);
+        assert!(!parse(bytes.clone()).unwrap().has_big_alpha());
+        // MVER (8 + 4) then MPHD's header (8): its first payload byte is dword 0's low byte.
+        bytes[20] = 0x4;
+        let wdt = parse(bytes).unwrap();
+        assert!(wdt.has_big_alpha());
+        assert!(
+            wdt.global_wmo().is_none(),
+            "bit 2 is not the no-terrain bit"
+        );
     }
 
     /// A WMO-only map: `MPHD` bit 0, an empty `MAIN`, `MWMO` and one 64-byte `MODF` of distinct

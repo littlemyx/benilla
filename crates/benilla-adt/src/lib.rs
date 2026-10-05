@@ -130,6 +130,10 @@ pub struct MclqChunk {
 /// Searing Gorge's. The reference's header walk copies it to its chunk flag `0x40` (`0x6af5f0`).
 pub const MCNK_IMPASSABLE: u32 = 0x2;
 
+/// MCNK header flag bit 15: the chunk's alpha layers are complete 64×64 maps, so the last row and
+/// column are not rebuilt from their neighbours. Set on 78% of 2.4.3 chunks, 1% of 1.12.1's.
+pub const MCNK_DO_NOT_FIX_ALPHA: u32 = 0x8000;
+
 /// The MCNK header fields the renderer reads. The names mislead: `pred_tex` and `no_effect_doodad`
 /// are the two halves of the predominant-texture map at `+0x40`, and `unknown_8bytes` is the real
 /// noEffectDoodad at `+0x50`; the consumer reassembles them.
