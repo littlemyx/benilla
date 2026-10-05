@@ -165,14 +165,19 @@ impl ObjectFields {
     pub fn unit_level(&self) -> Option<u32> {
         self.get_u32(self.table.unit_level)
     }
-    /// One aura slot, live only when its `AURAFLAGS` nibble has an effect bit (`& 0x0E`) as the
-    /// client tests it, since a cleared slot can keep a stale spell id.
+    /// The aura slots of this build, 48 in 1.12.1 and 56 in 2.4.3.
+    pub fn unit_aura_slot_count(&self) -> u8 {
+        self.table.shape.aura_slots
+    }
+    /// One aura slot, live only when its `AURAFLAGS` bits have an effect bit set, as the client
+    /// tests it, since a cleared slot can keep a stale spell id.
     pub fn unit_aura(&self, slot: u8) -> Option<UnitAuraSlot> {
-        if slot >= UNIT_AURA_SLOTS {
+        let shape = &self.table.shape;
+        if slot >= shape.aura_slots {
             return None;
         }
-        let flags = self.get_aura_nibble(slot);
-        if flags & AURA_FLAG_EFF_INDEX_MASK == 0 {
+        let flags = self.get_aura_flags(slot);
+        if flags & shape.aura_live_mask == 0 {
             return None;
         }
         let spell_id = self
@@ -189,19 +194,41 @@ impl ObjectFields {
                 .saturating_add(1),
         })
     }
-    /// Live auras by ascending slot, buffs 0-31 then debuffs 32-47: the order `UnitBuff` and
+    /// Live auras by ascending slot, buffs first then debuffs: the order `UnitBuff` and
     /// `UnitDebuff` read another unit in (`0x519500`, `0x5198f0`). The local player's buff bar
     /// keeps insertion order in a packed cache (`0xbc6040`) instead, which this cannot recover.
     pub fn unit_auras(&self) -> impl Iterator<Item = UnitAuraSlot> + '_ {
-        (0..UNIT_AURA_SLOTS).filter_map(|slot| self.unit_aura(slot))
+        (0..self.unit_aura_slot_count()).filter_map(|slot| self.unit_aura(slot))
     }
     /// Every `UNIT_FIELD_AURA` slot's raw spell id, zeros and stale ids included, as the cast
     /// validator's crowd-control scan (`0x6e9ca0`) reads them, without `AURAFLAGS`.
     pub fn unit_aura_ids(&self) -> impl Iterator<Item = u32> + '_ {
-        (0..UNIT_AURA_SLOTS).map(|slot| {
+        (0..self.unit_aura_slot_count()).map(|slot| {
             self.get_u32(at(self.table.unit_aura, u16::from(slot)))
                 .unwrap_or(0)
         })
+    }
+    /// The first debuff slot: 1.12.1 a constant 32; 2.4.3 the byte the server sends per unit
+    /// (`UNIT_FIELD_BYTES_2` byte 1, 40 for a player or pet, 16 for a creature), `None` when a
+    /// delta does not carry it.
+    pub fn unit_aura_positive_limit(&self) -> Option<u8> {
+        match self.table.shape.aura_positive {
+            AuraSplit::Fixed(n) => Some(n),
+            AuraSplit::Byte(loc, _) => self.get_byte(loc).filter(|&n| n != 0),
+        }
+    }
+    /// A buff: the slot lies below [`Self::unit_aura_positive_limit`], or below the build's
+    /// constant when the unit does not carry its own.
+    pub fn unit_aura_is_helpful(&self, aura: &UnitAuraSlot) -> bool {
+        let fallback = match self.table.shape.aura_positive {
+            AuraSplit::Fixed(n) | AuraSplit::Byte(_, n) => n,
+        };
+        aura.slot < self.unit_aura_positive_limit().unwrap_or(fallback)
+    }
+    /// Whether the server will honour a `CMSG_CANCEL_AURA` for the aura, by the build's flag bit
+    /// (1.12.1 0x01, 2.4.3 0x10).
+    pub fn unit_aura_is_cancelable(&self, aura: &UnitAuraSlot) -> bool {
+        aura.flags & self.table.shape.aura_cancelable != 0
     }
 
     /// `UNIT_FIELD_BYTES_0` byte 3: power type, 0 mana, 1 rage, 2 focus, 3 energy, 4 happiness.
@@ -211,12 +238,12 @@ impl ObjectFields {
     /// `UNIT_FIELD_BYTES_1` byte 0: stand state, 0 stand, 1 sit, 2 chair, 3 sleep, 4-6 low,
     /// medium and high chair, 8 kneel; for a player, the echo of `CMSG_STANDSTATECHANGE`.
     pub fn unit_stand_state(&self) -> u8 {
-        (self.get_u32(self.table.unit_bytes_1).unwrap_or(0) & 0xff) as u8
+        self.get_byte(self.table.shape.stand_state).unwrap_or(0)
     }
     /// `UNIT_FIELD_BYTES_1` byte 1: a hunter pet's loyalty level, 1-8, which `GetPetLoyalty`
     /// (`0x4be700`) indexes `PetLoyalty.dbc` with; 0 is none and answers nil.
     pub fn unit_loyalty_level(&self) -> u8 {
-        ((self.get_u32(self.table.unit_bytes_1).unwrap_or(0) >> 8) & 0xff) as u8
+        self.get_byte(self.table.shape.loyalty).unwrap_or(0)
     }
     /// `UNIT_FIELD_PETEXPERIENCE` and `UNIT_FIELD_PETNEXTLEVELEXP`: `GetPetExperience`'s
     /// `(currXP, nextXP)`; absent reads 0, the binding's own failure value, never nil.
@@ -226,27 +253,39 @@ impl ObjectFields {
             self.get_u32(self.table.unit_petnextlevelexp).unwrap_or(0),
         )
     }
-    /// `UNIT_TRAINING_POINTS`: `(total, spent)`, total in the high half as the client splits it.
+    /// `UNIT_TRAINING_POINTS`: `(total, spent)`, total in the high half as the client splits it;
+    /// `(0, 0)` where the build has no such pair (2.4.3 keeps one signed display value) or the
+    /// object did not carry it, which [`Self::unit_training_points_carried`] tells apart.
     pub fn unit_training_points(&self) -> (u16, u16) {
-        let packed = self.get_u32(self.table.unit_training_points).unwrap_or(0);
-        ((packed >> 16) as u16, (packed & 0xffff) as u16)
+        self.unit_training_points_carried().unwrap_or((0, 0))
     }
-    /// `UNIT_FIELD_BYTES_1` byte 3 bit `0x2`, `UNIT_VIS_FLAGS_CREEP` (`SpellAuras.cpp:3610`):
-    /// stealthed; read by the usable check (`[+0x110]+0x213 & 2`) and the tracker (`0x5ed210`).
+    /// [`Self::unit_training_points`] keeping absence: `None` for a build without the pair and for
+    /// an object that did not carry it.
+    pub fn unit_training_points_carried(&self) -> Option<(u16, u16)> {
+        self.get_u32(self.table.unit_training_points)
+            .map(|packed| ((packed >> 16) as u16, (packed & 0xffff) as u16))
+    }
+    /// The vis-flags byte of `UNIT_FIELD_BYTES_1` (byte 3 in 1.12.1, byte 2 in 2.4.3), 0 when
+    /// not carried.
+    fn unit_vis_flags(&self) -> u8 {
+        self.get_byte(self.table.shape.vis_flags).unwrap_or(0)
+    }
+    /// Vis-flags bit `0x2`, `UNIT_VIS_FLAGS_CREEP` (`SpellAuras.cpp:3610`): stealthed; read by
+    /// the usable check (`[+0x110]+0x213 & 2`) and the tracker (`0x5ed210`).
     pub fn unit_is_stealthed(&self) -> bool {
-        (self.get_u32(self.table.unit_bytes_1).unwrap_or(0) >> 24) & 0x2 != 0
+        self.unit_vis_flags() & 0x2 != 0
     }
-    /// `UNIT_FIELD_BYTES_1` byte 3 bit `0x1`, `UNIT_VIS_FLAGS_GHOST`, set by the ghost aura: it
-    /// only hides names and plates (`byte3 & 0x03`, `0x607101`, `0x60f62e`); the ghostly body is
-    /// the aura's own visual kit (spell 8326, kit 989).
+    /// Vis-flags bit `0x1`, `UNIT_VIS_FLAGS_GHOST`, set by the ghost aura: it only hides names and
+    /// plates (`byte3 & 0x03`, `0x607101`, `0x60f62e`); the ghostly body is the aura's own visual
+    /// kit (spell 8326, kit 989).
     pub fn unit_is_ghost_visual(&self) -> bool {
-        (self.get_u32(self.table.unit_bytes_1).unwrap_or(0) >> 24) & 0x1 != 0
+        self.unit_vis_flags() & 0x1 != 0
     }
 
-    /// `UNIT_FIELD_BYTES_1` byte 3 bit `0x4` (vmangos `UNIT_VIS_FLAGS_UNTRACKABLE`): no minimap
-    /// dot at all, quest or tracking (`byte [eax+0x213] & 4`, the byte's only such test).
+    /// Vis-flags bit `0x4` (vmangos `UNIT_VIS_FLAGS_UNTRACKABLE`): no minimap dot at all, quest or
+    /// tracking (`byte [eax+0x213] & 4`, the byte's only such test).
     pub fn unit_is_untrackable(&self) -> bool {
-        (self.get_u32(self.table.unit_bytes_1).unwrap_or(0) >> 24) & 0x4 != 0
+        self.unit_vis_flags() & 0x4 != 0
     }
 
     /// `UNIT_FIELD_AURASTATE`: the aura-state bits (1 defense, 2 health under 20%, ...), which
@@ -255,10 +294,11 @@ impl ObjectFields {
         self.get_u32(self.table.unit_aurastate).unwrap_or(0)
     }
 
-    /// `UNIT_FIELD_BYTES_1` byte 2: the shapeshift form, 0 none, 17-19 the warrior stances, the
-    /// druid forms low; the creature-type resolver `0x605570` checks it first.
+    /// The shapeshift form, 0 none, 17-19 the warrior stances, the druid forms low; the
+    /// creature-type resolver `0x605570` checks it first. `UNIT_FIELD_BYTES_1` byte 2 in 1.12.1,
+    /// `UNIT_FIELD_BYTES_2` byte 3 in 2.4.3.
     pub fn unit_shapeshift_form(&self) -> u8 {
-        (self.get_u32(self.table.unit_bytes_1).unwrap_or(0) >> 16) as u8
+        self.get_byte(self.table.shape.shapeshift_form).unwrap_or(0)
     }
     /// `UNIT_FIELD_POWER1..5`: current power of type `ty`, on the wire's raw scale.
     pub fn unit_power(&self, ty: u8) -> Option<u32> {
@@ -340,28 +380,35 @@ impl ObjectFields {
             ))
         })?
     }
-    /// `UNIT_VIRTUAL_ITEM_INFO + 2*slot`: bytes `(class, subclass, material, inventory_type)`.
-    pub fn unit_virtual_item_info(&self, slot: u8) -> Option<(u8, u8, u8, u8)> {
-        let v = (slot < 3)
-            .then(|| self.get_u32(at(self.table.unit_virtual_item_info, 2 * u16::from(slot))))?;
-        v.map(|v| {
-            (
-                (v & 0xff) as u8,
-                ((v >> 8) & 0xff) as u8,
-                ((v >> 16) & 0xff) as u8,
-                ((v >> 24) & 0xff) as u8,
-            )
-        })
+    /// One byte of a virtual item's two info dwords, `None` when the dword is not carried.
+    fn virtual_item_byte(&self, slot: u8, loc: DwordByte) -> Option<u8> {
+        let index = at(
+            self.table.unit_virtual_item_info,
+            2 * u16::from(slot) + u16::from(loc.dword),
+        );
+        self.get_u32(index).map(|v| (v >> (8 * loc.byte)) as u8)
     }
-    /// `UNIT_VIRTUAL_ITEM_INFO + 2*slot + 1` byte 0: the virtual item's sheath type.
+    /// `UNIT_VIRTUAL_ITEM_INFO + 2*slot`: bytes `(class, subclass, material, inventory_type)`,
+    /// which the build lays over the two dwords as it does (the shape); `None` unless every dword
+    /// they come from is carried.
+    pub fn unit_virtual_item_info(&self, slot: u8) -> Option<(u8, u8, u8, u8)> {
+        if slot >= 3 {
+            return None;
+        }
+        let v = &self.table.shape.virtual_item;
+        Some((
+            self.virtual_item_byte(slot, v.class)?,
+            self.virtual_item_byte(slot, v.subclass)?,
+            self.virtual_item_byte(slot, v.material)?,
+            self.virtual_item_byte(slot, v.inventory_type)?,
+        ))
+    }
+    /// The virtual item's sheath type (1.12.1: dword 1 byte 0; 2.4.3: dword 1 byte 1).
     pub fn unit_virtual_item_sheath(&self, slot: u8) -> Option<u8> {
-        let v = (slot < 3).then(|| {
-            self.get_u32(at(
-                self.table.unit_virtual_item_info,
-                2 * u16::from(slot) + 1,
-            ))
-        })?;
-        v.map(|v| (v & 0xff) as u8)
+        if slot >= 3 {
+            return None;
+        }
+        self.virtual_item_byte(slot, self.table.shape.virtual_item.sheath)
     }
     /// `UNIT_FIELD_BYTES_2` byte 0: sheath state, 0 stowed, 1 melee drawn, 2 ranged drawn; for a
     /// player, whatever they last sent in `CMSG_SETSHEATHED`.

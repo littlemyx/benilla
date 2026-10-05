@@ -59,17 +59,20 @@ const FIELD_UNIT_MINRANGEDDAMAGE: u16 = FIELDS_5875.unit_minrangeddamage;
 #[cfg(test)]
 const FIELD_UNIT_MAXRANGEDDAMAGE: u16 = FIELDS_5875.unit_maxrangeddamage;
 
-/// Aura slots per unit (vmangos `MAX_AURAS`, `SpellAuraDefines.h:25`).
+/// Aura slots per unit in 1.12.1 (vmangos `MAX_AURAS`, `SpellAuraDefines.h:25`); a build's own
+/// count is [`ObjectFields::unit_aura_slot_count`] (2.4.3: 56).
 pub const UNIT_AURA_SLOTS: u8 = 48;
-/// Slots below this hold buffs, the rest debuffs (`SpellAuraDefines.h:26`). Passives get no slot,
-/// so the client renders the array unfiltered (`SpellAuras.cpp:6715-6736`).
+/// Slots below this hold buffs, the rest debuffs in 1.12.1 (`SpellAuraDefines.h:26`). Passives get
+/// no slot, so the client renders the array unfiltered (`SpellAuras.cpp:6715-6736`). A build's own
+/// boundary is [`ObjectFields::unit_aura_positive_limit`] (2.4.3: sent per unit).
 pub const UNIT_AURA_POSITIVE_SLOTS: u8 = 32;
 
-/// `AFLAG_CANCELABLE`: set on a positive aura without `SPELL_ATTR_NO_AURA_CANCEL`, the same test
-/// the `CMSG_CANCEL_AURA` handler makes (`SpellAuras.cpp:7467`).
+/// `AFLAG_CANCELABLE` in 1.12.1: set on a positive aura without `SPELL_ATTR_NO_AURA_CANCEL`, the
+/// same test the `CMSG_CANCEL_AURA` handler makes (`SpellAuras.cpp:7467`). 2.4.3 moved it to 0x10;
+/// [`ObjectFields::unit_aura_is_cancelable`] answers for either build.
 pub const AURA_FLAG_CANCELABLE: u8 = 0x01;
-/// `AFLAG_EFF_INDEX_0|1|2`, the client's aura liveness test: a cleared slot can keep a stale spell
-/// id, so a live aura is one with any of these bits set.
+/// `AFLAG_EFF_INDEX_0|1|2` in 1.12.1, the client's aura liveness test: a cleared slot can keep a
+/// stale spell id, so a live aura is one with any of these bits set (2.4.3: 0x07, in the shape).
 pub const AURA_FLAG_EFF_INDEX_MASK: u8 = 0x0E;
 
 /// One occupied aura slot, from the four `UNIT_FIELD_AURA*` arrays; duration and caster are not
@@ -79,7 +82,7 @@ pub struct UnitAuraSlot {
     /// Also the buff or debuff class, and the key `SMSG_UPDATE_AURA_DURATION` uses.
     pub slot: u8,
     pub spell_id: u32,
-    /// The raw `UNIT_FIELD_AURAFLAGS` nibble.
+    /// The raw `UNIT_FIELD_AURAFLAGS` bits of the slot (a nibble in 1.12.1, a byte in 2.4.3).
     pub flags: u8,
     /// The caster's level at apply time, the only trace of the caster.
     pub level: u8,
@@ -88,11 +91,13 @@ pub struct UnitAuraSlot {
 }
 
 impl UnitAuraSlot {
-    /// A buff: the slot is in the positive half.
+    /// A buff by the 1.12.1 boundary: the slot is in the positive half. For another build ask
+    /// [`ObjectFields::unit_aura_is_helpful`].
     pub fn is_helpful(&self) -> bool {
         self.slot < UNIT_AURA_POSITIVE_SLOTS
     }
-    /// Whether the server will honour a `CMSG_CANCEL_AURA` for this aura.
+    /// Whether the server will honour a `CMSG_CANCEL_AURA` for this aura, by the 1.12.1 flag bit.
+    /// For another build ask [`ObjectFields::unit_aura_is_cancelable`].
     pub fn is_cancelable(&self) -> bool {
         self.flags & AURA_FLAG_CANCELABLE != 0
     }
@@ -110,7 +115,8 @@ pub mod field {
     pub use super::FIELD_PLAYER_QUEST_LOG_1_1;
 }
 
-/// `MAX_QUEST_LOG_SIZE` (`QuestDef.h:34`).
+/// `MAX_QUEST_LOG_SIZE` in 1.12.1 (`QuestDef.h:34`); a build's own count is
+/// [`ObjectFields::player_quest_log_slot_count`] (2.4.3: 25).
 pub const PLAYER_QUEST_LOG_SLOTS: u8 = 20;
 
 /// One `PLAYER_QUEST_LOG` slot, the durable quest state; `SMSG_QUESTUPDATE_*` are only toasts.
@@ -118,10 +124,12 @@ pub const PLAYER_QUEST_LOG_SLOTS: u8 = 20;
 pub struct QuestLogSlot {
     /// 0 for an empty slot.
     pub quest_id: u32,
-    /// Four 6-bit kill, cast and interact counters at bits `6i..6i+6` (`Player.h:1100-1106`); the
-    /// client counts item objectives from the bags itself.
+    /// Four kill, cast and interact counters (`Player.h:1100-1106`): 6 bits each at bits
+    /// `6i..6i+6` in 1.12.1, a byte each in 2.4.3 (`SetQuestSlotCounter`); the client counts item
+    /// objectives from the bags itself.
     pub counters: [u8; 4],
-    /// Byte 3 of the counter field (`Player.h:1107`): a [`quest_slot_state`] bit, 0 in progress.
+    /// A [`quest_slot_state`] bit, 0 in progress: byte 3 of the counter field in 1.12.1
+    /// (`Player.h:1107`), the low byte of a state dword of its own in 2.4.3.
     pub state: u8,
     /// The absolute end time of a timed quest, else 0.
     pub timer: u32,
@@ -155,7 +163,8 @@ const FIELD_PLAYER_WATCHED_FACTION_INDEX: u16 = FIELDS_5875.player_watched_facti
 const FIELD_PLAYER_REST_STATE_EXPERIENCE: u16 = FIELDS_5875.player_rest_state_experience;
 #[cfg(test)]
 const FIELD_PLAYER_EXPLORED_ZONES_1: u16 = FIELDS_5875.player_explored_zones_1;
-/// The bitset's slot count (`Size: 64` in the server enum).
+/// The bitset's slot count in 1.12.1 (`Size: 64` in the server enum); a build's own count is
+/// [`ObjectFields::player_explored_zone_count`] (2.4.3: 128).
 pub const PLAYER_EXPLORED_ZONES_SLOTS: u16 = 64;
 #[cfg(test)]
 const FIELD_PLAYER_POSSTAT0: u16 = FIELDS_5875.player_posstat0;
@@ -508,12 +517,16 @@ impl ObjectFields {
         self.get_u32(index).map(|v| (v as u16, (v >> 16) as u16))
     }
 
-    /// One slot's `UNIT_FIELD_AURAFLAGS` nibble; an absent word reads 0, as in the client.
-    fn get_aura_nibble(&self, slot: u8) -> u8 {
+    /// One slot's `UNIT_FIELD_AURAFLAGS` bits (a nibble or a byte by the build's shape); an absent
+    /// word reads 0, as in the client.
+    fn get_aura_flags(&self, slot: u8) -> u8 {
+        let bits = u16::from(self.table.shape.aura_flag_bits);
+        let per_word = 32 / bits;
+        let slot = u16::from(slot);
         let word = self
-            .get_u32(at(self.table.unit_auraflags, u16::from(slot >> 3)))
+            .get_u32(at(self.table.unit_auraflags, slot / per_word))
             .unwrap_or(0);
-        ((word >> ((slot & 7) * 4)) & 0x0F) as u8
+        ((word >> ((slot % per_word) * bits)) & ((1u32 << bits) - 1)) as u8
     }
 
     /// One slot's byte of `UNIT_FIELD_AURALEVELS` or `UNIT_FIELD_AURAAPPLICATIONS`; an absent word
@@ -521,6 +534,12 @@ impl ObjectFields {
     fn get_aura_byte(&self, base: u16, slot: u8) -> u8 {
         let word = self.get_u32(at(base, u16::from(slot >> 2))).unwrap_or(0);
         (word >> ((slot & 3) * 8)) as u8
+    }
+
+    /// One byte of a packed field, `None` where the build has no such sub-field or the field is
+    /// not carried.
+    fn get_byte(&self, loc: ByteAt) -> Option<u8> {
+        self.get_u32(loc.field).map(|v| (v >> (8 * loc.byte)) as u8)
     }
 
     /// Folds in an update: a `Values` delta overlays, since a field going to 0 is sent as 0; a
@@ -611,8 +630,11 @@ impl ObjectFields {
 }
 
 mod player;
+mod shape;
 mod table;
 mod unit;
+
+pub use shape::{AuraSplit, ByteAt, DwordByte, FieldShape, QuestState, VirtualItemShape};
 
 use table::MAX_PLAYER_END;
 
@@ -628,5 +650,7 @@ fn at(base: u16, offset: u16) -> u16 {
 pub use table::{build_field_table, field_table, FieldTable, FIELDS_5875, FIELDS_8606};
 pub use unit::{power_display_scale, OwnerFallback};
 
+#[cfg(test)]
+mod shape_tests;
 #[cfg(test)]
 mod tests;
