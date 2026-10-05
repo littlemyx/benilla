@@ -134,6 +134,16 @@ pub(crate) struct Placements {
 }
 
 impl Placements {
+    /// Registered placements as `(m2 doodads, wmo buildings)`, for the viewer's counters.
+    pub(crate) fn counts(&self) -> (usize, usize) {
+        let m2 = self
+            .by_id
+            .values()
+            .filter(|p| matches!(p.model, ModelHandle::M2(_)))
+            .count();
+        (m2, self.by_id.len() - m2)
+    }
+
     /// Every entity a registered placement owns; a placed part outside it is a doubled prop.
     pub(crate) fn owned(&self) -> std::collections::HashSet<Entity> {
         self.by_id

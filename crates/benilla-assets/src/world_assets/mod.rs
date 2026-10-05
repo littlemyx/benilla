@@ -305,7 +305,9 @@ impl WorldAssets {
             return Some(handle);
         }
         // World art uploads as the BLP stores it; nothing reads it main-side.
-        let chain = read_texture_native_chain(&mut self.chain.lock_recover(), &key.0).ok()?;
+        let chain = read_texture_native_chain(&mut self.chain.lock_recover(), &key.0)
+            .inspect_err(|e| crate::load_misses::record("model/sky texture", &key.0, e))
+            .ok()?;
         let handle = images.add(repeat_texture_authored(crate::for_upload(chain), wrap));
         self.textures.insert(key, handle.clone());
         Some(handle)

@@ -225,6 +225,153 @@ fn plugin(app: &mut App) {
     if std::env::var("WOW_WORLDVIEW_SHOT").is_ok() {
         app.add_systems(Update, shoot_and_exit);
     }
+
+    // The counters print on the frame the shot fires, and the failure tally runs from the start.
+    app.init_resource::<LoadFailures>().add_systems(
+        Update,
+        (
+            note_failures::<benilla_assets::AdtTile>("adt"),
+            note_failures::<benilla_assets::WdtIndex>("wdt"),
+            note_failures::<benilla_assets::M2Model>("m2"),
+            note_failures::<benilla_assets::WmoModel>("wmo"),
+            note_failures::<Image>("image"),
+        ),
+    );
+    if std::env::var("WOW_WORLDVIEW_SHOT").is_ok() {
+        app.add_systems(Update, print_counters);
+    }
+}
+
+/// Every asset the engine's loaders refused, by kind and path: the count and the first error.
+#[derive(Resource, Default)]
+struct LoadFailures(std::collections::BTreeMap<(&'static str, String), (u32, String)>);
+
+fn note_failures<A: bevy::asset::Asset>(
+    kind: &'static str,
+) -> impl FnMut(MessageReader<bevy::asset::AssetLoadFailedEvent<A>>, ResMut<LoadFailures>) {
+    move |mut events, mut fails| {
+        for e in events.read() {
+            let slot = fails
+                .0
+                .entry((kind, e.path.to_string()))
+                .or_insert_with(|| (0, e.error.to_string().chars().take(160).collect()));
+            slot.0 += 1;
+        }
+    }
+}
+
+/// The seconds `WOW_WORLDVIEW_SHOT` fires at.
+fn shot_at() -> f32 {
+    std::env::var("WOW_WORLDVIEW_SHOT_AT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20.0)
+}
+
+/// What the counters read, as one parameter.
+#[derive(bevy::ecs::system::SystemParam)]
+struct CounterParams<'w, 's> {
+    census: crate::world_census::WorldCensus<'w, 's>,
+    placements: Option<Res<'w, crate::terrain_stream::Placements>>,
+    adt: Res<'w, Assets<benilla_assets::AdtTile>>,
+    wmo: Res<'w, Assets<benilla_assets::WmoModel>>,
+    m2: Res<'w, Assets<benilla_assets::M2Model>>,
+    liquids: Query<'w, 's, (), With<crate::liquid::LiquidSurface>>,
+    light: Option<Res<'w, crate::lighting::WowLighting>>,
+    map: Option<Res<'w, crate::world_map::CurrentMap>>,
+    cam: Query<'w, 's, &'static GlobalTransform, With<crate::view::WorldCamera>>,
+    fails: Res<'w, LoadFailures>,
+    streamer: Option<Res<'w, crate::terrain_stream::TerrainStreamer>>,
+}
+
+/// Prints the run's counters once, on the frame the shot fires: what was asked for, what arrived
+/// and what failed, so a run is judged by numbers and not by the picture.
+fn print_counters(time: Res<Time>, mut done: Local<bool>, p: CounterParams) {
+    if *done || time.elapsed_secs() < shot_at() {
+        return;
+    }
+    *done = true;
+    let r = p.census.take();
+    let (furnished, requested) = r.tiles.unwrap_or((0, 0));
+    let (mut tiles_loaded, mut chunks, mut layer_slots) = (0usize, 0usize, 0usize);
+    let mut distinct_layers = std::collections::BTreeSet::new();
+    for (_, tile) in p.adt.iter() {
+        tiles_loaded += 1;
+        for c in tile.chunks.iter().filter(|c| c.indices.len() >= 3) {
+            chunks += 1;
+            layer_slots += c.layer_textures.len().min(4);
+            distinct_layers.extend(
+                c.layer_textures
+                    .iter()
+                    .take(4)
+                    .map(|t| t.to_ascii_lowercase()),
+            );
+        }
+    }
+    let (m2_inst, wmo_inst) = p.placements.as_ref().map_or((0, 0), |p| p.counts());
+    let wmo_groups: usize = p.wmo.iter().map(|(_, m)| m.group_nav.len()).sum();
+    let map = p.map.as_ref().map_or(u32::MAX, |m| m.0);
+    let failed_tiles = p.fails.0.keys().filter(|(k, _)| *k == "adt").count();
+    println!("WV_COUNTERS map={map}");
+    println!(
+        "WV_COUNTERS tiles requested={requested} furnished={furnished} adt_loaded={tiles_loaded} \
+         adt_failed={failed_tiles}"
+    );
+    println!(
+        "WV_COUNTERS terrain chunks={chunks} layer_slots={layer_slots} distinct_layer_textures={}",
+        distinct_layers.len()
+    );
+    println!(
+        "WV_COUNTERS m2 models={} instances={m2_inst} | wmo roots={} groups={wmo_groups} \
+         instances={wmo_inst} | liquid_surfaces={} | submeshes={} drawn={} images={} meshes={}",
+        p.m2.len(),
+        p.wmo.len(),
+        p.liquids.iter().count(),
+        r.submeshes,
+        r.drawn,
+        r.images,
+        r.meshes
+    );
+    if let Some(l) = p.light.as_ref() {
+        let d = benilla_formats::Atmosphere::DEFAULT;
+        println!(
+            "WV_COUNTERS light fog_end={:.1} fog_color={:?} ambient={:?} fallback_atmosphere={}",
+            l.fog_end,
+            l.fog_color,
+            l.ambient,
+            l.fog_color == d.fog_color && l.ambient == d.ambient
+        );
+    }
+    if let Some(c) = p.cam.iter().next() {
+        let wow = benilla_assets::coords::bevy_to_wow(c.translation());
+        let ground = p
+            .streamer
+            .as_ref()
+            .and_then(|s| crate::terrain_stream::terrain_height_under(s, &p.adt, c.translation()));
+        println!(
+            "WV_COUNTERS camera wow=[{:.1}, {:.1}, {:.1}] ground_under={ground:?} sky={:?}",
+            wow[0], wow[1], wow[2], r.sky
+        );
+    }
+    let mut by_class: std::collections::BTreeMap<String, (usize, u32)> = Default::default();
+    for ((k, _), (n, _)) in &p.fails.0 {
+        let e = by_class.entry((*k).to_string()).or_default();
+        e.0 += 1;
+        e.1 += n;
+    }
+    let misses = benilla_assets::load_misses::texture_misses();
+    for (k, why, _, n) in &misses {
+        let e = by_class.entry(format!("{k} {why}")).or_default();
+        e.0 += 1;
+        e.1 += n;
+    }
+    println!("WV_COUNTERS failed (distinct paths, attempts) by class: {by_class:?}");
+    for ((k, path), (n, err)) in p.fails.0.iter().take(15) {
+        println!("WV_COUNTERS fail {k} x{n} {path}: {err}");
+    }
+    for (k, why, path, n) in misses.iter().take(15) {
+        println!("WV_COUNTERS fail {k} {why} x{n} {path}");
+    }
 }
 
 /// Fires the `WOW_WORLDVIEW_SHOT` screenshot once and exits two seconds later: the write is
@@ -235,10 +382,7 @@ fn shoot_and_exit(
     mut fired_at: Local<Option<f32>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let at = std::env::var("WOW_WORLDVIEW_SHOT_AT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(20.0);
+    let at = shot_at();
     match *fired_at {
         None if time.elapsed_secs() >= at => {
             let path = std::env::var("WOW_WORLDVIEW_SHOT").unwrap_or_default();
