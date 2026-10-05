@@ -28,6 +28,11 @@ pub struct M2Layout {
     pub bone_pivot: usize,
     /// Bone rotation key size: four f32 (16) in 256/257; four int16 (8) from 260.
     pub rotation_key_size: usize,
+    /// Particle emitter record: the emitter type (1 plane, 2 sphere, 3 spline, 4 bone) as `(offset,
+    /// size)`: a u16 at 0x2a up to version 261, a u8 at 0x29 from 262 (measured: 100% of 9,269 +
+    /// 1,681 emitters read 1..4 as u16@0x2a in 260/261, and 100% of 2,075 + 3,045 as u8@0x29 in
+    /// 262/263, where u16@0x2a is the colour index, 0 in 95%).
+    pub particle_emitter_type: (usize, usize),
 }
 
 impl M2Layout {
@@ -42,6 +47,7 @@ impl M2Layout {
                 bone_scale: 0x44,
                 bone_pivot: 0x60,
                 rotation_key_size: 16,
+                particle_emitter_type: (0x2a, 2),
             }
         } else {
             Self {
@@ -52,6 +58,7 @@ impl M2Layout {
                 bone_scale: 0x48,
                 bone_pivot: 0x64,
                 rotation_key_size: 8,
+                particle_emitter_type: if version < 262 { (0x2a, 2) } else { (0x29, 1) },
             }
         }
     }
@@ -59,6 +66,16 @@ impl M2Layout {
     /// The layout of the model whose bytes these are; a file too short for a header reads as 1.12.1.
     pub fn of(bytes: &[u8]) -> Self {
         Self::for_version(bytes.u32_at(4).unwrap_or(256))
+    }
+
+    /// The emitter type of the particle record at `rec`, in this version's form.
+    pub fn read_particle_emitter_type(&self, b: &[u8], rec: usize) -> Option<u16> {
+        let (o, size) = self.particle_emitter_type;
+        if size == 1 {
+            b.get(rec + o).copied().map(u16::from)
+        } else {
+            b.u16_at(rec + o)
+        }
     }
 
     /// Whether bone rotation keys are the compressed int16 form.
@@ -120,6 +137,8 @@ mod tests {
             assert_eq!(l.bone_rotation, l.bone_translation + TRACK_SIZE);
         }
         assert_eq!((old.rotation_key_size, new.rotation_key_size), (16, 8));
+        assert_eq!(M2Layout::for_version(261).particle_emitter_type, (0x2a, 2));
+        assert_eq!(M2Layout::for_version(262).particle_emitter_type, (0x29, 1));
     }
 
     #[test]

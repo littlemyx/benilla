@@ -11,7 +11,7 @@ use benilla_m2::{parse_m2, M2ScalarTrack};
 use crate::emit_timing::{EmitParams, EmitTiming};
 use crate::models::SeqSlot;
 
-/// Emitter spawn shape, file `emitterType` (+0x2a): 1 plane, 2 sphere, 3 spline.
+/// Emitter spawn shape, file `emitterType` (u16 at +0x2a, u8 at +0x29 from header version 262): 1 plane, 2 sphere, 3 spline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParticleShape {
     Plane,
@@ -545,12 +545,13 @@ pub fn parse_m2_particle_emitters(bytes: &[u8]) -> Result<Vec<ParticleEmitterDef
         ]
     };
 
+    let layout = benilla_m2::M2Layout::of(bytes);
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let e = base + i * STRIDE;
         let tex_index = le_u16(bytes, e + 0x16) as usize;
         let texture = textures.get(tex_index).cloned().flatten();
-        let shape = shape_of(le_u16(bytes, e + 0x2a));
+        let shape = shape_of(layout.read_particle_emitter_type(bytes, e).unwrap_or(0));
         // The geometry and recursion model paths (`M2Array<char>`, file-relative offsets).
         let model_path = |cnt_off: usize| -> Option<String> {
             let n = le_u32(bytes, e + cnt_off) as usize;
@@ -699,6 +700,31 @@ mod tests {
         assert_eq!(defs[0].flags, 0x0002, "authored flag word");
         assert_eq!(defs[0].blend, ParticleBlend::Alpha);
         assert!(defs[0].lit, "the spray sheet is shaded by the world");
+    }
+
+    /// One emitter record in a model of header `version` with the emitter type 2 (sphere) stored
+    /// in that version's form: u16 at 0x2a up to 261, u8 at 0x29 from 262.
+    fn model_with_sphere_emitter(version: u32) -> Vec<u8> {
+        let mut b = vec![0u8; 0x400 + STRIDE];
+        b[0..4].copy_from_slice(b"MD20");
+        b[4..8].copy_from_slice(&version.to_le_bytes());
+        b[HDR_COUNT..HDR_COUNT + 4].copy_from_slice(&1u32.to_le_bytes());
+        b[HDR_PTR..HDR_PTR + 4].copy_from_slice(&0x400u32.to_le_bytes());
+        if version < 262 {
+            b[0x400 + 0x2a] = 2;
+        } else {
+            b[0x400 + 0x29] = 2;
+        }
+        b
+    }
+
+    #[test]
+    fn the_emitter_type_is_read_in_the_headers_own_form() {
+        for version in [256, 260, 261, 262, 263] {
+            let defs = parse_m2_particle_emitters(&model_with_sphere_emitter(version)).unwrap();
+            assert_eq!(defs.len(), 1, "v{version}");
+            assert_eq!(defs[0].shape, ParticleShape::Sphere, "v{version}");
+        }
     }
 
     /// Straight segments of 1 and 3 yd (control points at thirds, so each cubic is linear) put
