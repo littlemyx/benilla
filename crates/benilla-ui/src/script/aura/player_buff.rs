@@ -10,12 +10,12 @@ use super::{cancel_authorized, AuraState, Model};
 /// `HELPFUL|HARMFUL` (`0x4e4618`), and a filter string starts the mask at zero (`0x4e4639`), so a
 /// bare `"CANCELABLE"` matches nothing.
 #[derive(Clone, Copy)]
-struct PlayerBuffFilter(u32);
+pub(super) struct PlayerBuffFilter(u32);
 
 impl PlayerBuffFilter {
     /// Case-insensitive match against the four tokens (`0x4e4661`-`0x4e46cf`); anything else,
     /// `"PASSIVE"` included, sets no bit. Space and pipe both delimit, runs collapsed (`0x84bc3c`).
-    fn parse(spec: Option<&str>) -> Self {
+    pub(super) fn parse(spec: Option<&str>) -> Self {
         const HELPFUL: u32 = 0x1;
         const HARMFUL: u32 = 0x2;
         const CANCELABLE: u32 = 0x10;
@@ -58,7 +58,7 @@ impl PlayerBuffFilter {
 /// The family's index argument, as every verb opens (`0x4e45d6`, `0x4e4748`, `0x4e4808`,
 /// `0x4e48bc`, `0x4e493e`, `0x4e49a8`): a number or numeric string, truncated; anything else raises
 /// the reference's usage line through `luaL_error` (`0x6f4940`).
-fn buff_index_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<i64> {
+pub(super) fn buff_index_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<i64> {
     match lua.coerce_number(v)? {
         // `__ftol` truncates toward zero, as `as i64` does.
         Some(n) => Ok(n as i64),
@@ -70,7 +70,7 @@ fn buff_index_arg(lua: &Lua, v: Value, usage: &'static str) -> mlua::Result<i64>
 /// NULL outside `0..0x30` (`0x4e4430`) and cleared records its siblings treat as absent. Deviation:
 /// `GetPlayerBuffApplications` answers 1 for a cleared record where the reference reads its stale
 /// `+0x9`, the previous occupant's count, because no guarded caller reaches it.
-fn player_buff_record(lua: &Lua, pos: i64) -> Option<AuraState> {
+pub(super) fn player_buff_record(lua: &Lua, pos: i64) -> Option<AuraState> {
     let pos = usize::try_from(pos).ok()?;
     let model = lua.app_data_ref::<Model>().expect("model app_data");
     model.player_auras.get(pos).cloned()
@@ -78,7 +78,7 @@ fn player_buff_record(lua: &Lua, pos: i64) -> Option<AuraState> {
 
 /// The enumerator (`0x4e43b0`): the `index`-th record passing `filter`, by ascending position,
 /// with that position. A negative `index` never matches the counter, which counts up from 0.
-fn enumerate_player_buff(
+pub(super) fn enumerate_player_buff(
     lua: &Lua,
     index: i64,
     filter: PlayerBuffFilter,

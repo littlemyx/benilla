@@ -30,6 +30,8 @@ use crate::ui_unit::UnitFeed;
 #[derive(Resource, Default)]
 pub(crate) struct AuraDurations {
     by_slot: HashMap<u8, DurationStamp>,
+    /// The spell a 2.4.3 extra-aura packet named per slot, which its clear packet keys on.
+    spell_of_slot: HashMap<u8, u32>,
 }
 
 struct DurationStamp {
@@ -59,6 +61,49 @@ impl AuraDurations {
                 received_at: now,
             },
         );
+    }
+}
+
+impl AuraDurations {
+    /// One 2.4.3 extra-aura packet: the full and remaining time of `spell_id`'s aura in `slot`. A
+    /// permanent aura (`max_ms` -1) carries no countdown and drops any stamp the slot had.
+    pub(crate) fn set_timed(
+        &mut self,
+        slot: u8,
+        spell_id: u32,
+        max_ms: i32,
+        remaining_ms: u32,
+        now: f64,
+    ) {
+        if max_ms <= 0 {
+            self.by_slot.remove(&slot);
+            self.spell_of_slot.remove(&slot);
+            return;
+        }
+        self.spell_of_slot.insert(slot, spell_id);
+        let remaining = f64::from(remaining_ms) / 1000.0;
+        self.by_slot.insert(
+            slot,
+            DurationStamp {
+                total: f64::from(max_ms) / 1000.0,
+                expires_at: now + remaining,
+                received_at: now,
+            },
+        );
+    }
+
+    /// `SMSG_CLEAR_EXTRA_AURA_INFO`: the stamps of `spell_id` end.
+    pub(crate) fn clear_spell(&mut self, spell_id: u32) {
+        let gone: Vec<u8> = self
+            .spell_of_slot
+            .iter()
+            .filter(|(_, s)| **s == spell_id)
+            .map(|(slot, _)| *slot)
+            .collect();
+        for slot in gone {
+            self.by_slot.remove(&slot);
+            self.spell_of_slot.remove(&slot);
+        }
     }
 }
 
@@ -271,9 +316,28 @@ fn other_unit_inputs<'a>(
     store
         .0
         .unit_auras()
-        .filter(move |a| buffs_visible || a.slot >= UNIT_AURA_POSITIVE_SLOTS)
+        .filter(move |a| buffs_visible || !store.0.unit_aura_is_helpful(a))
         .filter(move |a| shown_in_aura_ui(catalog, a.spell_id))
-        .map(|a| (a.slot, a.spell_id, a.stacks, a.flags))
+        .map(|a| {
+            // The sign and the cancel bit in the 1.12.1 convention `unit_aura_state` reads: the
+            // build's own split (2.4.3 sends it per unit) and cancel bit (0x10) decide them.
+            let slot = if store.0.unit_aura_is_helpful(&a) {
+                a.slot.min(UNIT_AURA_POSITIVE_SLOTS - 1)
+            } else {
+                a.slot.max(UNIT_AURA_POSITIVE_SLOTS)
+            };
+            let cancel = if store.0.unit_aura_is_cancelable(&a) {
+                AURA_FLAG_CANCELABLE
+            } else {
+                0
+            };
+            (
+                slot,
+                a.spell_id,
+                a.stacks,
+                (a.flags & !AURA_FLAG_CANCELABLE) | cancel,
+            )
+        })
 }
 
 /// A roster record's aura block as the two bindings' roster walk reads it (`0x519763`-`0x5197d2`,
@@ -433,10 +497,26 @@ fn feed_auras(
 
     let script_now = script.now();
 
+    // The build's own sign and cancel bit of each live slot (2.4.3: a per-unit split, bit 0x10).
+    let kind = |c: &CachedAura| {
+        occupied.iter().find(|a| a.slot == c.slot).map_or(
+            (
+                c.slot < UNIT_AURA_POSITIVE_SLOTS,
+                c.flags & AURA_FLAG_CANCELABLE != 0,
+            ),
+            |a| {
+                (
+                    store.0.unit_aura_is_helpful(a),
+                    store.0.unit_aura_is_cancelable(a),
+                )
+            },
+        )
+    };
     let list: Vec<AuraState> = cache
         .auras
         .iter()
         .map(|c| {
+            let (helpful, cancelable) = kind(c);
             let display = catalog.and_then(|cat| cat.get(c.spell_id));
             let (duration, expiration_time) = join_duration(
                 durations.by_slot.get(&c.slot),
@@ -455,12 +535,12 @@ fn feed_auras(
                     .map(str::to_string),
                 duration,
                 expiration_time,
-                helpful: c.slot < UNIT_AURA_POSITIVE_SLOTS,
-                cancelable: c.flags & AURA_FLAG_CANCELABLE != 0,
+                helpful,
+                cancelable,
                 until_cancelled: until_cancelled(
                     display,
                     display.and_then(|d| spell_durations.and_then(|c| c.get(d.duration_index))),
-                    c.flags & AURA_FLAG_CANCELABLE != 0,
+                    cancelable,
                     expiration_time,
                 ),
                 channeled: display
@@ -470,7 +550,18 @@ fn feed_auras(
         .collect();
 
     // Before the memory update, so a tracking change joins the edge key.
-    let tracking = tracking_state_of(catalog, &occupied);
+    let tracking = tracking_state_of(
+        catalog,
+        &occupied
+            .iter()
+            .map(|a| UnitAuraSlot {
+                // The cancel bit in the 1.12.1 position `tracking_state_of` reads.
+                flags: (a.flags & !AURA_FLAG_CANCELABLE)
+                    | u8::from(store.0.unit_aura_is_cancelable(a)),
+                ..*a
+            })
+            .collect::<Vec<_>>(),
+    );
     let tracking_spell = tracking.as_ref().map(|t| t.spell_id);
 
     if let Some(period) = trace_period() {
@@ -626,6 +717,7 @@ fn end_session_aura_state(
     }
     cache.auras.clear();
     durations.by_slot.clear();
+    durations.spell_of_slot.clear();
     // No `AuraFeedMemory` reset: its edge keys die with the VM.
 }
 
@@ -735,6 +827,46 @@ mod tests {
 
     fn order(cache: &[CachedAura]) -> Vec<(u8, u32)> {
         cache.iter().map(|c| (c.slot, c.spell_id)).collect()
+    }
+
+    /// 2.4.3's extra-aura packets: a timed aura stamps its full and remaining time, a permanent
+    /// one stamps nothing, and a clear ends the spell's stamps.
+    #[test]
+    fn the_extra_aura_info_stamps_timed_auras_and_clears_by_spell() {
+        let mut d = AuraDurations::default();
+        d.set_timed(3, 6673, 120_000, 90_000, 10.0);
+        d.set_timed(4, 2457, -1, 0, 10.0);
+        let (total, left) = join_duration(d.by_slot.get(&3), 10.0, 10.0, 50.0);
+        assert_eq!((total, left), (120.0, 50.0 + 90.0));
+        assert_eq!(
+            join_duration(d.by_slot.get(&4), 10.0, 10.0, 50.0),
+            (0.0, 0.0)
+        );
+        d.clear_spell(6673);
+        assert!(d.by_slot.is_empty());
+    }
+
+    /// Against the 2.4.3 `Spell.dbc`: the three warrior stances carry `AttributesEx` 0x10000000, the
+    /// bit 1.12.1 hides from the bar, and the shapeshift forms and Battle Shout do not, so the same
+    /// filter hides the stance and keeps the forms, with their icons.
+    #[test]
+    fn the_2_4_3_spell_catalog_hides_the_stances_and_keeps_forms_and_shouts() {
+        let data = benilla_formats::wow_data_tbc_or_skip!();
+        let mut chain = benilla_formats::open_chain(&data).expect("open chain");
+        let catalog = benilla_formats::load_spell_catalog(&mut chain).expect("Spell.dbc");
+        let stance = catalog.get(2457).expect("Battle Stance is a 2.4.3 spell");
+        assert_eq!(stance.name, "Battle Stance");
+        assert_eq!(
+            stance.icon.as_deref(),
+            Some("Interface\\Icons\\Ability_Warrior_OffensiveStance")
+        );
+        for stance in [71u32, 2457, 2458] {
+            assert!(!shown_in_aura_ui(Some(&catalog), stance), "stance {stance}");
+        }
+        for shown in [5487u32, 768, 1784, 1126, 6673] {
+            assert!(shown_in_aura_ui(Some(&catalog), shown), "spell {shown}");
+        }
+        assert!(catalog.get(6673).unwrap().icon.is_some());
     }
 
     /// Against the real `Spell.dbc`; skips without client data.

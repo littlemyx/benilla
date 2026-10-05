@@ -950,6 +950,9 @@ mod spellbook_tests;
 mod buff_tests;
 
 #[cfg(test)]
+mod stock_243_tests;
+
+#[cfg(test)]
 mod target_aura_tests;
 
 #[cfg(test)]

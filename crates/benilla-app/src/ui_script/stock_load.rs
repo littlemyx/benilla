@@ -301,8 +301,18 @@ fn chain_of(data: &Path) -> &'static Chain {
 /// Loads the stock interface of the install at `data` (a `Data` folder) through the production
 /// path, the layer off, and reports each `FrameXML.toc` row. The caller holds [`ENV_LOCK`].
 pub(super) fn load_stock(data: &Path, tag: &str) -> Report {
+    let (report, _script, _laid) = load_stock_with_script(data, tag);
+    report
+}
+
+/// [`load_stock`], and the VM the load left behind with the guard that keeps the chain seated on
+/// this thread, for what a test asks of the loaded interface (an on-demand addon reads the chain).
+pub(super) fn load_stock_with_script(
+    data: &Path,
+    tag: &str,
+) -> (Report, UiScript, reference_ui::fixture::ChainGuard) {
     let chain = chain_of(data);
-    let _laid = reference_ui::fixture::use_chain(chain);
+    let laid = reference_ui::fixture::use_chain(chain);
     let mut rows = Vec::new();
     let (script, failures) = production_load_observed(tag, true, "", |_| {}, &mut |file, out| {
         rows.push(Row {
@@ -349,7 +359,7 @@ pub(super) fn load_stock(data: &Path, tag: &str) -> Report {
             .collect();
         let _ = std::fs::write(dir.join(format!("{tag}.missing.txt")), blocked);
     }
-    report
+    (report, script, laid)
 }
 
 /// Everything one row said, classified.

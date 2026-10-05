@@ -799,6 +799,54 @@ mod tests {
         }
     }
 
+    /// The extra-aura timing packets decode to one event per aura, so the app sees the durations.
+    #[test]
+    fn the_extra_aura_packets_decode_to_aura_timing_events() {
+        use crate::SessionEvent as E;
+        // Packed guid 0x10 (mask 0x01, byte 0x10), then slot 3, spell 6673, 120000 ms of 120000.
+        let mut one = vec![0x01, 0x10, 3];
+        one.extend(6673u32.to_le_bytes());
+        one.extend(120_000i32.to_le_bytes());
+        one.extend(120_000u32.to_le_bytes());
+        for op in [
+            tbc_opcode::SMSG_SET_EXTRA_AURA_INFO,
+            tbc_opcode::SMSG_SET_EXTRA_AURA_INFO_NEED_UPDATE,
+        ] {
+            let events = crate::decode(parse(op, &one).unwrap());
+            assert!(
+                matches!(
+                    events.as_slice(),
+                    [E::ExtraAuraInfo { guid: 0x10, aura }]
+                        if aura.slot == 3
+                            && aura.spell_id == 6673
+                            && aura.max_duration_ms == 120_000
+                            && aura.remaining_ms == 120_000
+                ),
+                "{op:#x}: {events:?}"
+            );
+        }
+        // Two entries of 13 bytes, the second permanent (-1, 0).
+        let mut two = one.clone();
+        two.push(4);
+        two.extend(2457u32.to_le_bytes());
+        two.extend((-1i32).to_le_bytes());
+        two.extend(0u32.to_le_bytes());
+        let events = crate::decode(parse(tbc_opcode::SMSG_INIT_EXTRA_AURA_INFO, &two).unwrap());
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(matches!(&events[1], E::ExtraAuraInfo { aura, .. }
+            if aura.spell_id == 2457 && aura.max_duration_ms == -1));
+        let mut clear = vec![0x01, 0x10];
+        clear.extend(6673u32.to_le_bytes());
+        let events = crate::decode(parse(tbc_opcode::SMSG_CLEAR_EXTRA_AURA_INFO, &clear).unwrap());
+        assert!(matches!(
+            events.as_slice(),
+            [E::ExtraAuraCleared {
+                guid: 0x10,
+                spell_id: 6673
+            }]
+        ));
+    }
+
     #[test]
     fn a_time_sync_request_decodes_to_the_event_the_read_thread_answers() {
         let packet = parse(tbc_opcode::SMSG_TIME_SYNC_REQ, &7u32.to_le_bytes()).unwrap();

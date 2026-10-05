@@ -18,6 +18,7 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_cooldown(lua)?;
     install_attributes(lua)?;
     install_text_methods(lua)?;
+    super::aura::install_tbc(lua)?;
     super::ui243_verbs::install(lua)
 }
 
