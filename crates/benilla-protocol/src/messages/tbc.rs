@@ -206,6 +206,16 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
         // Empty in both builds; sent when the player logs out or leaves combat.
         t::SMSG_CANCEL_COMBAT => ServerPacket::CancelCombat,
         t::SMSG_TIME_SYNC_REQ => ServerPacket::Tbc(tbc_world::read_time_sync_request(r)?),
+        // One `u32`, the echoed ping sequence: the bytes of 1.12.1 (`SMSG_PONG`, cmangos-classic
+        // and cmangos-tbc `HandlePing`).
+        t::SMSG_PONG => ServerPacket::Pong {
+            sequence: read_u32_le(r)?,
+        },
+        // Same fields in the same order in both builds (cmangos `SendGMTicketGetTicket` and the
+        // no-ticket status): the 1.12.1 reader.
+        t::SMSG_GMTICKET_GETTICKET => ServerPacket::GmTicketAnswer {
+            ticket: super::gm_ticket::read_gm_ticket(r)?.map(Box::new),
+        },
         // --- Queries ----------------------------------------------------------------------
         t::SMSG_NAME_QUERY_RESPONSE => {
             let guid = read_u64_le(r)?;
@@ -707,5 +717,90 @@ mod tests {
         let mut want = b"Deadbeef\0".to_vec();
         want.extend_from_slice(&[1, 1, 1, 0x08, 0, 0x0e, 0x02, 0x04, 0]);
         assert_eq!(super::super::char_create(&req), want);
+    }
+
+    #[test]
+    fn a_pong_is_its_sequence_in_both_builds() {
+        let body = 0x0102_0304u32.to_le_bytes();
+        for packet in [
+            parse(opcode::SMSG_PONG, &body).unwrap(),
+            super::super::parse_server(opcode::SMSG_PONG, &body).unwrap(),
+        ] {
+            match packet {
+                ServerPacket::Pong { sequence } => assert_eq!(sequence, 0x0102_0304),
+                other => panic!("{}", other.name()),
+            }
+        }
+        assert!(
+            parse(opcode::SMSG_PONG, &[1, 2]).is_err(),
+            "a short pong is refused"
+        );
+    }
+
+    #[test]
+    fn a_gm_ticket_answer_is_read_as_in_1_12_1() {
+        use super::super::gm_ticket::{GMTICKET_STATUS_DEFAULT, GMTICKET_STATUS_HASTEXT};
+        // No ticket: the 4-byte status alone.
+        let body = GMTICKET_STATUS_DEFAULT.to_le_bytes();
+        match parse(opcode::SMSG_GMTICKET_GETTICKET, &body).unwrap() {
+            ServerPacket::GmTicketAnswer { ticket } => assert!(ticket.is_none()),
+            other => panic!("{}", other.name()),
+        }
+        // A ticket: status, text, category, three days, status, seen.
+        let mut body = GMTICKET_STATUS_HASTEXT.to_le_bytes().to_vec();
+        body.extend_from_slice(b"help\0");
+        body.push(3);
+        for d in [1.5f32, 2.5, 0.25] {
+            body.extend_from_slice(&d.to_le_bytes());
+        }
+        body.extend_from_slice(&[2, 1]);
+        let from_tbc = parse(opcode::SMSG_GMTICKET_GETTICKET, &body).unwrap();
+        let from_classic =
+            super::super::parse_server(opcode::SMSG_GMTICKET_GETTICKET, &body).unwrap();
+        match (from_tbc, from_classic) {
+            (
+                ServerPacket::GmTicketAnswer { ticket: Some(a) },
+                ServerPacket::GmTicketAnswer { ticket: Some(b) },
+            ) => {
+                assert_eq!(a, b);
+                assert_eq!(
+                    (a.text.as_str(), a.category, a.assigned_to_gm),
+                    ("help", 3, 2)
+                );
+            }
+            _ => panic!("expected a ticket from both"),
+        }
+    }
+
+    /// The opcodes whose 2.4.3 bytes differ from 1.12.1's, or that 1.12.1 has no reader for, stay
+    /// `Other`, each with its 2.4.3 name.
+    #[test]
+    fn the_unread_opcodes_stay_other_and_carry_their_2_4_3_names() {
+        for (op, name) in [
+            (0x0053, "SMSG_PET_NAME_QUERY_RESPONSE"),
+            (0x0099, "SMSG_CHANNEL_NOTIFY"),
+            (0x01cf, "SMSG_QUERY_TIME_RESPONSE"),
+            (0x0284, "MSG_QUERY_NEXT_MAIL_TIME"),
+            (0x02cc, "SMSG_RAID_INSTANCE_INFO"),
+            (0x036d, "SMSG_LFG_UPDATE_LFM"),
+            (0x036e, "SMSG_LFG_UPDATE_LFG"),
+            (0x03f1, "SMSG_USERLIST_UPDATE"),
+        ] {
+            assert_eq!(super::super::tbc_opcode_name(op), Some(name));
+            assert!(
+                matches!(parse(op, &[0; 16]), Ok(ServerPacket::Other { opcode }) if opcode == op),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_time_sync_request_decodes_to_the_event_the_read_thread_answers() {
+        let packet = parse(tbc_opcode::SMSG_TIME_SYNC_REQ, &7u32.to_le_bytes()).unwrap();
+        let events = crate::decode(packet);
+        assert!(matches!(
+            events.as_slice(),
+            [crate::SessionEvent::TimeSyncRequest { counter: 7 }]
+        ));
     }
 }

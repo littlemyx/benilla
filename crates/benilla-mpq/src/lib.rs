@@ -1,6 +1,7 @@
-//! A read-only MPQ reader for the 1.12.1 `Data/` chain: format V1/V2, every file stored whole or
-//! `COMPRESS`-flagged and sectored, no encrypted or single-unit files, no PTCH patches. Anything
-//! else is a hard error.
+//! A read-only MPQ reader for the `Data/` chain of 1.12.1 and 2.4.3: format V1/V2, every file
+//! stored whole, `COMPRESS`-flagged and sectored, or single-unit (one block, no sector offset
+//! table, a codec-mask byte in front when compressed); zlib is the one codec. No encrypted files,
+//! no PTCH patches. Anything else is a hard error naming it.
 //!
 //! The patch archives carry delete markers (flag `0x02000000`, size 0): the path is deleted from
 //! the composite chain. [`Archive::contains`] reports one present and [`Archive::read_file`]
@@ -30,9 +31,12 @@ const USERDATA_SIGNATURE: u32 = 0x1B51_504D;
 const FLAG_IMPLODE: u32 = 0x0000_0100;
 const FLAG_COMPRESS: u32 = 0x0000_0200;
 const FLAG_ENCRYPTED: u32 = 0x0001_0000;
+const FLAG_FIX_KEY: u32 = 0x0002_0000;
+const FLAG_PATCH: u32 = 0x0010_0000;
 const FLAG_SINGLE_UNIT: u32 = 0x0100_0000;
 /// A patch archive's delete marker (size 0): the path is deleted from the composite chain.
 const FLAG_DELETE_MARKER: u32 = 0x0200_0000;
+const FLAG_SECTOR_CRC: u32 = 0x0400_0000;
 const FLAG_EXISTS: u32 = 0x8000_0000;
 
 /// Hash-table sentinels.
@@ -51,6 +55,8 @@ struct HashEntry {
 #[derive(Clone, Copy)]
 struct BlockEntry {
     file_pos: u32,
+    /// The bytes the file takes in the archive: a single-unit file's unit length.
+    comp_size: u32,
     file_size: u32,
     flags: u32,
 }
@@ -70,6 +76,47 @@ struct Index {
 #[derive(Clone)]
 pub struct Archive {
     index: Arc<Index>,
+}
+
+/// One block-table entry as the census reads it ([`Archive::blocks`]).
+#[derive(Debug, Clone, Copy)]
+pub struct BlockInfo {
+    pub index: usize,
+    /// Absolute offset of the block's first byte in the archive file.
+    pub file_pos: u64,
+    pub file_size: u32,
+    pub comp_size: u32,
+    pub flags: u32,
+}
+
+impl BlockInfo {
+    pub fn is_single_unit(&self) -> bool {
+        self.flags & FLAG_SINGLE_UNIT != 0
+    }
+    pub fn is_compressed(&self) -> bool {
+        self.flags & FLAG_COMPRESS != 0
+    }
+    pub fn is_imploded(&self) -> bool {
+        self.flags & FLAG_IMPLODE != 0
+    }
+    pub fn is_encrypted(&self) -> bool {
+        self.flags & FLAG_ENCRYPTED != 0
+    }
+    pub fn is_fix_key(&self) -> bool {
+        self.flags & FLAG_FIX_KEY != 0
+    }
+    pub fn is_patch(&self) -> bool {
+        self.flags & FLAG_PATCH != 0
+    }
+    pub fn is_delete_marker(&self) -> bool {
+        self.flags & FLAG_DELETE_MARKER != 0
+    }
+    pub fn has_sector_crc(&self) -> bool {
+        self.flags & FLAG_SECTOR_CRC != 0
+    }
+    pub fn exists(&self) -> bool {
+        self.flags & FLAG_EXISTS != 0
+    }
 }
 
 /// A read error; anything outside the 1.12.1 envelope surfaces here.
@@ -192,6 +239,39 @@ impl Archive {
             .is_some_and(|b| b.flags & FLAG_DELETE_MARKER != 0)
     }
 
+    /// Every block-table entry, in table order: the census reads the flags of files whose names
+    /// the archive does not list.
+    pub fn blocks(&self) -> Vec<BlockInfo> {
+        self.index
+            .block_table
+            .iter()
+            .enumerate()
+            .map(|(index, b)| BlockInfo {
+                index,
+                file_pos: self.index.archive_offset + u64::from(b.file_pos),
+                file_size: b.file_size,
+                comp_size: b.comp_size,
+                flags: b.flags,
+            })
+            .collect()
+    }
+
+    /// The uncompressed sector size of a sectored file, `512 << block_size`.
+    pub fn sector_size(&self) -> usize {
+        self.index.sector_size
+    }
+
+    /// Read block `index` whole, by its table position instead of a name.
+    pub fn read_block(&self, index: usize) -> Result<Vec<u8>> {
+        let block = *self
+            .index
+            .block_table
+            .get(index)
+            .ok_or_else(|| Error::NotFound(format!("block {index}")))?;
+        self.open_entry(block, &format!("block {index}"))?
+            .read_all()
+    }
+
     /// The archive's path.
     pub fn path(&self) -> &Path {
         &self.index.path
@@ -209,7 +289,12 @@ impl Archive {
     pub fn open_file(&self, name: &str) -> Result<ArchiveFile> {
         let idx = &self.index;
         let block = idx.find(name).ok_or_else(|| Error::NotFound(name.into()))?;
+        self.open_entry(block, name)
+    }
 
+    /// One block opened for reading; `name` only labels errors.
+    fn open_entry(&self, block: BlockEntry, name: &str) -> Result<ArchiveFile> {
+        let idx = &self.index;
         if block.flags & FLAG_EXISTS == 0 {
             return Err(Error::NotFound(name.into()));
         }
@@ -221,9 +306,6 @@ impl Archive {
         if block.flags & FLAG_ENCRYPTED != 0 {
             return Err(Error::Unsupported(format!("encrypted file {name}")));
         }
-        if block.flags & FLAG_SINGLE_UNIT != 0 {
-            return Err(Error::Unsupported(format!("single-unit file {name}")));
-        }
 
         let file = File::open(&idx.path)?;
         let file_pos = idx.archive_offset + block.file_pos as u64;
@@ -234,12 +316,19 @@ impl Archive {
         let file_len = file.metadata()?.len();
         let avail = avail_from(file_len, file_pos);
 
+        let single = block.flags & FLAG_SINGLE_UNIT != 0;
         let mut open = ArchiveFile {
             file,
             name: name.to_owned(),
             base: file_pos,
             size: file_size,
-            sector_size: idx.sector_size,
+            // A single unit is one sector as long as the file, with its offsets known from the
+            // block table: `[0, comp_size]`.
+            sector_size: if single {
+                file_size.max(1)
+            } else {
+                idx.sector_size
+            },
             offsets: None,
             implode_only,
             avail,
@@ -253,6 +342,10 @@ impl Archive {
                     "{name}: stored size ({file_size}) larger than the archive"
                 )));
             }
+            return Ok(open);
+        }
+        if single {
+            open.offsets = Some(vec![0, block.comp_size]);
             return Ok(open);
         }
 
@@ -559,7 +652,7 @@ fn read_block_table(
             let o = i * 4;
             BlockEntry {
                 file_pos: words[o],
-                // words[o + 1] is compressed_size, unread: the offset table sizes the sectors.
+                comp_size: words[o + 1],
                 file_size: words[o + 2],
                 flags: words[o + 3],
             }
@@ -708,6 +801,80 @@ mod tests {
         }
         bytes.extend_from_slice(data);
         bytes
+    }
+
+    /// A zlib unit as a single-unit block carries it: the codec-mask byte, then the stream.
+    fn zlib_unit(plain: &[u8]) -> Vec<u8> {
+        use flate2::{write::ZlibEncoder, Compression};
+        use std::io::Write;
+        let mut enc = ZlibEncoder::new(vec![0x02], Compression::best());
+        enc.write_all(plain).unwrap();
+        enc.finish().unwrap()
+    }
+
+    #[test]
+    fn a_single_unit_zlib_file_reads_whole_and_in_place() {
+        let plain: Vec<u8> = (0..20_000u32).flat_map(|i| (i % 7).to_le_bytes()).collect();
+        let unit = zlib_unit(&plain);
+        assert!(unit.len() < plain.len());
+        let flags = FLAG_EXISTS | FLAG_SINGLE_UNIT | FLAG_COMPRESS;
+        let (arc, path) = open_temp_kept(
+            "single_zlib",
+            &archive_with_one_block("a.ttf", flags, &unit, plain.len() as u32),
+        );
+        assert_eq!(arc.read_file("a.ttf").unwrap(), plain);
+        assert_eq!(arc.read_block(0).unwrap(), plain);
+        let mut f = arc.open_file("a.ttf").unwrap();
+        f.seek(SeekFrom::Start(70_000)).unwrap();
+        let mut buf = [0u8; 16];
+        f.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, plain[70_000..70_016]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A unit no smaller than the file is stored without a mask byte, as a sector is.
+    #[test]
+    fn a_single_unit_that_did_not_shrink_is_stored_and_one_without_compress_is_plain() {
+        let plain = b"abcdefgh";
+        for flags in [
+            FLAG_EXISTS | FLAG_SINGLE_UNIT | FLAG_COMPRESS,
+            FLAG_EXISTS | FLAG_SINGLE_UNIT,
+        ] {
+            let (arc, path) = open_temp_kept(
+                "single_stored",
+                &archive_with_one_entry("a.bin", flags, plain),
+            );
+            assert_eq!(arc.read_file("a.bin").unwrap(), plain);
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    #[test]
+    fn a_single_unit_with_a_codec_the_reader_lacks_names_the_codec() {
+        let mut unit = vec![0x10u8]; // bzip2
+        unit.extend_from_slice(&[0u8; 4]);
+        let flags = FLAG_EXISTS | FLAG_SINGLE_UNIT | FLAG_COMPRESS;
+        let (arc, path) = open_temp_kept(
+            "single_bzip",
+            &archive_with_one_block("a.bin", flags, &unit, 64),
+        );
+        match arc.read_file("a.bin") {
+            Err(Error::Unsupported(m)) => assert!(m.contains("0x10"), "{m}"),
+            other => panic!("expected Unsupported naming 0x10, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_single_unit_that_inflates_short_is_refused() {
+        let unit = zlib_unit(&[7u8; 100]);
+        let flags = FLAG_EXISTS | FLAG_SINGLE_UNIT | FLAG_COMPRESS;
+        let (arc, path) = open_temp_kept(
+            "single_short",
+            &archive_with_one_block("a.bin", flags, &unit, 200),
+        );
+        assert!(matches!(arc.read_file("a.bin"), Err(Error::Decompress(_))));
+        let _ = std::fs::remove_file(&path);
     }
 
     /// The control for the delete-marker test: the same builder's plain entry reads back.

@@ -61,7 +61,9 @@ crate of its own or a fork, and benilla opens a piece of itself to such a crate 
   cache or scratch file. `scripts/smoke.sh` fails a run that leaves the install changed.
 - **Local state lives in one folder**, `benilla-config/`, at the repo root in a dev build and
   beside the binary in the player build; every path to it resolves through `crate::local_state`.
-  Player settings are CVars persisted as a diff in `benilla-config/config.toml`.
+  Player settings are CVars persisted as a diff in `benilla-config/config.toml`. A build other
+  than 1.12.1 keeps all of its state in a subfolder named for it (`benilla-config/2.4.3/`), and
+  1.12.1 keeps its paths as they are, so one build never reads or writes another's files.
 - **The core UI is the stock UI; benilla's own is one layer on top.** The core loads the stock
   1.12 FrameXML off the player's own chain, byte for byte, and builds the engine verbs those
   files call, never stubbing one to make a file load. benilla's own interface (its options

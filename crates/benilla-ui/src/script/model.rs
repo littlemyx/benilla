@@ -429,6 +429,12 @@ pub(crate) struct Model {
     pub(crate) action_bar_page: u8,
     /// `GetAccountExpansionLevel()`: the byte of the admitting 2.4.3 `SMSG_AUTH_RESPONSE`.
     pub(crate) account_expansion: u8,
+    /// The mirror timers the server has running, in start order: `GetMirrorTimerInfo`'s rows.
+    pub(crate) mirror_timers: Vec<super::ui243_verbs::MirrorTimerState>,
+    /// The player's channelled spell while one runs: `UnitChannelInfo("player")`.
+    pub(crate) channel: Option<super::ui243_verbs::ChannelState>,
+    /// What `SetAutoLootDefault` last set (the Auto Loot option's engine side).
+    pub(crate) auto_loot_default: bool,
     /// Calls of the secure-execution verbs, while the taint model is pending.
     pub(crate) secure_model_calls: std::collections::BTreeMap<&'static str, u64>,
     /// Layout hints the 2.4.3 loader kept for drawing, by owner key (`ui243::store_hint`).
@@ -1205,6 +1211,9 @@ impl Model {
             bonus_bar_offset: 0,
             action_bar_page: 1,
             account_expansion: 0,
+            mirror_timers: Vec::new(),
+            channel: None,
+            auto_loot_default: false,
             secure_model_calls: Default::default(),
             stackable_actions: Default::default(),
             xml_hints: HashMap::new(),

@@ -10,18 +10,65 @@
 //!
 //! With `$WOW_CAPTURE` set every path resolves to `None`: a capture neither reads nor writes
 //! player state.
+//!
+//! The folder is one, with a subfolder per build other than 1.12.1 (`benilla-config/2.4.3/…`):
+//! 1.12.1 keeps every path it has always had, and a run on another build can name no file of
+//! 1.12.1's. [`set_build`] says which build the session plays; [`home`] is the one place that
+//! applies it.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use benilla_build::{ClientBuild, VANILLA_1_12_1};
 
 /// The folder's name: not `benilla`, which beside the binary is the executable itself, and not
 /// `WTF`, which a real install already uses.
 const STATE_DIR: &str = "benilla-config";
 
+/// The build the session plays, set once at launch from the install ([`set_build`]); 1.12.1 until
+/// then, so every path before detection, and every path of a 1.12.1 run, is the one it always was.
+static BUILD: Mutex<ClientBuild> = Mutex::new(VANILLA_1_12_1);
+
+/// Says which build the session plays, so [`home`] names that build's folder. Called once at
+/// launch, before any state path is read.
+pub(crate) fn set_build(build: ClientBuild) {
+    *BUILD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = build;
+}
+
+/// The build the session plays ([`set_build`]); 1.12.1 until one is set.
+pub(crate) fn build() -> ClientBuild {
+    *BUILD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The subfolder of the state folder that `build` keeps its files in: none for 1.12.1, else its
+/// version (`2.4.3`).
+fn build_subfolder(build: &ClientBuild) -> Option<String> {
+    (*build != VANILLA_1_12_1).then(|| {
+        let [major, minor, patch] = build.version;
+        format!("{major}.{minor}.{patch}")
+    })
+}
+
 /// The state folder, or `None` when persistence is off (a capture run, or no executable path).
 /// It may not exist yet: [`write_atomic`] creates it, and a reader treats a missing file as
-/// defaults.
+/// defaults. The folder of a build other than 1.12.1 is its subfolder of the one folder.
 pub(crate) fn home() -> Option<PathBuf> {
+    let build = *BUILD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    base_home().map(|base| match build_subfolder(&build) {
+        Some(sub) => base.join(sub),
+        None => base,
+    })
+}
+
+/// The one state folder, before the build's subfolder.
+fn base_home() -> Option<PathBuf> {
     if std::env::var_os("WOW_CAPTURE").is_some() {
         return None; // hermetic: captures neither read nor write player state
     }
@@ -382,6 +429,78 @@ mod tests {
             "a capture reads no player's window layout"
         );
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Every path fn, for the tests that must see them all.
+    fn every_path(realm: &str, character: &str) -> Vec<Option<PathBuf>> {
+        vec![
+            home(),
+            config_path(),
+            macros_account_path(),
+            macros_character_path(realm, character),
+            bindings_account_path(),
+            bindings_character_path(realm, character),
+            saved_variables_path(),
+            addons_state_path(realm, character),
+            addon_saved_account_dir(),
+            addon_saved_character_dir(realm, character),
+            camera_character_path(realm, character),
+            saved_account_path(),
+            chat_character_path(realm, character),
+            layout_character_path(realm, character),
+            name_cache_path(realm),
+            logs_dir(),
+            shots_path(),
+            screenshots_dir(),
+            diagnostics_dir(),
+            fps_journal_path(),
+        ]
+    }
+
+    /// 1.12.1 keeps its paths byte for byte; 2.4.3 keeps every one under `2.4.3/`, so a run on it
+    /// names no file a 1.12.1 run reads or writes.
+    #[test]
+    fn a_build_other_than_1_12_1_keeps_its_state_in_its_own_subfolder() {
+        let _l = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tmp = std::env::temp_dir().join(format!("benilla-ls-b-{}", std::process::id()));
+        let root = tmp.join(STATE_DIR);
+        let _c = EnvGuard::unset("WOW_CAPTURE");
+        let _h = EnvGuard::set("BENILLA_HOME", root.to_str().unwrap());
+
+        set_build(VANILLA_1_12_1);
+        let vanilla = every_path("Realm", "Char");
+        assert_eq!(config_path(), Some(root.join("config.toml")));
+        assert_eq!(
+            saved_variables_path(),
+            Some(root.join("saved-variables.lua"))
+        );
+        assert_eq!(name_cache_path("Realm"), Some(root.join("cache/Realm.tsv")));
+
+        set_build(benilla_build::TBC_2_4_3);
+        let tbc = every_path("Realm", "Char");
+        assert_eq!(config_path(), Some(root.join("2.4.3/config.toml")));
+        assert_eq!(
+            saved_variables_path(),
+            Some(root.join("2.4.3/saved-variables.lua"))
+        );
+        assert_eq!(
+            name_cache_path("Realm"),
+            Some(root.join("2.4.3/cache/Realm.tsv"))
+        );
+        assert_eq!(vanilla.len(), tbc.len());
+        for (v, t) in vanilla.iter().zip(&tbc) {
+            let (v, t) = (v.as_ref().unwrap(), t.as_ref().unwrap());
+            assert_ne!(v, t);
+            assert!(t.starts_with(root.join("2.4.3")), "{}", t.display());
+            // Only the folder itself is a prefix of a 2.4.3 path: no file of 1.12.1's is.
+            assert!(v == &root || !t.starts_with(v), "{}", t.display());
+        }
+        // A capture run still resolves nothing, whatever the build.
+        let _c2 = EnvGuard::set("WOW_CAPTURE", "x");
+        assert!(every_path("Realm", "Char").iter().all(Option::is_none));
+        set_build(VANILLA_1_12_1);
     }
 
     /// A unit test that does not pin `$BENILLA_HOME` resolves no state folder, so no test can write

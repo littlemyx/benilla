@@ -163,6 +163,7 @@ impl TextEngine {
                     Ok(b) => b,
                     Err(e) => {
                         warn!("ui_text: failed to read {path} from the patch chain: {e:#}");
+                        crate::flow_census::note_font_load(false);
                         continue;
                     }
                 }
@@ -170,6 +171,7 @@ impl TextEngine {
             let ascent_ratio = hhea_ascent_ratio(&bytes).unwrap_or(0.794);
             match register_font(&mut font_system, bytes) {
                 Ok(r) => {
+                    crate::flow_census::note_font_load(true);
                     path_to_face.insert(path.to_ascii_lowercase(), faces.len());
                     faces.push(Face {
                         id: r.id,
@@ -181,7 +183,10 @@ impl TextEngine {
                         ascent_ratio,
                     });
                 }
-                Err(e) => warn!("ui_text: failed to register {path}: {e:#}"),
+                Err(e) => {
+                    crate::flow_census::note_font_load(false);
+                    warn!("ui_text: failed to register {path}: {e:#}")
+                }
             }
         }
         let default_face = *path_to_face.get(&CLIENT_FONTS[0].to_ascii_lowercase())?;
@@ -250,6 +255,7 @@ impl TextEngine {
         let r = register_font(&mut self.font_system, bytes)
             .inspect_err(|e| warn!("ui_text: failed to register {path}: {e:#}"))
             .ok()?;
+        crate::flow_census::note_font_load(true);
         let index = self.faces.len();
         self.faces.push(Face {
             id: r.id,
@@ -477,6 +483,7 @@ impl TextEngine {
             return;
         }
         self.stats.cells_rasterized += 1;
+        crate::flow_census::note_glyph_cell();
         // An outlined cell grows by `pad` each side and its bearings move out; the advance stays.
         let (uv, cw, ch, bx, bt) = if radius == 0 {
             (

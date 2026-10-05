@@ -117,6 +117,21 @@ fn feed_mirror_timers(
             }
         }
         let name = ScriptValue::Str(script_name(kind).into());
+        // What `GetMirrorTimerInfo` reads follows the same edges the events do.
+        match &edge {
+            MirrorTimerEdge::Start(start) => script.mirror_timer_start(
+                script_name(kind),
+                i64::from(start.remaining_ms),
+                i64::from(start.duration_ms),
+                i64::from(start.scale),
+                start.paused,
+                &caption(kind, spell_name(start.spell_id).as_deref()),
+            ),
+            MirrorTimerEdge::Pause { paused, .. } => {
+                script.mirror_timer_pause(script_name(kind), *paused)
+            }
+            MirrorTimerEdge::Stop { .. } => script.mirror_timer_stop(script_name(kind)),
+        }
         let (event, args): (&str, Vec<ScriptValue>) = match edge {
             MirrorTimerEdge::Start(start) => (
                 "MIRROR_TIMER_START",

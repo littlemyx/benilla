@@ -805,6 +805,9 @@ pub enum SessionEvent {
     ItemPushResult(ItemPushResult),
     /// The keepalive echo (`SMSG_PONG`) of a 30 s `CMSG_PING`, matched by `sequence`.
     Pong { sequence: u32 },
+    /// A 2.4.3 server's clock check (`SMSG_TIME_SYNC_REQ`): its `counter` is owed back with our
+    /// tick count (`CMSG_TIME_SYNC_RESP`); the read thread answers it and forwards nothing.
+    TimeSyncRequest { counter: u32 },
     /// Our speed changed (`SMSG_FORCE_*_SPEED_CHANGE`): ack `counter`, the exact `speed` and a live
     /// `MovementInfo`, or vmangos flags anticheat in about 4 s (`CheckPendingMovementChanges`).
     ForceSpeedChange {

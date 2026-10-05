@@ -951,6 +951,19 @@ fn writer_loop(
                         fall_time,
                     } => w.move_not_active_mover(guid, flags, pos, orientation, fall_time),
                     ClientCommand::FarSight { engage } => w.far_sight(engage),
+                    ClientCommand::TimeSyncResponse { counter } => {
+                        // The answer reads nothing of the mover: a time sync is owed whatever the pose.
+                        let pose = benilla_protocol::MoverPose {
+                            guid: 0,
+                            position: [0.0; 3],
+                            orientation: 0.0,
+                            flags: 0,
+                        };
+                        let order = benilla_protocol::ServerPacket::Tbc(
+                            benilla_protocol::messages::TbcPacket::TimeSyncRequest { counter },
+                        );
+                        w.answer_movement(&order, &pose).map(|_| ())
+                    }
                     ClientCommand::TeleportAck { guid, counter } => w.teleport_ack(guid, counter),
                     ClientCommand::WorldportAck => w.worldport_ack(),
                     ClientCommand::SetSelection { guid } => w.set_selection(guid),

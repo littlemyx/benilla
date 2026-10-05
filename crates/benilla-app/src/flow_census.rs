@@ -118,6 +118,21 @@ pub(crate) fn note_event(ev: &SessionEvent) {
     }
 }
 
+static FONTS_OK: AtomicU64 = AtomicU64::new(0);
+static FONTS_FAILED: AtomicU64 = AtomicU64::new(0);
+static GLYPH_CELLS: AtomicU64 = AtomicU64::new(0);
+
+/// A font file the text engine read and registered (`ok`) or could not (`!ok`).
+pub(crate) fn note_font_load(ok: bool) {
+    let n = if ok { &FONTS_OK } else { &FONTS_FAILED };
+    n.fetch_add(1, Ordering::Relaxed);
+}
+
+/// A glyph rasterized into the sheet: text was drawn with a resolved face.
+pub(crate) fn note_glyph_cell() {
+    GLYPH_CELLS.fetch_add(1, Ordering::Relaxed);
+}
+
 /// One packet off the world socket: `events` is what the decode produced for it.
 pub(crate) fn note_packet(opcode: u16, events: &[SessionEvent]) {
     if !crate::run_mode::dev_affordances() {
@@ -266,6 +281,12 @@ pub(crate) fn print_summary() {
             other += t.other;
             bad += t.unparseable;
         }
+        println!(
+            "census: fonts loaded-ok={} failed={} glyph-cells-rasterized={}",
+            FONTS_OK.load(Ordering::Relaxed),
+            FONTS_FAILED.load(Ordering::Relaxed),
+            GLYPH_CELLS.load(Ordering::Relaxed)
+        );
         println!(
             "census: packets opcodes={} consumed={consumed} parsed-no-event={ignored} other={other} unparseable={bad}",
             c.packets.len()

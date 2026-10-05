@@ -341,6 +341,8 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
                     );
                     // The one source of the session's build; the net plugin reads it at build.
                     app.insert_resource(session_build::SessionBuild(build));
+                    // Local state keeps each build apart: a build but 1.12.1 gets its own subfolder.
+                    local_state::set_build(build);
                 }
                 Err(e) => eprintln!("benilla: cannot tell the install's build ({e:#})"),
             }

@@ -257,3 +257,27 @@ fn a_change_on_a_live_mover_keeps_its_other_slots() {
 fn a_change_with_no_speed_set_invents_none() {
     assert!(speeds_after(vec![create_with_speeds(None), force_run(7.0)]).is_none());
 }
+
+/// A 2.4.3 server's `SMSG_TIME_SYNC_REQ` reaches the write thread as the answer it is owed, with
+/// the counter it sent.
+#[test]
+fn a_time_sync_request_is_answered_with_its_counter() {
+    let mut app = crate::game_plugins::schedule_tests::headless_client();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    app.insert_resource(NetEvents(rx));
+    let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+    app.insert_resource(crate::net::NetCommands(cmd_tx));
+    tx.send(SessionEvent::TimeSyncRequest { counter: 3 })
+        .unwrap();
+    tx.send(SessionEvent::TimeSyncRequest { counter: 4 })
+        .unwrap();
+    super::apply_net_updates(app.world_mut());
+    let owed: Vec<u32> = cmd_rx
+        .try_iter()
+        .map(|c| match c {
+            crate::net::ClientCommand::TimeSyncResponse { counter } => counter,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(owed, [3, 4]);
+}
