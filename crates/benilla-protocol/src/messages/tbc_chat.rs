@@ -72,7 +72,7 @@ pub fn chat_ignored_tbc(guid: u64) -> Vec<u8> {
 
 /// Read a 2.4.3 `SMSG_CHANNEL_NOTIFY`. Notices 0..=31 are 1.12.1's with the same tails except
 /// `YOU_JOINED` (a `u8` flags byte, the `u32` channel id, a `u32` 0: cmangos-tbc `MakeYouJoined`,
-/// wow_messages models no tail); 32..=35 are new in 2.4.3.
+/// wow_messages models no tail) and `YOU_LEFT` (a `u32` id and a `u8`); 32..=35 are new in 2.4.3.
 pub(super) fn read_channel_notify_tbc(r: &mut &[u8]) -> io::Result<ServerPacket> {
     let notice = read_u8(r)?;
     let channel = read_cstring(r)?;
@@ -86,6 +86,16 @@ pub(super) fn read_channel_notify_tbc(r: &mut &[u8]) -> io::Result<ServerPacket>
                 notice,
                 channel,
                 tail: ChannelNoticeTail::YouJoined { flags },
+            })
+        }
+        // `MakeYouLeft` ends the name with the channel id and a `u8` 0 (left) or 1 (suspended).
+        channel_notice::YOU_LEFT => {
+            let _id = read_u32_le(r)?;
+            let _suspended = read_u8(r)?;
+            ServerPacket::ChannelNotify(ChannelNotify {
+                notice,
+                channel,
+                tail: ChannelNoticeTail::Empty,
             })
         }
         // Not in the area, not queued for the LFG channel: the name alone.

@@ -230,9 +230,26 @@ fn a_channel_notice_has_1_12_1s_tail_but_for_you_joined() {
     ));
     // Empty tails.
     assert!(matches!(
-        tbc(t::SMSG_CHANNEL_NOTIFY, &notify(3, "c", &[])),
+        tbc(t::SMSG_CHANNEL_NOTIFY, &notify(5, "c", &[])),
         ServerPacket::ChannelNotify(_)
     ));
+    // YOU_LEFT, as cmangos-tbc sent it live: the channel id and a `u8` 0.
+    let live = hex_bytes("0362656e696c6c615f70726f6265000000000000");
+    match tbc(t::SMSG_CHANNEL_NOTIFY, &live) {
+        ServerPacket::ChannelNotify(n) => {
+            assert_eq!(n.notice, channel_notice::YOU_LEFT);
+            assert_eq!(n.channel, "benilla_probe");
+            assert_eq!(n.tail, ChannelNoticeTail::Empty);
+        }
+        other => panic!("{}", other.name()),
+    }
+}
+
+fn hex_bytes(s: &str) -> Vec<u8> {
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
 }
 
 #[test]
