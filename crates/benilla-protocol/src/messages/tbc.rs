@@ -156,6 +156,25 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
             // A chat type 1.12.1 has no number for: its bytes are left unread, never guessed at.
             None => return Ok(ServerPacket::Other { opcode: op }),
         },
+        // The GM line's body is the ordinary line's: the tag carries the GM flag and the name.
+        t::SMSG_GM_MESSAGECHAT => match super::chat::read_message_chat_tbc(r)? {
+            Some(message) => ServerPacket::MessageChat(message),
+            None => return Ok(ServerPacket::Other { opcode: op }),
+        },
+        t::SMSG_CHANNEL_NOTIFY => super::tbc_chat::read_channel_notify_tbc(r)?,
+        t::SMSG_USERLIST_ADD => ServerPacket::Tbc(super::tbc_chat::read_userlist(
+            super::UserListChange::Add,
+            r,
+        )?),
+        t::SMSG_USERLIST_UPDATE => ServerPacket::Tbc(super::tbc_chat::read_userlist(
+            super::UserListChange::Update,
+            r,
+        )?),
+        t::SMSG_USERLIST_REMOVE => ServerPacket::Tbc(super::tbc_chat::read_userlist(
+            super::UserListChange::Remove,
+            r,
+        )?),
+        t::SMSG_CHAT_RESTRICTED => ServerPacket::Tbc(super::tbc_chat::read_chat_restricted(r)?),
         t::SMSG_NOTIFICATION => ServerPacket::Notification {
             text: read_cstring(r)?,
         },
@@ -783,13 +802,11 @@ mod tests {
     fn the_unread_opcodes_stay_other_and_carry_their_2_4_3_names() {
         for (op, name) in [
             (0x0053, "SMSG_PET_NAME_QUERY_RESPONSE"),
-            (0x0099, "SMSG_CHANNEL_NOTIFY"),
             (0x01cf, "SMSG_QUERY_TIME_RESPONSE"),
             (0x0284, "MSG_QUERY_NEXT_MAIL_TIME"),
             (0x02cc, "SMSG_RAID_INSTANCE_INFO"),
             (0x036d, "SMSG_LFG_UPDATE_LFM"),
             (0x036e, "SMSG_LFG_UPDATE_LFG"),
-            (0x03f1, "SMSG_USERLIST_UPDATE"),
         ] {
             assert_eq!(super::super::tbc_opcode_name(op), Some(name));
             assert!(

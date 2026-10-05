@@ -55,6 +55,11 @@ mod tbc;
 pub use tbc::{char_create_result, read_char_enum_records};
 pub mod tbc_movement;
 pub use tbc_movement::{tbc_flag, FlightSpeed, RelayTail, TbcMovementInfo, TbcTransport};
+pub mod tbc_chat;
+pub use tbc_chat::{
+    chat_ignored_tbc, chat_type_to_tbc, join_channel_tbc, leave_channel_tbc, messagechat_tbc,
+    UserListChange,
+};
 mod tbc_same;
 pub use tbc_same::{same_reader_for, TBC_SAME_READERS};
 mod tbc_world;

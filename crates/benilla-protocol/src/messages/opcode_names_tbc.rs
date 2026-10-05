@@ -43,7 +43,11 @@ pub mod tbc_opcode {
     pub const SMSG_CONTACT_LIST: u16 = 0x0067;
     pub const SMSG_FRIEND_STATUS: u16 = 0x0068;
     pub const CMSG_SET_CONTACT_NOTES: u16 = 0x006b;
+    pub const CMSG_MESSAGECHAT: u16 = 0x0095;
     pub const SMSG_MESSAGECHAT: u16 = 0x0096;
+    pub const CMSG_JOIN_CHANNEL: u16 = 0x0097;
+    pub const CMSG_LEAVE_CHANNEL: u16 = 0x0098;
+    pub const SMSG_CHANNEL_NOTIFY: u16 = 0x0099;
     pub const SMSG_UPDATE_OBJECT: u16 = 0x00a9;
     pub const SMSG_DESTROY_OBJECT: u16 = 0x00aa;
     pub const MSG_MOVE_START_FORWARD: u16 = 0x00b5;
@@ -122,14 +126,15 @@ pub mod tbc_opcode {
     pub const SMSG_QUERY_TIME_RESPONSE: u16 = 0x01cf;
     pub const CMSG_PING: u16 = 0x01dc;
     pub const SMSG_PONG: u16 = 0x01dd;
-    pub const SMSG_GMTICKET_GETTICKET: u16 = 0x0212;
     pub const SMSG_AUTH_CHALLENGE: u16 = 0x01ec;
     pub const CMSG_AUTH_SESSION: u16 = 0x01ed;
     pub const SMSG_AUTH_RESPONSE: u16 = 0x01ee;
     pub const SMSG_COMPRESSED_UPDATE_OBJECT: u16 = 0x01f6;
     pub const SMSG_ACCOUNT_DATA_TIMES: u16 = 0x0209;
+    pub const SMSG_GMTICKET_GETTICKET: u16 = 0x0212;
     pub const SMSG_GAMEOBJECT_DESPAWN_ANIM: u16 = 0x0215;
     pub const SMSG_SET_REST_START: u16 = 0x021e;
+    pub const CMSG_CHAT_IGNORED: u16 = 0x0225;
     pub const SMSG_LOGIN_VERIFY_WORLD: u16 = 0x0236;
     pub const SMSG_SPELLLOGEXECUTE: u16 = 0x024c;
     pub const SMSG_PERIODICAURALOG: u16 = 0x024e;
@@ -157,6 +162,7 @@ pub mod tbc_opcode {
     pub const CMSG_FORCE_TURN_RATE_CHANGE_ACK: u16 = 0x02df;
     pub const SMSG_ADDON_INFO: u16 = 0x02ef;
     pub const SMSG_WEATHER: u16 = 0x02f4;
+    pub const SMSG_CHAT_RESTRICTED: u16 = 0x02fd;
     pub const SMSG_SPLINE_SET_RUN_SPEED: u16 = 0x02fe;
     pub const SMSG_SPLINE_SET_RUN_BACK_SPEED: u16 = 0x02ff;
     pub const SMSG_SPLINE_SET_SWIM_SPEED: u16 = 0x0300;
@@ -209,6 +215,9 @@ pub mod tbc_opcode {
     pub const MSG_MOVE_UPDATE_CAN_FLY: u16 = 0x03ad;
     pub const SMSG_GM_MESSAGECHAT: u16 = 0x03b2;
     pub const SMSG_FEATURE_SYSTEM_STATUS: u16 = 0x03c8;
+    pub const SMSG_USERLIST_ADD: u16 = 0x03ef;
+    pub const SMSG_USERLIST_REMOVE: u16 = 0x03f0;
+    pub const SMSG_USERLIST_UPDATE: u16 = 0x03f1;
     pub const CMSG_KEEP_ALIVE: u16 = 0x0406;
     pub const SMSG_SEND_UNLEARN_SPELLS: u16 = 0x041d;
     pub const SMSG_SPLINE_MOVE_SET_FLYING: u16 = 0x0421;
@@ -255,7 +264,10 @@ static NAMES: &[(u16, &str)] = &[
     (0x007c, "SMSG_GROUP_DESTROYED"),
     (0x0083, "SMSG_GUILD_INVITE"),
     (0x0088, "SMSG_GUILD_INFO"),
+    (0x0095, "CMSG_MESSAGECHAT"),
     (0x0096, "SMSG_MESSAGECHAT"),
+    (0x0097, "CMSG_JOIN_CHANNEL"),
+    (0x0098, "CMSG_LEAVE_CHANNEL"),
     (0x0099, "SMSG_CHANNEL_NOTIFY"),
     (0x00a9, "SMSG_UPDATE_OBJECT"),
     (0x00aa, "SMSG_DESTROY_OBJECT"),
@@ -416,6 +428,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x021e, "SMSG_SET_REST_START"),
     (0x0222, "SMSG_SPIRIT_HEALER_CONFIRM"),
     (0x0224, "SMSG_GOSSIP_POI"),
+    (0x0225, "CMSG_CHAT_IGNORED"),
     (0x0236, "SMSG_LOGIN_VERIFY_WORLD"),
     (0x0239, "SMSG_SEND_MAIL_RESULT"),
     (0x0244, "SMSG_ITEM_TEXT_QUERY_RESPONSE"),
@@ -484,6 +497,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x02f1, "SMSG_PET_UNLEARN_CONFIRM"),
     (0x02f4, "SMSG_WEATHER"),
     (0x02fa, "SMSG_RAID_INSTANCE_MESSAGE"),
+    (0x02fd, "SMSG_CHAT_RESTRICTED"),
     (0x02fe, "SMSG_SPLINE_SET_RUN_SPEED"),
     (0x02ff, "SMSG_SPLINE_SET_RUN_BACK_SPEED"),
     (0x0300, "SMSG_SPLINE_SET_SWIM_SPEED"),
@@ -545,6 +559,8 @@ static NAMES: &[(u16, &str)] = &[
     (0x03ad, "MSG_MOVE_UPDATE_CAN_FLY"),
     (0x03b2, "SMSG_GM_MESSAGECHAT"),
     (0x03c8, "SMSG_FEATURE_SYSTEM_STATUS"),
+    (0x03ef, "SMSG_USERLIST_ADD"),
+    (0x03f0, "SMSG_USERLIST_REMOVE"),
     (0x03f1, "SMSG_USERLIST_UPDATE"),
     (0x0406, "CMSG_KEEP_ALIVE"),
     (0x041d, "SMSG_SEND_UNLEARN_SPELLS"),

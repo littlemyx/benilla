@@ -53,6 +53,8 @@ mod stable;
 mod summon;
 mod tabard;
 mod taxi;
+#[cfg(test)]
+mod tbc_forms_tests;
 mod trade;
 mod trainer;
 mod tutorial;

@@ -390,7 +390,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "chat_ignored",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_CHAT_IGNORED],
     },
     VerbForm {
@@ -695,7 +695,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "join_channel",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_JOIN_CHANNEL],
     },
     VerbForm {
@@ -715,7 +715,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "leave_channel",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_LEAVE_CHANNEL],
     },
     VerbForm {
@@ -1130,12 +1130,12 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "send_addon_message",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_MESSAGECHAT],
     },
     VerbForm {
         verb: "send_chat",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_MESSAGECHAT],
     },
     VerbForm {
@@ -1145,7 +1145,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "send_message_chat",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_MESSAGECHAT],
     },
     VerbForm {

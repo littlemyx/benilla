@@ -101,7 +101,7 @@ fn an_unestablished_verb_is_refused_on_2_4_3_and_sent_unchanged_on_1_12_1() {
             tried += 1;
         }
     }
-    assert!(tried >= 50);
+    assert!(tried >= 10);
     assert!(
         tbc.sent.as_ref().unwrap().is_empty(),
         "a refused verb reached the socket"

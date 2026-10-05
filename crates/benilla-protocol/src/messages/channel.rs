@@ -73,10 +73,20 @@ pub struct ChannelNotify {
 
 /// A notice byte past 0x1F errors, since the length of its tail is unknown.
 pub(super) fn read_channel_notify(r: &mut &[u8]) -> io::Result<ChannelNotify> {
-    use channel_notice as n;
-
     let notice = read_u8(r)?;
     let channel = read_cstring(r)?;
+    read_notice_tail(notice, channel, r)
+}
+
+/// The tail of a notice whose byte and channel name are read; both builds share every tail but
+/// `YOU_JOINED`'s, which 2.4.3 reads itself.
+pub(super) fn read_notice_tail(
+    notice: u8,
+    channel: String,
+    r: &mut &[u8],
+) -> io::Result<ChannelNotify> {
+    use channel_notice as n;
+
     let tail = match notice {
         n::JOINED | n::LEFT => ChannelNoticeTail::Guid(read_u64_le(r)?),
         n::YOU_JOINED => {
