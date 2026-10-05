@@ -13,6 +13,10 @@
 /// The `## Interface` this client implements, the reference's hard-coded `0x2bc0`.
 pub const CLIENT_INTERFACE: u32 = 11200;
 
+/// The `## Interface` the 2.4.3 client implements, which every `Blizzard_*` addon of its install
+/// carries.
+pub const CLIENT_INTERFACE_2_4_3: u32 = 20400;
+
 /// One addon as the gate reads it; every addon registry lowers into this.
 pub struct GateRow<'a> {
     pub name: &'a str,
@@ -63,12 +67,31 @@ impl Verdict {
 /// `demand_only` is the in-game query (`dl=1`), where an unloaded addon that is not LoadOnDemand
 /// reports `NOT_DEMAND_LOADED`; `version_check` is the live `checkAddonVersion`, read per query.
 pub fn can_load(rows: &[GateRow], index: usize, demand_only: bool, version_check: bool) -> Verdict {
+    can_load_for(CLIENT_INTERFACE, rows, index, demand_only, version_check)
+}
+
+/// [`can_load`] for a client whose own `## Interface` number is `client` (2.4.3: [`CLIENT_INTERFACE_2_4_3`]).
+pub fn can_load_for(
+    client: u32,
+    rows: &[GateRow],
+    index: usize,
+    demand_only: bool,
+    version_check: bool,
+) -> Verdict {
     let mut visiting = vec![false; rows.len()];
-    walk(rows, index, demand_only, version_check, &mut visiting)
+    walk(
+        client,
+        rows,
+        index,
+        demand_only,
+        version_check,
+        &mut visiting,
+    )
 }
 
 /// One level of the arbiter, its checks in the reference's order.
 fn walk(
+    client: u32,
     rows: &[GateRow],
     i: usize,
     demand_only: bool,
@@ -89,7 +112,7 @@ fn walk(
     }
     // Checks 4 and 5, banned and corrupt: no signature state, never produced.
     // Check 6: the version gate, exact `==`; with the check off it falls through (`0x51e876`).
-    if row.interface != CLIENT_INTERFACE && version_check {
+    if row.interface != client && version_check {
         return Verdict::Refused {
             reason: Some("INTERFACE_VERSION"),
             dep: None,
@@ -108,7 +131,7 @@ fn walk(
             },
             // A loaded dependency satisfies the walk before any recursion (`0x51e8ba`).
             Some(d) if rows[d].loaded => Verdict::Loadable,
-            Some(d) => walk(rows, d, demand_only, version_check, visiting),
+            Some(d) => walk(client, rows, d, demand_only, version_check, visiting),
         };
         if let Verdict::Refused { reason, dep } = verdict {
             visiting[i] = false;

@@ -183,3 +183,37 @@ fn the_2_4_3_aura_verbs_answer_the_lists_the_stock_files_read() {
         "past the end: nothing"
     );
 }
+
+/// `PLAYER_LOGIN` makes the stock interface ask for `Blizzard_CombatLog` on demand: the addon is a
+/// registry row of the 2.4.3 chain, loads from it, and the failure popup's table stays empty.
+#[test]
+fn the_combat_log_addon_loads_on_demand_at_login() {
+    let data = benilla_formats::wow_data_tbc_or_skip!();
+    let _l = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (_report, mut s, _laid) = load_stock_with_script(&data, "combatlog-243");
+    assert!(
+        s.eval::<bool>(r#"return IsAddOnLoadOnDemand("Blizzard_CombatLog") ~= nil"#)
+            .unwrap(),
+        "the addon is a registry row"
+    );
+    assert!(!s
+        .eval::<bool>(r#"return IsAddOnLoaded("Blizzard_CombatLog") ~= nil"#)
+        .unwrap());
+    let before = s.errors().len();
+    s.fire_event("PLAYER_LOGIN", vec![]);
+    assert!(
+        s.eval::<bool>(r#"return IsAddOnLoaded("Blizzard_CombatLog") ~= nil"#)
+            .unwrap(),
+        "the addon loaded"
+    );
+    assert!(
+        !s.eval::<bool>(r#"return StaticPopup1 ~= nil and StaticPopup1:IsShown() == 1"#)
+            .unwrap(),
+        "no failure popup is up"
+    );
+    let errors = s.errors().split_off(before);
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert!(s.eval::<bool>("return COMBATLOG ~= nil").unwrap());
+}

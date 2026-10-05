@@ -15,10 +15,14 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     if super::ScriptDialect::of(lua) != super::ScriptDialect::Lua51 {
         return Ok(());
     }
+    lua.app_data_mut::<Model>()
+        .expect("model app_data")
+        .client_interface = super::addon_gate::CLIENT_INTERFACE_2_4_3;
     install_cooldown(lua)?;
     install_attributes(lua)?;
     install_text_methods(lua)?;
     super::aura::install_tbc(lua)?;
+    super::ui243_combatlog::install(lua)?;
     super::ui243_verbs::install(lua)
 }
 

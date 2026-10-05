@@ -133,6 +133,7 @@ mod tooltip_item;
 mod tooltip_spell;
 mod tooltip_unit;
 pub(crate) mod ui243;
+mod ui243_combatlog;
 mod ui243_verbs;
 mod ui_errors;
 pub use tooltip_unit::TooltipTint;
@@ -212,6 +213,7 @@ pub use tabard::{
     emblem_mask_path, TabardHost, TabardIntent, EMBLEM_MASK_TOKEN, TABARD_COUNTS,
     TABARD_CREATION_COST,
 };
+pub use ui243_combatlog::{CombatLogFilter, FilterUnits};
 pub use video_pairs::VIDEO_PAIR_CVARS;
 pub use worldmap_arrow::ARROW_MODEL;
 

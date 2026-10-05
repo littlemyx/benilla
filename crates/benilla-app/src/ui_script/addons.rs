@@ -337,26 +337,31 @@ fn root_from(home: Option<PathBuf>) -> Option<PathBuf> {
     home.map(|h| h.join(ADDONS_DIR))
 }
 
-/// The reference's twelve `Blizzard_*` LoadOnDemand addons: on a 1.12 install each folder holds
-/// only a `.pub`, with the files in the archive. Probed against the chain.
-const BLIZZARD_ADDONS: [&str; 12] = [
+/// The reference's `Blizzard_*` LoadOnDemand addons: on a 1.12 install each folder holds only a
+/// `.pub`, with the files in the archive. Probed against the chain, so a name the build's archives
+/// lack is no row: 1.12.1 carries the first twelve of the alphabetical list, 2.4.3 sixteen.
+const BLIZZARD_ADDONS: [&str; 16] = [
     "Blizzard_AuctionUI",
     "Blizzard_BattlefieldMinimap",
     "Blizzard_BindingUI",
+    "Blizzard_CombatLog",
     "Blizzard_CombatText",
     "Blizzard_CraftUI",
     "Blizzard_GMSurveyUI",
+    "Blizzard_GuildBankUI",
     "Blizzard_InspectUI",
+    "Blizzard_ItemSocketingUI",
     "Blizzard_MacroUI",
     "Blizzard_RaidUI",
     "Blizzard_TalentUI",
+    "Blizzard_TimeManager",
     "Blizzard_TradeSkillUI",
     "Blizzard_TrainerUI",
 ];
 
 /// The Blizzard addons the chain carries as LoadOnDemand registry rows, for `UIParentLoadAddOn`;
 /// a toc that is not LoadOnDemand is skipped, as the startup walk does not read the chain.
-fn chain_addons() -> Vec<Addon> {
+pub(super) fn chain_addons() -> Vec<Addon> {
     BLIZZARD_ADDONS
         .iter()
         .filter_map(|name| {
@@ -926,14 +931,12 @@ impl Walk {
         // The version gate, `AddOn_CanLoad` check 6: after the enable state, before the dependency
         // loop, an exact `==` (a missing `## Interface` is 0). Not a failure either: the AddOns
         // screens show it, and the Load out of date AddOns checkbox loads it anyway.
-        if self.version_check
-            && addon.toc.interface_version() != benilla_ui::script::addon_gate::CLIENT_INTERFACE
-        {
+        if self.version_check && addon.toc.interface_version() != script.client_interface() {
             info!(
                 "ui_script: {key} is out of date (## Interface: {}, client {}) — not loaded \
                  (the AddOns screen's 'Load out of date AddOns' loads it anyway)",
                 addon.toc.interface_version(),
-                benilla_ui::script::addon_gate::CLIENT_INTERFACE
+                script.client_interface()
             );
             self.failed.insert(addon.name.clone());
             return Err(());

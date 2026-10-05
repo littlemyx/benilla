@@ -123,20 +123,43 @@ pub(crate) fn feed_cast_bar(
             CastBarEdge::Start {
                 spell_id,
                 cast_time_ms,
-            } => Some((
-                "SPELLCAST_START",
-                vec![
-                    ScriptValue::Str(cast_bar_label(spells.as_deref(), spell_id)),
-                    ScriptValue::Int(i64::from(cast_time_ms)),
-                ],
-            )),
-            CastBarEdge::Stop => Some(("SPELLCAST_STOP", vec![])),
-            CastBarEdge::Failed => Some(("SPELLCAST_FAILED", vec![])),
-            CastBarEdge::Interrupted => Some(("SPELLCAST_INTERRUPTED", vec![])),
-            CastBarEdge::Delayed { delay_ms } => Some((
-                "SPELLCAST_DELAYED",
-                vec![ScriptValue::Int(i64::from(delay_ms))],
-            )),
+            } => {
+                let label = cast_bar_label(spells.as_deref(), spell_id);
+                // What `UnitCastingInfo("player")` reads: the spell's name, the bar's text, its icon.
+                let display = spells.as_deref().and_then(|s| s.catalog.get(spell_id));
+                script.cast_start(
+                    display.map_or("", |d| d.name.as_str()),
+                    &label,
+                    display.and_then(|d| d.icon.clone()),
+                    i64::from(cast_time_ms),
+                );
+                Some((
+                    "SPELLCAST_START",
+                    vec![
+                        ScriptValue::Str(label),
+                        ScriptValue::Int(i64::from(cast_time_ms)),
+                    ],
+                ))
+            }
+            CastBarEdge::Stop => {
+                script.cast_stop();
+                Some(("SPELLCAST_STOP", vec![]))
+            }
+            CastBarEdge::Failed => {
+                script.cast_stop();
+                Some(("SPELLCAST_FAILED", vec![]))
+            }
+            CastBarEdge::Interrupted => {
+                script.cast_stop();
+                Some(("SPELLCAST_INTERRUPTED", vec![]))
+            }
+            CastBarEdge::Delayed { delay_ms } => {
+                script.cast_delay(i64::from(delay_ms));
+                Some((
+                    "SPELLCAST_DELAYED",
+                    vec![ScriptValue::Int(i64::from(delay_ms))],
+                ))
+            }
             CastBarEdge::ChannelStart {
                 spell_id,
                 duration_ms,
