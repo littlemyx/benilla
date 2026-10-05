@@ -13,7 +13,12 @@
 //! (`PARSED`) and any bytes the parse left unread (`TAIL`) printed for a script to check. It then
 //! sends one read-only query per player and per distinct creature, game-object and item entry it
 //! saw, keeps reading for 20 s answering 2.4.3 time-sync requests, requests a logout and waits for
-//! it. It sends nothing else: no movement, chat, combat or interaction.
+//! it. It sends nothing else: no chat, combat or interaction, and no movement unless `WOW_WALK` is
+//! set: `1` walks 4 yd along heading 0 and back, `out` only the first leg, `back` only the return
+//! (heading pi), each at the server's run speed with a heartbeat every 500 ms, after checking that
+//! no unit or object lies within 12 yd of the segment. It answers every order the server sends and
+//! prints, as a `WALK finding` line, each correction or order. It stops and logs out if the own
+//! player's health drops or an attack names it.
 //! It also prints the groups 2.4.3 lays out differently (inventory and visible items with their
 //! enchantments, the item objects, skills, quest log, explored zones, bytes fields, and the auras
 //! and virtual items of every unit in range) as `RAW` lines that a script can check against
@@ -32,7 +37,7 @@ use benilla_protocol::messages::{
     self, Character, FieldTable, Object, ObjectFields, ObjectType, ServerPacket, TbcPacket,
 };
 use benilla_protocol::wire::Vector3d;
-use benilla_protocol::{logon_as, CharCreateReq, CharRecord, PacketRead, WorldSession};
+use benilla_protocol::{logon_as, CharCreateReq, CharRecord, MoverPose, PacketRead, WorldSession};
 
 fn env(name: &str) -> Result<String> {
     std::env::var(name).map_err(|_| anyhow!("set {name}"))
@@ -541,6 +546,17 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
     }
     println!("parse errors: {}", parse_errors.len());
     let _ = &other;
+
+    if let Ok(mode) = std::env::var("WOW_WALK") {
+        match &own {
+            Some(o) => {
+                if let Err(e) = walk(world, &mut tally, character.guid, o, &seen, &mode) {
+                    println!("WALK failed: {e:#}");
+                }
+            }
+            None => println!("WALK: no own-player create, not walking"),
+        }
+    }
 
     // The queries: one per distinct entry seen (and every player), then 20 s answering time sync.
     let sent = send_queries(world, &seen)?;
@@ -1103,4 +1119,335 @@ fn report_groups(own: &OwnPlayer, player_guid: u64, seen: &[Seen]) {
         c.durability_equals_max, items.len(), c.enchanted_items,
         c.units_with_auras, c.units, c.aura_flag_anomalies, c.units_with_virtual_items, c.virtual_items
     );
+}
+
+/// Yards of one leg of the walk.
+const WALK_YARDS: f32 = 4.0;
+/// The clearance every unit and object must keep from the walked segment.
+const WALK_CLEARANCE: f32 = 12.0;
+/// The client's movement heartbeat cadence while moving.
+const WALK_HEARTBEAT: Duration = Duration::from_millis(500);
+
+/// The state a walk pump needs.
+struct Walker {
+    guid: u64,
+    mover: MoverPose,
+    /// The own player's health at entry; any lower value ends the walk.
+    health: Option<u32>,
+    /// Set by a health drop or an attack naming the own player.
+    abort: bool,
+    /// Packets that were a correction, an order, or unexpected, as printed.
+    findings: u32,
+    /// Relayed `MSG_MOVE_*` of other movers.
+    relays: u32,
+    /// Packets read during the walk.
+    read: u32,
+    /// Orders answered, by what they were.
+    answered: BTreeMap<&'static str, u32>,
+}
+
+/// Distance from `p` to the segment `a`..`b`.
+fn segment_distance(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 == 0.0 {
+        0.0
+    } else {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0)
+    };
+    ((a.0 + t * dx - p.0).powi(2) + (a.1 + t * dy - p.1).powi(2)).sqrt()
+}
+
+/// Read one packet for at most the socket's short timeout, account for it, answer what it asks.
+fn walk_pump(
+    world: &mut WorldSession,
+    tally: &mut Tally,
+    w: &mut Walker,
+    begin: Instant,
+) -> Result<()> {
+    let read = match world.recv_detailed() {
+        Ok(r) => r,
+        Err(e) => {
+            let text = format!("{e:#}");
+            if is_timeout(&text) {
+                return Ok(());
+            }
+            if text.contains("parsing opcode") {
+                println!("WALK parse error: {text}");
+                w.findings += 1;
+                return Ok(());
+            }
+            return Err(e.context("reading the world stream during the walk"));
+        }
+    };
+    w.read += 1;
+    tally.note(&read, begin.elapsed());
+    answer_time_sync(world, tally)?;
+    let is_sync = matches!(
+        read.packet,
+        ServerPacket::Tbc(TbcPacket::TimeSyncRequest { .. })
+    );
+    if !is_sync {
+        if let Some(what) = world.answer_movement(&read.packet, &w.mover)? {
+            *w.answered.entry(what).or_default() += 1;
+        }
+    }
+    let label = opcode_label(read.opcode);
+    let mine = |g: u64| g == w.guid;
+    let finding = match &read.packet {
+        ServerPacket::Tbc(TbcPacket::MoveRelay { .. }) => {
+            w.relays += 1;
+            None
+        }
+        ServerPacket::Tbc(
+            TbcPacket::ForceFlightSpeedChange { .. } | TbcPacket::MoveSetCanFly { .. },
+        )
+        | ServerPacket::Teleport { .. }
+        | ServerPacket::ForceSpeedChange { .. }
+        | ServerPacket::MoveMode { .. }
+        | ServerPacket::KnockBack { .. }
+        | ServerPacket::ClientControlUpdate { .. }
+        | ServerPacket::NewWorld { .. }
+        | ServerPacket::TransferPending { .. } => Some("an order or correction"),
+        ServerPacket::SplineMoveMode { guid, .. } if mine(*guid) => Some("a mode change"),
+        ServerPacket::SplineSpeedChange { guid, .. } if mine(*guid) => Some("a speed change"),
+        ServerPacket::LogoutComplete => Some("the logout completing"),
+        ServerPacket::AttackStart { attacker, victim }
+        | ServerPacket::AttackStop { attacker, victim }
+            if mine(*attacker) || mine(*victim) =>
+        {
+            w.abort = true;
+            Some("an attack naming us")
+        }
+        ServerPacket::UpdateObject { objects } => {
+            for o in objects {
+                if let Object::Values { guid, mask } = o {
+                    if mine(*guid) {
+                        if let (Some(now), Some(then)) = (mask.unit_health(), w.health) {
+                            if now < then {
+                                w.abort = true;
+                                println!("WALK own health {then} -> {now}");
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    };
+    if let Some(kind) = finding {
+        w.findings += 1;
+        println!("WALK finding: {label} ({kind})");
+    }
+    Ok(())
+}
+
+/// Read and answer for `span`.
+fn walk_read_for(
+    world: &mut WorldSession,
+    tally: &mut Tally,
+    w: &mut Walker,
+    begin: Instant,
+    span: Duration,
+) -> Result<()> {
+    let until = Instant::now() + span;
+    while Instant::now() < until && !w.abort {
+        walk_pump(world, tally, w, begin)?;
+    }
+    Ok(())
+}
+
+/// One leg: set the facing to `heading`, start forward, heartbeat every 500 ms at `speed` along the
+/// heading, stop `WALK_YARDS` on, with z kept as the server gave it.
+fn walk_leg(
+    world: &mut WorldSession,
+    tally: &mut Tally,
+    w: &mut Walker,
+    begin: Instant,
+    heading: f32,
+    speed: f32,
+) -> Result<()> {
+    use benilla_protocol::messages::{opcode, tbc_flag};
+    let start = w.mover.position;
+    let (dx, dy) = (heading.cos(), heading.sin());
+    let at = |travelled: f32| {
+        [
+            start[0] + dx * travelled,
+            start[1] + dy * travelled,
+            start[2],
+        ]
+    };
+    world.send_movement(
+        opcode::MSG_MOVE_SET_FACING,
+        0,
+        start,
+        heading,
+        0.0,
+        0,
+        None,
+        None,
+    )?;
+    w.mover.orientation = heading;
+    let began = Instant::now();
+    world.send_movement(
+        opcode::MSG_MOVE_START_FORWARD,
+        tbc_flag::FORWARD,
+        start,
+        heading,
+        0.0,
+        0,
+        None,
+        None,
+    )?;
+    w.mover.flags = tbc_flag::FORWARD;
+    println!(
+        "WALK start forward heading {heading:.5} from ({:.3}, {:.3}, {:.3}) at {speed} yd/s",
+        start[0], start[1], start[2]
+    );
+    let duration = Duration::from_secs_f32(WALK_YARDS / speed);
+    let mut next_beat = WALK_HEARTBEAT;
+    loop {
+        let elapsed = began.elapsed();
+        if elapsed >= duration || w.abort {
+            break;
+        }
+        if elapsed >= next_beat {
+            let pos = at(speed * elapsed.as_secs_f32());
+            world.send_movement(
+                opcode::MSG_MOVE_HEARTBEAT,
+                tbc_flag::FORWARD,
+                pos,
+                heading,
+                0.0,
+                0,
+                None,
+                None,
+            )?;
+            w.mover.position = pos;
+            println!(
+                "WALK heartbeat at {:.0} ms ({:.3}, {:.3})",
+                elapsed.as_secs_f32() * 1000.0,
+                pos[0],
+                pos[1]
+            );
+            next_beat += WALK_HEARTBEAT;
+        }
+        walk_pump(world, tally, w, begin)?;
+    }
+    // Stop where the leg ends, or where an abort caught us.
+    let end = if w.abort {
+        w.mover.position
+    } else {
+        at(WALK_YARDS)
+    };
+    world.send_movement(opcode::MSG_MOVE_STOP, 0, end, heading, 0.0, 0, None, None)?;
+    w.mover = MoverPose {
+        position: end,
+        flags: 0,
+        ..w.mover
+    };
+    println!(
+        "WALK stop at ({:.3}, {:.3}, {:.3}) after {:.0} ms",
+        end[0],
+        end[1],
+        end[2],
+        began.elapsed().as_secs_f32() * 1000.0
+    );
+    Ok(())
+}
+
+/// The walk: `1` out and back, `out`, or `back`.
+fn walk(
+    world: &mut WorldSession,
+    tally: &mut Tally,
+    guid: u64,
+    own: &OwnPlayer,
+    seen: &[Seen],
+    mode: &str,
+) -> Result<()> {
+    use benilla_protocol::messages::opcode;
+    let (out, back) = match mode {
+        "1" => (true, true),
+        "out" => (true, false),
+        "back" => (false, true),
+        other => bail!("WOW_WALK {other:?} is not 1, out or back"),
+    };
+    let (p0, facing0) = own.position.ok_or_else(|| anyhow!("no own position"))?;
+    let speed = own
+        .speeds
+        .map(|s| s[1])
+        .ok_or_else(|| anyhow!("no run speed"))?;
+    let start = [p0.x, p0.y, p0.z];
+    // The segment both legs cover: from the start along the heading of the first leg.
+    let first_heading = if out { 0.0f32 } else { std::f32::consts::PI };
+    let end = (
+        start[0] + first_heading.cos() * WALK_YARDS,
+        start[1] + first_heading.sin() * WALK_YARDS,
+    );
+    let mut nearest: Option<(f32, u64)> = None;
+    for s in seen.iter().filter(|s| s.guid != guid) {
+        if let Some(p) = s.position {
+            let d = segment_distance((start[0], start[1]), end, (p.x, p.y));
+            if nearest.is_none_or(|(n, _)| d < n) {
+                nearest = Some((d, s.guid));
+            }
+        }
+    }
+    println!(
+        "WALK mode {mode}: start ({:.3}, {:.3}, {:.3}) facing {facing0:.5}, run speed {speed}, nearest object to the segment {:?}",
+        start[0],
+        start[1],
+        start[2],
+        nearest.map(|(d, g)| (d, hex_guid(g)))
+    );
+    if nearest.is_some_and(|(d, _)| d < WALK_CLEARANCE) {
+        bail!("an object lies within {WALK_CLEARANCE} yd of the segment, not walking");
+    }
+    let mut w = Walker {
+        guid,
+        mover: MoverPose {
+            guid,
+            position: start,
+            orientation: facing0,
+            flags: 0,
+        },
+        health: own.fields.unit_health(),
+        abort: false,
+        findings: 0,
+        relays: 0,
+        read: 0,
+        answered: BTreeMap::new(),
+    };
+    let begin = Instant::now();
+    world.set_read_timeout(Some(Duration::from_millis(50)))?;
+    world.set_active_mover(guid)?;
+    if out {
+        walk_leg(world, tally, &mut w, begin, 0.0, speed)?;
+        walk_read_for(world, tally, &mut w, begin, Duration::from_secs(3))?;
+    }
+    if back && !w.abort {
+        walk_leg(world, tally, &mut w, begin, std::f32::consts::PI, speed)?;
+        walk_read_for(world, tally, &mut w, begin, Duration::from_secs(3))?;
+    }
+    // Restore the facing the character had at entry.
+    let here = w.mover.position;
+    world.send_movement(
+        opcode::MSG_MOVE_SET_FACING,
+        0,
+        here,
+        facing0,
+        0.0,
+        0,
+        None,
+        None,
+    )?;
+    w.mover.orientation = facing0;
+    walk_read_for(world, tally, &mut w, begin, Duration::from_secs(1))?;
+    world.set_read_timeout(Some(Duration::from_secs(1)))?;
+    println!(
+        "WALK done at ({:.3}, {:.3}, {:.3}) facing {facing0:.5}: {} packets read, {} findings, {} relays of other movers, answered {:?}, abort {}",
+        here[0], here[1], here[2], w.read, w.findings, w.relays, w.answered, w.abort
+    );
+    Ok(())
 }

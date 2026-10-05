@@ -4,6 +4,7 @@
 
 use std::io;
 
+use super::tbc_movement::{FlightSpeed, RelayTail, TbcMovementInfo};
 use crate::wire::{
     capacity_hint, read_cstring, read_f32_le, read_i32_le, read_packed_guid, read_u32_le,
     read_u64_le, read_u8,
@@ -85,6 +86,36 @@ pub enum TbcPacket {
     ClearExtraAuraInfo { guid: u64, spell_id: u32 },
     /// `SMSG_TIME_SYNC_REQ`: the counter a `CMSG_TIME_SYNC_RESP` echoes.
     TimeSyncRequest { counter: u32 },
+    /// A relayed `MSG_MOVE_*` of another mover (`opcode` names which): the movement info in
+    /// 2.4.3's flag bits, and the speed or launch that ends a few of them.
+    MoveRelay {
+        guid: u64,
+        opcode: u16,
+        info: TbcMovementInfo,
+        tail: RelayTail,
+    },
+    /// `SMSG_FORCE_FLIGHT_SPEED_CHANGE` / `..._BACK_...`: owes the matching ack with `counter`.
+    ForceFlightSpeedChange {
+        guid: u64,
+        kind: FlightSpeed,
+        counter: u32,
+        speed: f32,
+    },
+    /// `SMSG_SPLINE_SET_FLIGHT_SPEED` / `..._BACK_SPEED`: a unit we do not control, no ack.
+    SplineFlightSpeedChange {
+        guid: u64,
+        kind: FlightSpeed,
+        speed: f32,
+    },
+    /// `SMSG_MOVE_SET_CAN_FLY` (`apply`) / `SMSG_MOVE_UNSET_CAN_FLY`: owes
+    /// `CMSG_MOVE_SET_CAN_FLY_ACK` with `counter`.
+    MoveSetCanFly {
+        guid: u64,
+        counter: u32,
+        apply: bool,
+    },
+    /// `SMSG_SPLINE_MOVE_SET_FLYING` / `..._UNSET_FLYING`: any unit's flying flag, no ack.
+    SplineMoveFlying { guid: u64, apply: bool },
 }
 
 impl TbcPacket {
@@ -111,6 +142,31 @@ impl TbcPacket {
             }
             TbcPacket::ClearExtraAuraInfo { .. } => "SMSG_CLEAR_EXTRA_AURA_INFO",
             TbcPacket::TimeSyncRequest { .. } => "SMSG_TIME_SYNC_REQ",
+            TbcPacket::MoveRelay { opcode, .. } => {
+                super::tbc_opcode_name(*opcode).unwrap_or("MSG_MOVE_*")
+            }
+            TbcPacket::ForceFlightSpeedChange { kind, .. } => match kind {
+                FlightSpeed::Flight => "SMSG_FORCE_FLIGHT_SPEED_CHANGE",
+                FlightSpeed::FlightBack => "SMSG_FORCE_FLIGHT_BACK_SPEED_CHANGE",
+            },
+            TbcPacket::SplineFlightSpeedChange { kind, .. } => match kind {
+                FlightSpeed::Flight => "SMSG_SPLINE_SET_FLIGHT_SPEED",
+                FlightSpeed::FlightBack => "SMSG_SPLINE_SET_FLIGHT_BACK_SPEED",
+            },
+            TbcPacket::MoveSetCanFly { apply, .. } => {
+                if *apply {
+                    "SMSG_MOVE_SET_CAN_FLY"
+                } else {
+                    "SMSG_MOVE_UNSET_CAN_FLY"
+                }
+            }
+            TbcPacket::SplineMoveFlying { apply, .. } => {
+                if *apply {
+                    "SMSG_SPLINE_MOVE_SET_FLYING"
+                } else {
+                    "SMSG_SPLINE_MOVE_UNSET_FLYING"
+                }
+            }
         }
     }
 }

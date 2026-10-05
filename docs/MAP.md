@@ -507,6 +507,7 @@
 - `WOW_VIS_DUMP` — benilla-app/src/capture/probes/live_fps.rs
 - `WOW_VIS_TRACE` — benilla-world/src/model_render/visibility.rs
 - `WOW_VPLATE_TRACE` — benilla-app/src/vplates.rs
+- `WOW_WALK` — benilla-protocol/examples/login_probe.rs
 - `WOW_WARM_SLICE` — benilla-app/src/pipe_warm/mod.rs
 - `WOW_WATER_CLIP` — benilla-assets/src/materials.rs
 - `WOW_WAVE_DUMP` — benilla-world/src/ffx_glow.rs
