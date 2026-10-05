@@ -190,7 +190,7 @@ pub(super) struct NetHandles {
 }
 
 /// Spawns the read thread with its park and cycle loop, and the one long-lived write thread.
-pub(super) fn spawn_net(connect: bool) -> NetHandles {
+pub(super) fn spawn_net(connect: bool, build: benilla_build::ClientBuild) -> NetHandles {
     let (events_tx, events_rx) = crossbeam_channel::unbounded();
     let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
     let (pick_tx, pick_rx) = crossbeam_channel::unbounded::<CharRequest>();
@@ -236,6 +236,7 @@ pub(super) fn spawn_net(connect: bool) -> NetHandles {
                     read_clock.lock_recover().clear();
                     read_expansion.store(u8::MAX, Ordering::Relaxed);
                     match run_with(
+                        &build,
                         &events_tx,
                         &writer_tx,
                         &parks,
@@ -310,6 +311,7 @@ fn run(
 ) -> Result<Cycle> {
     let expansion = std::sync::atomic::AtomicU8::new(u8::MAX);
     run_with(
+        &benilla_build::VANILLA_1_12_1,
         events_tx,
         writer_tx,
         parks,
@@ -320,8 +322,10 @@ fn run(
     )
 }
 
-/// [`run`] with the cell the admitting auth response's expansion byte lands in.
+/// [`run`] as `build` (the session's, from [`crate::session_build::SessionBuild`]) with the cell
+/// the admitting auth response's expansion byte lands in.
 fn run_with(
+    build: &benilla_build::ClientBuild,
     events_tx: &Sender<SessionEvent>,
     writer_tx: &Sender<WorldWriter>,
     parks: &Parks,
@@ -380,7 +384,7 @@ fn run_with(
     // Logon: the dial and the SRP6 exchange against realmd.
     let mut logon = {
         stage(LoginStage::Connecting);
-        match benilla_protocol::logon(&req.host, &req.user, &req.pass) {
+        match benilla_protocol::logon_as(build, &req.host, &req.user, &req.pass) {
             Ok(l) => l,
             Err(e) => {
                 if canceled() {
@@ -483,7 +487,8 @@ fn run_with(
             });
             !canceled()
         };
-        let mut session = match WorldSession::connect_queued(
+        let mut session = match WorldSession::connect_queued_as(
+            build,
             &world_addr,
             &req.user,
             logon.session_key,
@@ -692,6 +697,7 @@ fn run_with(
                     tail,
                 } => {
                     skip_run = 0;
+                    crate::flow_census::note_packet(opcode, &events);
                     // A body is length-framed, so a decoder shorter than the server's layout
                     // succeeds silently; report it once per opcode, and never skip the packet.
                     if tail > 0 && tails_announced.insert(opcode) {
@@ -741,6 +747,7 @@ fn run_with(
                 }
                 Poll::Skipped { opcode, reason } => {
                     skip_run += 1;
+                    crate::flow_census::note_unparseable(opcode);
                     // Every skip, uncapped, into the trace (tag `skip`): otherwise a packet that
                     // failed to parse looks like one that never arrived.
                     if benilla_assets::trace::enabled() {

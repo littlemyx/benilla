@@ -373,6 +373,7 @@ pub(crate) fn load_ingame_ui_on_world_entry(world: &mut World) {
     } else {
         Default::default()
     };
+    super::flow_probe::install_lua_probe(&script);
     // No sound during the load edge, as in the reference's `UI_Init` (`0x48fbfa` → `0x49016d`).
     silenced_ui_load(&mut script, |script| {
         let _ = load_ingame_ui(script, identity.as_ref(), &roster, version_check);

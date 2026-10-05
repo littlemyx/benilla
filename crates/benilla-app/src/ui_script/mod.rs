@@ -15,6 +15,7 @@ use benilla_world::schedule::WorldStage;
 pub(crate) mod addons;
 mod content;
 pub(crate) mod extract;
+pub(crate) mod flow_probe;
 mod input;
 #[cfg(test)]
 mod layer_tests;
