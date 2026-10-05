@@ -49,6 +49,37 @@ function BenillaCensusDump()
   for k, v in pairs(C.fired) do table.insert(out, "F\t" .. k .. "\t" .. v) end
   return table.concat(out, "\n")
 end
+function BenillaCensusUi()
+  local g = _G or getfenv(0)
+  local shown, texes = 0, {}
+  for i = 1, 32 do
+    local b = g["BuffButton" .. i]
+    if b and b:IsShown() then
+      shown = shown + 1
+      local ic = g["BuffButton" .. i .. "Icon"]
+      table.insert(texes, tostring(ic and ic:GetTexture()))
+    end
+  end
+  local pops = {}
+  for i = 1, 4 do
+    local f = g["StaticPopup" .. i]
+    if f and f:IsShown() then
+      local t = g["StaticPopup" .. i .. "Text"]
+      table.insert(pops, tostring(t and t:GetText()))
+    end
+  end
+  local msgs = {}
+  local cf = g["ChatFrame1"]
+  if cf and cf.GetNumMessages and cf.GetMessageInfo then
+    for i = 1, cf:GetNumMessages() do
+      table.insert(msgs, tostring((cf:GetMessageInfo(i))))
+    end
+  end
+  local v, b, d = GetBuildInfo()
+  return "buff-buttons-shown=" .. shown .. " icons=[" .. table.concat(texes, ",") .. "] popups-shown=" ..
+    table.getn(pops) .. " [" .. table.concat(pops, " | ") .. "] build=" .. tostring(v) .. "," ..
+    tostring(b) .. "," .. tostring(d) .. " chat1=[" .. table.concat(msgs, " | ") .. "]"
+end
 "#;
 
 /// Installs the probe in a VM about to load the in-game interface.
@@ -96,6 +127,22 @@ fn sample_vm(script: &UiScript) {
         script.eval::<String>("return BenillaCensusDump and BenillaCensusDump() or ''")
     {
         (snap.registered, snap.fired) = parse_dump(&dump);
+    }
+    if let Ok(line) = script.eval::<String>("return BenillaCensusUi and BenillaCensusUi() or ''") {
+        if !line.is_empty() {
+            // Printed when it changes, so the in-world state survives the VM's teardown.
+            static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+            if let Ok(mut last) = LAST.lock() {
+                if *last != line {
+                    println!(
+                        "census: ui-state t={}ms {line}",
+                        crate::flow_census::now_ms()
+                    );
+                    last.clone_from(&line);
+                }
+            }
+            snap.ui = line;
+        }
     }
     record_vm(script.session(), snap);
 }

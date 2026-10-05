@@ -16,6 +16,10 @@ use bevy::prelude::*;
 static T0: OnceLock<Instant> = OnceLock::new();
 static CENSUS: Mutex<Census> = Mutex::new(Census::new());
 
+pub(crate) fn now_ms() -> u128 {
+    ms()
+}
+
 fn ms() -> u128 {
     T0.get_or_init(Instant::now).elapsed().as_millis()
 }
@@ -27,6 +31,8 @@ pub(crate) struct VmSnap {
     pub(crate) diagnostics: Vec<(&'static str, String, u32)>,
     pub(crate) registered: BTreeMap<String, u64>,
     pub(crate) fired: BTreeMap<String, u64>,
+    /// The interface's own state line (buff buttons, popups, build info), from the probe.
+    pub(crate) ui: String,
 }
 
 /// One opcode's fate: events produced, a parse with no event, an unknown opcode, a failed parse.
@@ -242,6 +248,9 @@ pub(crate) fn print_summary() {
         );
         for (v, n) in top(missing, 15) {
             println!("census: missing-verb x{n} {v}");
+        }
+        for vm in c.vms.values().filter(|v| !v.ui.is_empty()) {
+            println!("census: ui-state {}", vm.ui);
         }
         // Events: registered by the stock files vs fired by the engine.
         let mut registered: BTreeMap<String, u64> = BTreeMap::new();
