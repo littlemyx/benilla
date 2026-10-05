@@ -212,10 +212,46 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     install_tooltip_owner(lua)
 }
 
+/// The Druid's Cat Form spell, the form whose `SpellShapeshiftForm.dbc` row carries the agility
+/// attack bonus flag (cmangos-tbc `SharedDefines.h`: "Druid Cat form").
+const CAT_FORM_SPELL: u32 = 768;
+
 /// Verbs that read what the engine holds. A bag's family is not tracked (every bag is a general
 /// one), a channel's icon is not resolved, and `SetAutoLootDefault` keeps its value for no reader yet.
 fn install_engine_state(lua: &Lua) -> mlua::Result<()> {
     let g = lua.globals();
+    // GetAttackPowerForStat(stat, value) -> the melee attack power `value` points of stat 1
+    // (strength) or 2 (agility) give this class, which `PaperDollFrame.lua:228,242` formats into the
+    // stat tooltip; any other stat gives none. Per-point rates are cmangos-tbc's melee formula
+    // (`Player::UpdateAttackPowerAndDamage`, `StatSystem.cpp:280-296`): strength x2 for Warrior,
+    // Paladin, Shaman and Druid, x1 for Rogue, Hunter, Mage, Priest and Warlock; agility x1 for
+    // Rogue, Hunter and a Druid in Cat Form (the one form with the agility attack bonus flag).
+    g.set(
+        "GetAttackPowerForStat",
+        lua.create_function(|lua, (stat, value): (Value, Value)| {
+            const USAGE: &str = "Usage: GetAttackPowerForStat(stat, value)";
+            let stat = number_arg(lua, stat, USAGE)?;
+            let value = number_arg(lua, value, USAGE)?;
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let class = model
+                .player_record
+                .class
+                .as_ref()
+                .map_or("", |(_, token)| token.as_str());
+            let cat_form = model
+                .shapeshift_forms
+                .iter()
+                .any(|f| f.view.active && f.view.spell_id == CAT_FORM_SPELL);
+            let rate = match (stat, class) {
+                (1, "WARRIOR" | "PALADIN" | "SHAMAN" | "DRUID") => 2,
+                (1, "ROGUE" | "HUNTER" | "MAGE" | "PRIEST" | "WARLOCK") => 1,
+                (2, "ROGUE" | "HUNTER") => 1,
+                (2, "DRUID") if cat_form => 1,
+                _ => 0,
+            };
+            Ok(i64::from(rate) * i64::from(value))
+        })?,
+    )?;
     // GetDeathReleasePosition() -> map x, y of the spirit healer's graveyard marker, or (0, 0),
     // which `WorldMapFrame.lua` hides (the marker is fed by `SMSG_DEATH_RELEASE_LOC`).
     g.set(
@@ -790,9 +826,15 @@ fn install_empty_state(lua: &Lua) -> mlua::Result<()> {
             lua.create_function(|_, _: MultiValue| Ok(MultiValue::new()))?,
         )?;
     }
-    // No honor currency is read from the player's fields yet.
+    // No honor currency is read from the player's fields yet, nor the arena one
+    // (`PLAYER_FIELD_ARENA_CURRENCY`): a character with none has 0 of each, which `PVPFrame.lua`
+    // prints.
     g.set(
         "GetHonorCurrency",
+        lua.create_function(|_, _: MultiValue| Ok(0))?,
+    )?;
+    g.set(
+        "GetArenaCurrency",
         lua.create_function(|_, _: MultiValue| Ok(0))?,
     )?;
     g.set(
@@ -874,6 +916,70 @@ mod tests {
         assert_eq!(
             s.arity("GetNumVoiceSessionMembersBySessionID(1)").unwrap(),
             1
+        );
+    }
+
+    #[test]
+    fn the_attack_power_a_stat_gives_follows_the_class_and_the_arena_currency_is_empty() {
+        let mut s = s51();
+        // No class known: nothing contributes.
+        assert_eq!(
+            s.eval::<i64>("return GetAttackPowerForStat(1, 10)")
+                .unwrap(),
+            0
+        );
+        for (class, strength, agility) in [
+            ("WARRIOR", 20, 0),
+            ("PALADIN", 20, 0),
+            ("SHAMAN", 20, 0),
+            ("ROGUE", 10, 10),
+            ("HUNTER", 10, 10),
+            ("MAGE", 10, 0),
+            ("PRIEST", 10, 0),
+            ("WARLOCK", 10, 0),
+            ("DRUID", 20, 0),
+        ] {
+            s.set_player_record(crate::script::PlayerRecord {
+                name: "Tester".to_string(),
+                class: Some((class.to_string(), class.to_string())),
+                ..Default::default()
+            });
+            assert_eq!(
+                s.eval::<(i64, i64, i64, i64)>(
+                    "return GetAttackPowerForStat(1, 10), GetAttackPowerForStat(2, 10), \
+                     GetAttackPowerForStat(3, 10), GetAttackPowerForStat('1', '10')"
+                )
+                .unwrap(),
+                (strength, agility, 0, strength),
+                "{class}"
+            );
+        }
+        // A Druid in Cat Form (spell 768 active) also gets one attack power per agility.
+        s.set_shapeshift_forms(vec![crate::script::ShapeshiftFormView {
+            spell_id: 768,
+            active: true,
+            ..Default::default()
+        }]);
+        assert_eq!(
+            s.eval::<(i64, i64)>(
+                "return GetAttackPowerForStat(1, 10), GetAttackPowerForStat(2, 10)"
+            )
+            .unwrap(),
+            (20, 10)
+        );
+        assert!(s.run("GetAttackPowerForStat(1)").is_err());
+        assert_eq!(s.eval::<i64>("return GetArenaCurrency()").unwrap(), 0);
+        // The graveyard marker is absent until the app feeds one: (0, 0) hides it.
+        assert_eq!(
+            s.eval::<(f64, f64)>("return GetDeathReleasePosition()")
+                .unwrap(),
+            (0.0, 0.0)
+        );
+        s.set_death_release_uv(Some((0.25, 0.5)));
+        assert_eq!(
+            s.eval::<(f64, f64)>("return GetDeathReleasePosition()")
+                .unwrap(),
+            (0.25, 0.5)
         );
     }
 
