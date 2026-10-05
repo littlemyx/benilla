@@ -279,6 +279,8 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
         t::SMSG_ATTACKERSTATEUPDATE => {
             ServerPacket::AttackerState(super::attack::read_attacker_state_in(r, true)?)
         }
+        // The kill's XP line; the trailing refer-a-friend byte is cmangos-tbc's alone.
+        t::SMSG_LOG_XPGAIN => ServerPacket::XpGain(super::tbc_combat::read_xp_gain_tbc(r)?),
         t::SMSG_SPELLNONMELEEDAMAGELOG => {
             ServerPacket::SpellDamageLog(super::combat_log::read_spell_damage_log_in(r, true)?)
         }

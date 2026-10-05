@@ -142,6 +142,7 @@ pub mod tbc_opcode {
     pub const SMSG_NOTIFICATION: u16 = 0x01cb;
     pub const CMSG_QUERY_TIME: u16 = 0x01ce;
     pub const SMSG_QUERY_TIME_RESPONSE: u16 = 0x01cf;
+    pub const SMSG_LOG_XPGAIN: u16 = 0x01d0;
     pub const CMSG_PING: u16 = 0x01dc;
     pub const SMSG_PONG: u16 = 0x01dd;
     pub const SMSG_AUTH_CHALLENGE: u16 = 0x01ec;
@@ -443,6 +444,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x01cd, "SMSG_PLAYED_TIME"),
     (0x01ce, "CMSG_QUERY_TIME"),
     (0x01cf, "SMSG_QUERY_TIME_RESPONSE"),
+    (0x01d0, "SMSG_LOG_XPGAIN"),
     (0x01d4, "SMSG_LEVELUP_INFO"),
     (0x01d5, "MSG_MINIMAP_PING"),
     (0x01d9, "SMSG_START_MIRROR_TIMER"),

@@ -271,3 +271,90 @@ fn the_attack_swing_request_is_wow_messages_2_4_3_vector() {
         hex("6400000000000000")
     );
 }
+
+#[test]
+fn the_xp_line_reads_with_or_without_the_refer_a_friend_byte() {
+    // cmangos-tbc `SendLogXPGain`: victim, total, type 0 (kill), base, group rate, refer-a-friend.
+    let kill = |tail: &[u8]| {
+        cat(&[
+            0xF130_0000_0000_0042u64.to_le_bytes().to_vec(),
+            u32b(60),
+            vec![0],
+            u32b(50),
+            1.0f32.to_le_bytes().to_vec(),
+            tail.to_vec(),
+        ])
+    };
+    for body in [kill(&[0]), kill(&[])] {
+        match tbc(t::SMSG_LOG_XPGAIN, &body) {
+            ServerPacket::XpGain(x) => {
+                assert_eq!(
+                    (x.victim, x.total, x.base, x.kill),
+                    (0xF130_0000_0000_0042, 60, 50, true)
+                );
+            }
+            other => panic!("{}", other.name()),
+        }
+    }
+    // A non-kill award has no base or rate, only the trailing byte.
+    let quest = cat(&[0u64.to_le_bytes().to_vec(), u32b(450), vec![1, 0]]);
+    match tbc(t::SMSG_LOG_XPGAIN, &quest) {
+        ServerPacket::XpGain(x) => assert_eq!((x.total, x.base, x.kill), (450, 450, false)),
+        other => panic!("{}", other.name()),
+    }
+}
+
+#[test]
+fn the_rest_of_a_kill_reads_on_2_4_3() {
+    // Same bytes as 1.12.1 (cmangos-tbc `Unit::Kill`, `Player::GiveLevel`, `Unit::Attack`).
+    let ev = |op: u16, body: &[u8]| tbc(op, body).name();
+    // `SMSG_PARTYKILLLOG`: killer and victim guids.
+    let kill = cat(&[
+        0x07u64.to_le_bytes().to_vec(),
+        0x42u64.to_le_bytes().to_vec(),
+    ]);
+    assert_eq!(ev(0x01F5, &kill), "SMSG_PARTYKILLLOG");
+    // `SMSG_AI_REACTION`: guid and reaction 2 (hostile).
+    let ai = cat(&[0x42u64.to_le_bytes().to_vec(), u32b(2)]);
+    assert_eq!(ev(0x013C, &ai), "SMSG_AI_REACTION");
+    // `SMSG_LEVELUP_INFO`: level, health, five powers, five stats.
+    let mut up = u32b(2);
+    for v in [18u32, 0, 0, 0, 0, 0, 2, 1, 0, 0, 1] {
+        up.extend(u32b(v));
+    }
+    assert_eq!(ev(0x01D4, &up), "SMSG_LEVELUP_INFO");
+    // `SMSG_ATTACKSTART` / `SMSG_ATTACKSTOP`: two guids; two packed guids and the dead word.
+    assert_eq!(ev(0x0143, &kill), "SMSG_ATTACKSTART");
+    let stop = cat(&[packed(7), packed(0x42), u32b(1)]);
+    assert_eq!(ev(0x0144, &stop), "SMSG_ATTACKSTOP");
+}
+
+#[test]
+fn a_heroic_strike_swing_keeps_its_spell_hit_bits_and_blocked_amount_on_2_4_3() {
+    // `SendAttackStateUpdate`: HitInfo crit (0x80) | block (0x800), one sub-damage block (physical
+    // mask 1), target state 1, attacker state 0, melee spell 78 (Heroic Strike), blocked 3.
+    let body = cat(&[
+        u32b(0x880),
+        packed(0x07),
+        packed(0x42),
+        u32b(25),
+        vec![1],
+        u32b(1),
+        25.0f32.to_le_bytes().to_vec(),
+        u32b(25),
+        u32b(0),
+        u32b(0),
+        u32b(1),
+        u32b(0),
+        u32b(78),
+        u32b(3),
+    ]);
+    match tbc(t::SMSG_ATTACKERSTATEUPDATE, &body) {
+        ServerPacket::AttackerState(a) => {
+            assert_eq!((a.hit_info, a.damage, a.victim_state), (0x880, 25, 1));
+            assert_eq!((a.melee_spell_id, a.blocked, a.school), (78, 3, 0));
+            assert!(a.displayed());
+        }
+        other => panic!("{}", other.name()),
+    }
+}
