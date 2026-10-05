@@ -132,6 +132,7 @@ mod tooltip;
 mod tooltip_item;
 mod tooltip_spell;
 mod tooltip_unit;
+pub(crate) mod ui243;
 mod ui_errors;
 pub use tooltip_unit::TooltipTint;
 mod trade;
@@ -606,6 +607,7 @@ impl UiScript {
         worldmap::install(&lua)?;
         worldstate::install(&lua)?;
         net_stats::install(&lua)?;
+        ui243::install(&lua)?;
 
         dialect.apply(&lua)?;
         let s = UiScript {
@@ -1180,6 +1182,7 @@ impl UiScript {
                 crate::widget::FrameKind::MovieFrame => "MovieFrame",
                 crate::widget::FrameKind::GameTooltip => "GameTooltip",
                 crate::widget::FrameKind::Minimap => "Minimap",
+                crate::widget::FrameKind::Cooldown => "Cooldown",
             });
         }
         // Region leaves publish into their own name table, not the arena's.

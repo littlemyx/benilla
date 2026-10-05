@@ -300,6 +300,28 @@ impl Loader<'_> {
 
     /// `<Minimap>` (`0x4ee2b0`): the two model files for the ctor's nine `Model` children, each
     /// the stock model when the attribute is absent, as the reference reads a default string.
+    /// `<Cooldown>` (2.4.3): `reverse` and `drawEdge`, the two flags its XML reader takes.
+    pub(super) fn apply_cooldown(&mut self, el: &Element, wrapper: &Table, dbg: &str) {
+        if !el.tag.eq_ignore_ascii_case("Cooldown") {
+            return;
+        }
+        let flags = [
+            (
+                "reverse",
+                crate::script::ui243::set_reverse as fn(_, _, _) -> _,
+            ),
+            ("drawEdge", crate::script::ui243::set_draw_edge),
+        ];
+        for (attr, set) in flags {
+            if el.attr_bool(attr) {
+                let done = set(self.lua, wrapper, true);
+                if let Err(e) = done {
+                    self.report.errors.push(format!("{dbg}: {attr}: {e}"));
+                }
+            }
+        }
+    }
+
     pub(super) fn apply_minimap(&mut self, el: &Element, wrapper: &Table, dbg: &str) {
         if !el.tag.eq_ignore_ascii_case("Minimap") {
             return;

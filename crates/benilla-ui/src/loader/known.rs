@@ -7,7 +7,6 @@
 //! its name here, which [`tests`] holds against the loader's sources.
 
 use crate::framexml::Element;
-use crate::script::frame_kind_from_tag;
 
 /// Attributes every frame kind reads (`apply_attrs`, `apply_anchors` and the framework's own).
 const FRAME_ATTRS: &[&str] = &[
@@ -66,6 +65,7 @@ const ATTRS: &[(&str, &[&str])] = &[
         &["alphamode", "file", "justifyh", "justifyv", "setallpoints"],
     ),
     ("color", &["a", "b", "g", "r"]),
+    ("cooldown", &["drawedge", "reverse"]),
     ("colorselect", &["drawlayer", "scale"]),
     (
         "colorvaluetexture",
@@ -392,18 +392,16 @@ impl Audit {
 
     /// One top-level element: a frame kind, a region template or a font. A tag that is none of
     /// those is an unknown frame type, which the load reports and skips.
-    pub(super) fn top_level(&mut self, el: &Element) {
+    pub(super) fn top_level(&mut self, el: &Element, is_frame: &dyn Fn(&str) -> bool) {
         let tag = el.tag.to_ascii_lowercase();
-        if frame_kind_from_tag(&el.tag).is_some()
-            || ["texture", "fontstring", "font"].contains(&tag.as_str())
-        {
-            self.walk(el);
+        if is_frame(&el.tag) || ["texture", "fontstring", "font"].contains(&tag.as_str()) {
+            self.walk(el, is_frame);
         }
     }
 
-    fn walk(&mut self, el: &Element) {
+    fn walk(&mut self, el: &Element, is_frame: &dyn Fn(&str) -> bool) {
         let tag = el.tag.to_ascii_lowercase();
-        let frame = frame_kind_from_tag(&el.tag).is_some();
+        let frame = is_frame(&el.tag);
         for (name, _) in el.attrs() {
             if !attr_known(&tag, frame, &name.to_ascii_lowercase()) {
                 Self::note(&mut self.attributes, format!("<{} {}>", el.tag, name));
@@ -414,8 +412,8 @@ impl Audit {
             match tag.as_str() {
                 // A frame list: each child is a frame kind, or an unknown frame type.
                 "frames" | "scrollchild" => {
-                    if frame_kind_from_tag(&child.tag).is_some() {
-                        self.walk(child);
+                    if is_frame(&child.tag) {
+                        self.walk(child, is_frame);
                     }
                 }
                 // A handler: its body is the code, and the loader reads no attribute of it.
@@ -424,7 +422,7 @@ impl Audit {
                         Self::note(&mut self.attributes, format!("<{} {}>", child.tag, name));
                     }
                 }
-                _ if child_known(&tag, frame, &ctag) => self.walk(child),
+                _ if child_known(&tag, frame, &ctag) => self.walk(child, is_frame),
                 _ => Self::note(&mut self.elements, format!("<{}><{}>", el.tag, child.tag)),
             }
         }
@@ -444,7 +442,7 @@ mod tests {
             | framexml::TopLevel::Instance(el)
             | framexml::TopLevel::Font(el) = item
             {
-                a.top_level(el);
+                a.top_level(el, &|t| crate::script::frame_kind_from_tag(t).is_some());
             }
         }
         a

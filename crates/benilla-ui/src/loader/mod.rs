@@ -347,7 +347,9 @@ impl Loader<'_> {
         for item in &doc.items {
             if let TopLevel::Template(el) | TopLevel::Instance(el) | TopLevel::Font(el) = item {
                 let mut audit = known::Audit::default();
-                audit.top_level(el);
+                audit.top_level(el, &|tag| {
+                    crate::script::object::registered_frame_kind(self.lua, tag).is_some()
+                });
                 for e in audit.elements {
                     if !self.report.unknown_elements.contains(&e) {
                         self.report.unknown_elements.push(e);
@@ -698,6 +700,7 @@ impl Loader<'_> {
         self.apply_messageframe(el, wrapper, dbg_name);
         self.apply_simplehtml(el, wrapper, dbg_name);
         self.apply_minimap(el, wrapper, dbg_name);
+        self.apply_cooldown(el, wrapper, dbg_name);
         // 6 · <Scripts> handlers (`0x769ef0`); OnLoad is captured to fire bottom-up below.
         let onload = self.apply_scripts(el, wrapper, dbg_name);
 

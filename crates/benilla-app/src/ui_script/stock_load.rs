@@ -542,7 +542,7 @@ mod tests {
 
     const BASELINE_2_4_3: Baseline = Baseline {
         rows: 113,
-        clean: 66,
+        clean: 67,
         classes: [
             (0, 0),
             (75, 21),
@@ -550,7 +550,7 @@ mod tests {
             (84, 3),
             (0, 0),
             (12, 3),
-            (524, 1),
+            (0, 0),
             (8, 3),
             (16, 8),
             (17, 7),

@@ -47,6 +47,8 @@ pub enum FrameKind {
     GameTooltip,
     /// The `<Minimap>` widget, a game-layer factory (`0x495940`) the app draws the map into.
     Minimap,
+    /// 2.4.3's `Cooldown` (`Cooldown.h` in the exe): a registered type of that build only.
+    Cooldown,
 }
 
 /// The kind of a [`Region`] leaf, the client's `CScriptRegion`-derived non-frame objects.
@@ -90,6 +92,22 @@ pub enum KindState {
     Minimap(MinimapState),
     /// The `GameTooltip` line stack, owner and fade.
     Tooltip(TooltipState),
+    /// A 2.4.3 `Cooldown`'s start, duration and flags.
+    Cooldown(CooldownState),
+}
+
+/// What a 2.4.3 `Cooldown` holds: `SetCooldown(start, duration)`, `SetReverse` and the XML
+/// `drawEdge`. The swipe is not drawn: nothing reads this yet but the widget's own getters.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CooldownState {
+    /// The `GetTime()` second the cooldown began, as `SetCooldown` was given it.
+    pub start: f64,
+    /// Seconds the cooldown runs; zero or less clears it.
+    pub duration: f64,
+    /// `SetReverse` / `reverse="true"`: the swipe fills instead of draining.
+    pub reverse: bool,
+    /// `drawEdge="true"`: the bright edge on the swipe's leading line.
+    pub draw_edge: bool,
 }
 
 impl KindState {
