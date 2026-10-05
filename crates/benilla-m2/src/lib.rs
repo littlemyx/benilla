@@ -213,11 +213,14 @@ pub fn parse_m2(cursor: &mut Cursor<&[u8]>) -> Result<M2Format> {
 
     // Bones: 108 bytes in v256: key bone i32, flags u32, parent i16, submesh u16 (no boneNameCRC in
     // vanilla), three 28-byte tracks, pivot C3 @96. The reference zeroes a NaN pivot component.
+    // From v260 a `boneNameCRC` u32 sits after `submesh`, so the record is 112 bytes and the pivot
+    // @100 (measured: 108 fails the parent and track-pointer checks on every sampled 2.4.3 model).
+    let (bone_size, pivot_ofs) = if version < 260 { (108, 96) } else { (112, 100) };
     let bones_avail = b.len().saturating_sub(bones.1 as usize);
-    let mut bone_list = Vec::with_capacity(capped(bones.0 as usize, 108, bones_avail));
+    let mut bone_list = Vec::with_capacity(capped(bones.0 as usize, bone_size, bones_avail));
     for i in 0..bones.0 as usize {
-        let bn = get(bones.1 as usize + i * 108, 108)?;
-        let mut pivot = rd_c3(bn, 96).ok_or(Error::Truncated)?;
+        let bn = get(bones.1 as usize + i * bone_size, bone_size)?;
+        let mut pivot = rd_c3(bn, pivot_ofs).ok_or(Error::Truncated)?;
         if pivot.x.is_nan() {
             pivot.x = 0.0;
         }
