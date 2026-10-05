@@ -252,6 +252,30 @@ fn install_engine_state(lua: &Lua) -> mlua::Result<()> {
             Ok(i64::from(rate) * i64::from(value))
         })?,
     )?;
+    // GetZonePVPInfo() -> pvpType, isFFA, factionName on 2.4.3: the three stock callers read the
+    // second as the free-for-all flag and the third as the controlling faction
+    // (`ZoneText.lua:8`, `Minimap.lua:27`, `Minimap.xml:88`), where 1.12.1 returns the faction
+    // second and the flag third. Same cache, swapped order.
+    g.set(
+        "GetZonePVPInfo",
+        lua.create_function(|lua, ()| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            let z = &model.zone;
+            let string = |s: &Option<String>| match s {
+                Some(s) => lua.create_string(s).map(Value::String),
+                None => Ok(Value::Nil),
+            };
+            Ok(MultiValue::from_vec(vec![
+                string(&z.pvp_type)?,
+                if z.is_arena {
+                    Value::Number(1.0)
+                } else {
+                    Value::Nil
+                },
+                string(&z.pvp_faction)?,
+            ]))
+        })?,
+    )?;
     // GetDeathReleasePosition() -> map x, y of the spirit healer's graveyard marker, or (0, 0),
     // which `WorldMapFrame.lua` hides (the marker is fed by `SMSG_DEATH_RELEASE_LOC`).
     g.set(
@@ -980,6 +1004,32 @@ mod tests {
             s.eval::<(f64, f64)>("return GetDeathReleasePosition()")
                 .unwrap(),
             (0.25, 0.5)
+        );
+    }
+
+    #[test]
+    fn the_zone_pvp_info_names_the_flag_second_and_the_faction_third() {
+        let mut s = s51();
+        s.set_zone_texts(crate::script::ZoneTexts {
+            pvp_type: Some("friendly".into()),
+            pvp_faction: Some("Alliance".into()),
+            is_arena: false,
+            ..Default::default()
+        });
+        assert_eq!(
+            s.eval::<(String, Option<f64>, String)>("return GetZonePVPInfo()")
+                .unwrap(),
+            ("friendly".to_string(), None, "Alliance".to_string())
+        );
+        s.set_zone_texts(crate::script::ZoneTexts {
+            pvp_type: Some("contested".into()),
+            is_arena: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            s.eval::<(String, Option<f64>, Option<String>)>("return GetZonePVPInfo()")
+                .unwrap(),
+            ("contested".to_string(), Some(1.0), None)
         );
     }
 

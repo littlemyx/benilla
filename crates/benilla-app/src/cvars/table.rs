@@ -254,6 +254,10 @@ pub(crate) const REGISTERED_243: &[Registered] = &[
     same("statusTextPercentage", "0"),
     // `stopAutoAttackOnTargetChange` register site 0x4aa108.
     same("stopAutoAttackOnTargetChange", "0"),
+    // `targetOfTargetMode`: the 2.4.3 exe holds the name but no register call of the scanned shape;
+    // the default is the stock interface's own, `UIOptionsFrame.lua:118` and the panel's
+    // `defaultValue` (`UIOptionsPanels.lua:134`).
+    same("targetOfTargetMode", "5"),
     // `targetStatusText` register site 0x4a9fc6.
     same("targetStatusText", "0"),
     // `useSimpleChat` register site 0x4aa5c9.
@@ -269,6 +273,17 @@ pub(crate) const REGISTERED_243: &[Registered] = &[
     same("timeMgrUseLocalTime", "0"),
     same("timeMgrUseMilitaryTime", "0"),
 ];
+
+/// 2.4.3's additions alone, for a VM seeded from the live table, which holds the 1.12.1 rows only.
+pub(crate) fn extra_pairs_for(
+    dialect: benilla_ui::script::ScriptDialect,
+) -> impl Iterator<Item = (&'static str, &'static str)> {
+    let extra: &[Registered] = match dialect {
+        benilla_ui::script::ScriptDialect::Lua51 => REGISTERED_243,
+        _ => &[],
+    };
+    extra.iter().map(|r| (r.name, r.default))
+}
 
 /// The CVars a build's script VM registers: the table, and 2.4.3's additions on its dialect.
 pub(crate) fn registered_pairs_for(

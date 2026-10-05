@@ -90,6 +90,7 @@ fn feed_gm_ticket(
     state: Res<GmTicketState>,
     categories: Option<Res<GmTicketCategories>>,
     mut feed: ResMut<GmTicketFeedState>,
+    build: Option<Res<crate::session_build::SessionBuild>>,
 ) {
     let Some(mut script) = script else {
         return;
@@ -115,7 +116,25 @@ fn feed_gm_ticket(
 
     if fed.answers != state.answers {
         fed.answers = state.answers;
-        script.fire_event("UPDATE_TICKET", update_ticket_args(state.ticket.as_deref()));
+        // 2.4.3 tests `if ( category )` and reads 0 as a ticket (`HelpFrame.lua:166`), so no ticket
+        // fires with no arguments there; 1.12.1 tests `arg1 ~= 0`.
+        let tbc = build.is_some_and(|b| b.0 == benilla_build::TBC_2_4_3);
+        script.fire_event(
+            "UPDATE_TICKET",
+            update_ticket_event_args(state.ticket.as_deref(), tbc),
+        );
+    }
+}
+
+/// [`update_ticket_args`] for a build: 2.4.3 tests `if ( category )`, where 0 is truthy, so no
+/// ticket is no arguments there.
+fn update_ticket_event_args(
+    ticket: Option<&benilla_protocol::messages::GmTicket>,
+    tbc: bool,
+) -> Vec<ScriptValue> {
+    match (ticket, tbc) {
+        (None, true) => Vec::new(),
+        (ticket, _) => update_ticket_args(ticket),
     }
 }
 
@@ -532,5 +551,14 @@ mod tests {
             client_command_for(write(0), 1, [0.0; 3]),
             Some(ClientCommand::GmTicketCreate { category: 0, .. })
         ));
+    }
+
+    #[test]
+    fn no_ticket_fires_no_arguments_on_2_4_3_and_a_zero_on_1_12_1() {
+        assert_eq!(
+            update_ticket_event_args(None, false),
+            vec![ScriptValue::Int(0)]
+        );
+        assert!(update_ticket_event_args(None, true).is_empty());
     }
 }
