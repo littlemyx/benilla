@@ -24,11 +24,22 @@ pub struct SpellDamageLog {
 }
 
 pub(super) fn read_spell_damage_log(r: &mut impl Read) -> io::Result<SpellDamageLog> {
+    read_spell_damage_log_in(r, false)
+}
+
+/// [`read_spell_damage_log`]; `school_mask` is true when the school byte is a school mask (2.4.3).
+pub(super) fn read_spell_damage_log_in(
+    r: &mut impl Read,
+    school_mask: bool,
+) -> io::Result<SpellDamageLog> {
     let target = read_packed_guid(r)?;
     let attacker = read_packed_guid(r)?;
     let spell_id = read_u32_le(r)?;
     let damage = read_u32_le(r)?;
-    let school = read_u8(r)?;
+    let mut school = read_u8(r)?;
+    if school_mask {
+        school = super::tbc_combat::school_from_mask(u32::from(school)) as u8;
+    }
     let absorb = read_u32_le(r)?;
     let resist = read_i32_le(r)?;
     let periodic = read_u8(r)? != 0;
@@ -92,6 +103,14 @@ const AURA_PERIODIC_DAMAGE_PERCENT: u32 = 89;
 
 /// Read `SMSG_PERIODICAURALOG`; an unknown aura type errors, as its payload width is unknown.
 pub(super) fn read_periodic_aura_log(r: &mut impl Read) -> io::Result<PeriodicAuraLog> {
+    read_periodic_aura_log_in(r, false)
+}
+
+/// [`read_periodic_aura_log`]; `school_mask` is true when a damage tick's school is a mask (2.4.3).
+pub(super) fn read_periodic_aura_log_in(
+    r: &mut impl Read,
+    school_mask: bool,
+) -> io::Result<PeriodicAuraLog> {
     let target = read_packed_guid(r)?;
     let caster = read_packed_guid(r)?;
     let spell_id = read_u32_le(r)?;
@@ -103,7 +122,14 @@ pub(super) fn read_periodic_aura_log(r: &mut impl Read) -> io::Result<PeriodicAu
         let tick = match aura_type {
             AURA_PERIODIC_DAMAGE | AURA_PERIODIC_DAMAGE_PERCENT => PeriodicTick::Damage {
                 amount: read_u32_le(r)?,
-                school: read_u32_le(r)?,
+                school: {
+                    let school = read_u32_le(r)?;
+                    if school_mask {
+                        super::tbc_combat::school_from_mask(school)
+                    } else {
+                        school
+                    }
+                },
                 absorb: read_u32_le(r)?,
                 resist: read_i32_le(r)?,
             },

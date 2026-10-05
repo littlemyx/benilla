@@ -2,7 +2,7 @@
 //! [`WorldWriter::chat_language`]: vmangos drops `Universal` outside AFK and DND
 //! (`ChatHandler.cpp:105`) and any tongue the character does not know (`:175`).
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::messages::{self, opcode};
 
@@ -11,10 +11,12 @@ use super::WorldWriter;
 impl WorldWriter {
     /// Send a `/say` line; dot-commands go out this way, parsed after the language gate.
     pub fn send_chat(&mut self, message: &str) -> Result<()> {
-        self.send(
-            opcode::CMSG_MESSAGECHAT,
-            &messages::messagechat(messages::CHAT_TYPE_SAY, self.chat_language, message),
-        )
+        let body = if self.tbc {
+            tbc_chat_body(messages::CHAT_TYPE_SAY, self.chat_language, None, message)?
+        } else {
+            messages::messagechat(messages::CHAT_TYPE_SAY, self.chat_language, message)
+        };
+        self.send(opcode::CMSG_MESSAGECHAT, &body)
     }
 
     /// Send a chat line of any `ChatMsg` type, as the reference's generic builder writes it
@@ -27,7 +29,16 @@ impl WorldWriter {
         target: Option<&str>,
         message: &str,
     ) -> Result<()> {
-        let body = message_chat_body(self.chat_language, chat_type, language, target, message);
+        let body = if self.tbc {
+            tbc_chat_body(
+                chat_type,
+                language.unwrap_or(self.chat_language),
+                target,
+                message,
+            )?
+        } else {
+            message_chat_body(self.chat_language, chat_type, language, target, message)
+        };
         self.send(opcode::CMSG_MESSAGECHAT, &body)
     }
 
@@ -36,15 +47,25 @@ impl WorldWriter {
     /// [`messages::LANGUAGE_ADDON`], is the only mark of addon data (`0x49f920`); vmangos gates it
     /// on `AddonChannel` and skips the language gate, flood control and sanitizing.
     pub fn send_addon_message(&mut self, chat_type: u32, text: &str) -> Result<()> {
-        self.send(
-            opcode::CMSG_MESSAGECHAT,
-            &messages::messagechat(chat_type, messages::LANGUAGE_ADDON, text),
-        )
+        let body = if self.tbc {
+            // Addon lanes (party, raid, guild, battleground) name no target.
+            let ty = messages::chat_type_to_tbc(chat_type)
+                .ok_or_else(|| anyhow!("chat type {chat_type:#x} has no 2.4.3 number"))?;
+            messages::messagechat_kind(ty, messages::LANGUAGE_ADDON, None, text)
+        } else {
+            messages::messagechat(chat_type, messages::LANGUAGE_ADDON, text)
+        };
+        self.send(opcode::CMSG_MESSAGECHAT, &body)
     }
 
     /// Tell the server we ignore `guid`; that player gets a `CHAT_MSG_IGNORED` notice.
     pub fn chat_ignored(&mut self, guid: u64) -> Result<()> {
-        self.send(opcode::CMSG_CHAT_IGNORED, &messages::full_guid(guid))
+        let body = if self.tbc {
+            messages::chat_ignored_tbc(guid)
+        } else {
+            messages::full_guid(guid)
+        };
+        self.send(opcode::CMSG_CHAT_IGNORED, &body)
     }
 
     /// Ask our played time (`CMSG_PLAYED_TIME`), answered by `SMSG_PLAYED_TIME`.
@@ -64,6 +85,18 @@ impl WorldWriter {
             &messages::text_emote(text_id, target),
         )
     }
+}
+
+/// The 2.4.3 `CMSG_MESSAGECHAT` body of a 1.12.1 `chat_type`; a type with no 2.4.3 number is an
+/// error, never a neighbouring one.
+fn tbc_chat_body(
+    chat_type: u32,
+    language: u32,
+    target: Option<&str>,
+    message: &str,
+) -> Result<Vec<u8>> {
+    messages::messagechat_tbc(chat_type, language, target, message)
+        .ok_or_else(|| anyhow!("chat type {chat_type:#x} has no 2.4.3 number"))
 }
 
 /// The `CMSG_MESSAGECHAT` body: type, language (`0x49f6f9`), the target cstring only for a whisper

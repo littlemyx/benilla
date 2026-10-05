@@ -316,6 +316,12 @@ impl WorldSession {
         self.addon_info.take()
     }
 
+    /// Send a packet whose body the caller built: the live probe's route for the 2.4.3 chat and
+    /// channel bodies, which this session's own send methods write in their 1.12.1 form.
+    pub fn send_raw(&mut self, opcode: u16, body: &[u8]) -> Result<()> {
+        self.send(opcode, body)
+    }
+
     /// Send a client packet (encrypted header + plaintext body).
     fn send(&mut self, opcode: u16, body: &[u8]) -> Result<()> {
         send_packet(

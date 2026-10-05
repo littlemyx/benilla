@@ -6,6 +6,8 @@ use std::net::TcpStream;
 use anyhow::Result;
 use benilla_srp::vanilla_header::EncrypterHalf;
 
+use crate::messages;
+
 use super::send_packet;
 
 pub use disposition::{form_of, refusal_on_tbc, Form, VerbForm, VerbRefused, VERBS};
@@ -53,6 +55,8 @@ mod stable;
 mod summon;
 mod tabard;
 mod taxi;
+#[cfg(test)]
+mod tbc_forms_tests;
 mod trade;
 mod trainer;
 mod tutorial;
@@ -92,6 +96,16 @@ impl WorldWriter {
             }
         }
         sent
+    }
+
+    /// A 1.12.1 inventory slot as this session's build numbers it: 2.4.3 moves the bank bag, buyback
+    /// and keyring slots (`messages::slot_to_tbc`), and a slot with no 2.4.3 number is an error.
+    fn slot(&self, slot: u8) -> Result<u8> {
+        if !self.tbc {
+            return Ok(slot);
+        }
+        messages::slot_to_tbc(slot)
+            .ok_or_else(|| anyhow::anyhow!("inventory slot {slot} has no 2.4.3 number"))
     }
 
     /// Start recording what reaches the socket; a second call keeps what is not yet drained.

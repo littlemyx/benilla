@@ -160,22 +160,22 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "auto_equip_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_AUTOEQUIP_ITEM],
     },
     VerbForm {
         verb: "auto_store_bag_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_AUTOSTORE_BAG_ITEM],
     },
     VerbForm {
         verb: "autobank_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_AUTOBANK_ITEM],
     },
     VerbForm {
         verb: "autostore_bank_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_AUTOSTORE_BANK_ITEM],
     },
     VerbForm {
@@ -255,7 +255,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "buyback_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_BUYBACK_ITEM],
     },
     VerbForm {
@@ -390,7 +390,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "chat_ignored",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_CHAT_IGNORED],
     },
     VerbForm {
@@ -425,7 +425,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "destroy_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_DESTROYITEM],
     },
     VerbForm {
@@ -695,7 +695,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "join_channel",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_JOIN_CHANNEL],
     },
     VerbForm {
@@ -715,7 +715,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "leave_channel",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_LEAVE_CHANNEL],
     },
     VerbForm {
@@ -765,7 +765,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "loot_roll",
-        form: Form::NotEstablished,
+        form: Form::Same,
         opcodes: &[opcode::CMSG_LOOT_ROLL],
     },
     VerbForm {
@@ -865,7 +865,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "open_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_OPEN_ITEM],
     },
     VerbForm {
@@ -1075,7 +1075,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "repair_item",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_REPAIR_ITEM],
     },
     VerbForm {
@@ -1130,12 +1130,12 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "send_addon_message",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_MESSAGECHAT],
     },
     VerbForm {
         verb: "send_chat",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_MESSAGECHAT],
     },
     VerbForm {
@@ -1145,7 +1145,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "send_message_chat",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_MESSAGECHAT],
     },
     VerbForm {
@@ -1205,7 +1205,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "set_trade_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_SET_TRADE_ITEM],
     },
     VerbForm {
@@ -1220,7 +1220,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "split_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_SPLIT_ITEM],
     },
     VerbForm {
@@ -1245,12 +1245,12 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "swap_inv_item",
-        form: Form::NotEstablished,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_SWAP_INV_ITEM],
     },
     VerbForm {
         verb: "swap_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_SWAP_ITEM],
     },
     VerbForm {
@@ -1360,7 +1360,7 @@ pub static VERBS: &[VerbForm] = &[
     },
     VerbForm {
         verb: "wrap_item",
-        form: Form::Same,
+        form: Form::Has243Form,
         opcodes: &[opcode::CMSG_WRAP_ITEM],
     },
 ];

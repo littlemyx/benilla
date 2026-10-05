@@ -1260,6 +1260,28 @@ const ALLOWED: &[u16] = &[
     t::MSG_SET_DUNGEON_DIFFICULTY,
     t::SMSG_SET_REST_START,
     t::SMSG_DEFENSE_MESSAGE,
+    t::SMSG_GOSSIP_MESSAGE,
+    t::SMSG_LIST_INVENTORY,
+    t::SMSG_QUESTGIVER_STATUS,
+    t::SMSG_ITEM_PUSH_RESULT,
+    t::SMSG_INVENTORY_CHANGE_FAILURE,
+    t::SMSG_CAST_RESULT,
+    t::SMSG_SPELL_COOLDOWN,
+    t::MSG_CHANNEL_START,
+    t::MSG_CHANNEL_UPDATE,
+    t::SMSG_ATTACKERSTATEUPDATE,
+    t::SMSG_SPELLNONMELEEDAMAGELOG,
+    t::SMSG_PERIODICAURALOG,
+    t::SMSG_SPELLDAMAGESHIELD,
+    t::SMSG_SPELLHEALLOG,
+    t::SMSG_SPELLINSTAKILLLOG,
+    t::SMSG_SPELLDISPELLOG,
+    t::SMSG_GM_MESSAGECHAT,
+    t::SMSG_CHANNEL_NOTIFY,
+    t::SMSG_USERLIST_ADD,
+    t::SMSG_USERLIST_UPDATE,
+    t::SMSG_USERLIST_REMOVE,
+    t::SMSG_CHAT_RESTRICTED,
     t::SMSG_INITIAL_SPELLS,
     t::SMSG_SEND_UNLEARN_SPELLS,
     t::SMSG_ACTION_BUTTONS,
@@ -1521,7 +1543,7 @@ fn the_allow_list_names_every_opcode_it_reads_and_nothing_else_is_read() {
             // A listed opcode is read (or fails to parse a junk body); it is never silently `Other`,
             // except a chat type the dispatch declines, which the 0xFF type is.
             assert!(
-                !other || op == t::SMSG_MESSAGECHAT,
+                !other || op == t::SMSG_MESSAGECHAT || op == t::SMSG_GM_MESSAGECHAT,
                 "{op:#x} is listed but came back Other"
             );
         } else {

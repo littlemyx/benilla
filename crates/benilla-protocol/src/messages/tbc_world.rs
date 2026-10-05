@@ -116,6 +116,50 @@ pub enum TbcPacket {
     },
     /// `SMSG_SPLINE_MOVE_SET_FLYING` / `..._UNSET_FLYING`: any unit's flying flag, no ack.
     SplineMoveFlying { guid: u64, apply: bool },
+    /// `SMSG_CHANNEL_NOTIFY` for the four notices 1.12.1 lacks (`NOT_IN_AREA`, `NOT_IN_LFG`,
+    /// `VOICE_ON`, `VOICE_OFF`); `guid` is the voice notices' member.
+    ChannelNotice {
+        notice: u8,
+        channel: String,
+        guid: Option<u64>,
+    },
+    /// `SMSG_USERLIST_ADD` / `UPDATE` / `REMOVE`: a member's change in a channel's roster.
+    UserList {
+        change: super::tbc_chat::UserListChange,
+        guid: u64,
+        /// The member's flags; absent on a removal.
+        player_flags: Option<u8>,
+        channel_flags: u8,
+        member_count: u32,
+        channel: String,
+    },
+    /// `SMSG_CHAT_RESTRICTED`: why the chat line was refused (a `ChatRestrictionType`).
+    ChatRestricted { reason: u8 },
+    /// `SMSG_CAST_RESULT` with a result 1.12.1 has no entry for (`result` is 2.4.3's number).
+    CastFailed {
+        spell_id: u32,
+        result: u8,
+        cast_count: u8,
+        /// The area, spell focus or equipped item class word of the results that carry one.
+        arg: Option<u32>,
+    },
+    /// `MSG_CHANNEL_START`: `caster` began channelling `spell_id` for `duration_ms`. Sent to every
+    /// unit in range, so a 1.12.1 `ChannelStart` (ours alone) cannot stand for it.
+    ChannelStart {
+        caster: u64,
+        spell_id: u32,
+        duration_ms: u32,
+    },
+    /// `MSG_CHANNEL_UPDATE`: `caster`'s channel has `remaining_ms` left (0 ends it).
+    ChannelUpdate { caster: u64, remaining_ms: u32 },
+    /// `SMSG_QUESTGIVER_STATUS` with a status 1.12.1 has no entry for (`status` is 2.4.3's number).
+    QuestGiverStatus { npc: u64, status: u8 },
+    /// `SMSG_INVENTORY_CHANGE_FAILURE` with an `InventoryResult` 1.12.1 lacks (67 and up).
+    InventoryChangeFailed {
+        result: u8,
+        item_guid: u64,
+        bag_slot: u8,
+    },
 }
 
 impl TbcPacket {
@@ -167,6 +211,18 @@ impl TbcPacket {
                     "SMSG_SPLINE_MOVE_UNSET_FLYING"
                 }
             }
+            TbcPacket::ChannelNotice { .. } => "SMSG_CHANNEL_NOTIFY",
+            TbcPacket::UserList { change, .. } => match change {
+                super::tbc_chat::UserListChange::Add => "SMSG_USERLIST_ADD",
+                super::tbc_chat::UserListChange::Update => "SMSG_USERLIST_UPDATE",
+                super::tbc_chat::UserListChange::Remove => "SMSG_USERLIST_REMOVE",
+            },
+            TbcPacket::ChatRestricted { .. } => "SMSG_CHAT_RESTRICTED",
+            TbcPacket::CastFailed { .. } => "SMSG_CAST_RESULT",
+            TbcPacket::ChannelStart { .. } => "MSG_CHANNEL_START",
+            TbcPacket::ChannelUpdate { .. } => "MSG_CHANNEL_UPDATE",
+            TbcPacket::InventoryChangeFailed { .. } => "SMSG_INVENTORY_CHANGE_FAILURE",
+            TbcPacket::QuestGiverStatus { .. } => "SMSG_QUESTGIVER_STATUS",
         }
     }
 }

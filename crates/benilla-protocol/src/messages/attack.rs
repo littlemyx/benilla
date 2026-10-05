@@ -49,6 +49,15 @@ impl AttackerState {
 /// count of `{school u32, damage f32, damage u32, absorb u32, resist i32}`, `TargetState`,
 /// `attackerState`, `meleeSpellId`, `BlockedAmount`.
 pub(super) fn read_attacker_state(r: &mut impl Read) -> io::Result<AttackerState> {
+    read_attacker_state_in(r, false)
+}
+
+/// [`read_attacker_state`]; `school_mask` is true when the blocks' school word is a school mask
+/// (2.4.3) and not a school index (1.12.1).
+pub(super) fn read_attacker_state_in(
+    r: &mut impl Read,
+    school_mask: bool,
+) -> io::Result<AttackerState> {
     let hit_info = read_u32_le(r)?;
     let attacker = read_packed_guid(r)?;
     let victim = read_packed_guid(r)?;
@@ -59,7 +68,10 @@ pub(super) fn read_attacker_state(r: &mut impl Read) -> io::Result<AttackerState
     let mut school = 0u8;
     for i in 0..subs {
         // The school comes from the first block; later blocks split off other schools.
-        let block_school = read_u32_le(r)?;
+        let mut block_school = read_u32_le(r)?;
+        if school_mask {
+            block_school = super::tbc_combat::school_from_mask(block_school);
+        }
         if i == 0 {
             school = u8::try_from(block_school).unwrap_or(0);
         }

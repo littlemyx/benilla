@@ -460,6 +460,7 @@
 - `WOW_RIG_COST` — benilla-world/src/rig_palette.rs
 - `WOW_RIG_SKIN` — benilla-assets/src/materials.rs
 - `WOW_ROW_BLOAT` — benilla-app/src/perf/census.rs, benilla-app/src/perf/mod.rs
+- `WOW_SCENARIO` — benilla-protocol/examples/login_probe.rs
 - `WOW_SCHED_CENSUS` — benilla-app/src/dev.rs, benilla-world/src/bgwin.rs
 - `WOW_SHADE_CENSUS` — benilla-world/src/entity_shade.rs
 - `WOW_SHOT_REQUIRE` — benilla-app/src/capture/live_shot.rs

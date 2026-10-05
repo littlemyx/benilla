@@ -43,7 +43,11 @@ pub mod tbc_opcode {
     pub const SMSG_CONTACT_LIST: u16 = 0x0067;
     pub const SMSG_FRIEND_STATUS: u16 = 0x0068;
     pub const CMSG_SET_CONTACT_NOTES: u16 = 0x006b;
+    pub const CMSG_MESSAGECHAT: u16 = 0x0095;
     pub const SMSG_MESSAGECHAT: u16 = 0x0096;
+    pub const CMSG_JOIN_CHANNEL: u16 = 0x0097;
+    pub const CMSG_LEAVE_CHANNEL: u16 = 0x0098;
+    pub const SMSG_CHANNEL_NOTIFY: u16 = 0x0099;
     pub const SMSG_UPDATE_OBJECT: u16 = 0x00a9;
     pub const SMSG_DESTROY_OBJECT: u16 = 0x00aa;
     pub const MSG_MOVE_START_FORWARD: u16 = 0x00b5;
@@ -102,41 +106,58 @@ pub mod tbc_opcode {
     pub const MSG_MOVE_HOVER: u16 = 0x00f7;
     pub const SMSG_TRIGGER_CINEMATIC: u16 = 0x00fa;
     pub const SMSG_TUTORIAL_FLAGS: u16 = 0x00fd;
+    pub const CMSG_SWAP_INV_ITEM: u16 = 0x010d;
+    pub const SMSG_INVENTORY_CHANGE_FAILURE: u16 = 0x0112;
     pub const SMSG_INITIALIZE_FACTIONS: u16 = 0x0122;
     pub const SMSG_SET_PROFICIENCY: u16 = 0x0127;
     pub const SMSG_ACTION_BUTTONS: u16 = 0x0129;
     pub const SMSG_INITIAL_SPELLS: u16 = 0x012a;
+    pub const SMSG_CAST_RESULT: u16 = 0x0130;
     pub const SMSG_SPELL_START: u16 = 0x0131;
     pub const SMSG_SPELL_GO: u16 = 0x0132;
     pub const SMSG_SPELL_COOLDOWN: u16 = 0x0134;
     pub const SMSG_UPDATE_AURA_DURATION: u16 = 0x0137;
+    pub const MSG_CHANNEL_START: u16 = 0x0139;
+    pub const MSG_CHANNEL_UPDATE: u16 = 0x013a;
+    pub const SMSG_ATTACKERSTATEUPDATE: u16 = 0x014a;
     pub const SMSG_CANCEL_COMBAT: u16 = 0x014e;
     pub const SMSG_SPELLBREAKLOG: u16 = 0x014f;
+    pub const SMSG_SPELLHEALLOG: u16 = 0x0150;
     pub const SMSG_BINDPOINTUPDATE: u16 = 0x0155;
     pub const SMSG_CLIENT_CONTROL_UPDATE: u16 = 0x0159;
+    pub const SMSG_ITEM_PUSH_RESULT: u16 = 0x0166;
+    pub const CMSG_GOSSIP_SELECT_OPTION: u16 = 0x017c;
+    pub const SMSG_GOSSIP_MESSAGE: u16 = 0x017d;
     pub const CMSG_NPC_TEXT_QUERY: u16 = 0x017f;
     pub const SMSG_NPC_TEXT_UPDATE: u16 = 0x0180;
     pub const SMSG_QUESTGIVER_STATUS: u16 = 0x0183;
+    pub const SMSG_LIST_INVENTORY: u16 = 0x019f;
     pub const SMSG_NOTIFICATION: u16 = 0x01cb;
     pub const CMSG_QUERY_TIME: u16 = 0x01ce;
     pub const SMSG_QUERY_TIME_RESPONSE: u16 = 0x01cf;
     pub const CMSG_PING: u16 = 0x01dc;
     pub const SMSG_PONG: u16 = 0x01dd;
-    pub const SMSG_GMTICKET_GETTICKET: u16 = 0x0212;
     pub const SMSG_AUTH_CHALLENGE: u16 = 0x01ec;
     pub const CMSG_AUTH_SESSION: u16 = 0x01ed;
     pub const SMSG_AUTH_RESPONSE: u16 = 0x01ee;
     pub const SMSG_COMPRESSED_UPDATE_OBJECT: u16 = 0x01f6;
     pub const SMSG_ACCOUNT_DATA_TIMES: u16 = 0x0209;
+    pub const SMSG_GMTICKET_GETTICKET: u16 = 0x0212;
     pub const SMSG_GAMEOBJECT_DESPAWN_ANIM: u16 = 0x0215;
     pub const SMSG_SET_REST_START: u16 = 0x021e;
+    pub const CMSG_CHAT_IGNORED: u16 = 0x0225;
     pub const SMSG_LOGIN_VERIFY_WORLD: u16 = 0x0236;
     pub const SMSG_SPELLLOGEXECUTE: u16 = 0x024c;
     pub const SMSG_PERIODICAURALOG: u16 = 0x024e;
+    pub const SMSG_SPELLDAMAGESHIELD: u16 = 0x024f;
+    pub const SMSG_SPELLNONMELEEDAMAGELOG: u16 = 0x0250;
     pub const SMSG_ZONE_UNDER_ATTACK: u16 = 0x0254;
     pub const CMSG_SET_ACTIVE_MOVER: u16 = 0x026a;
+    pub const SMSG_SPELLDISPELLOG: u16 = 0x027b;
     pub const SMSG_SERVER_MESSAGE: u16 = 0x0291;
     pub const SMSG_MEETINGSTONE_LEAVE: u16 = 0x0293;
+    pub const CMSG_LOOT_ROLL: u16 = 0x02a0;
+    pub const CMSG_REPAIR_ITEM: u16 = 0x02a8;
     pub const SMSG_MONSTER_MOVE_TRANSPORT: u16 = 0x02ae;
     pub const MSG_MOVE_FEATHER_FALL: u16 = 0x02b0;
     pub const MSG_MOVE_WATER_WALK: u16 = 0x02b1;
@@ -157,6 +178,7 @@ pub mod tbc_opcode {
     pub const CMSG_FORCE_TURN_RATE_CHANGE_ACK: u16 = 0x02df;
     pub const SMSG_ADDON_INFO: u16 = 0x02ef;
     pub const SMSG_WEATHER: u16 = 0x02f4;
+    pub const SMSG_CHAT_RESTRICTED: u16 = 0x02fd;
     pub const SMSG_SPLINE_SET_RUN_SPEED: u16 = 0x02fe;
     pub const SMSG_SPLINE_SET_RUN_BACK_SPEED: u16 = 0x02ff;
     pub const SMSG_SPLINE_SET_SWIM_SPEED: u16 = 0x0300;
@@ -177,6 +199,7 @@ pub mod tbc_opcode {
     pub const MSG_MOVE_TIME_SKIPPED: u16 = 0x0319;
     pub const SMSG_SPLINE_MOVE_ROOT: u16 = 0x031a;
     pub const MSG_SET_DUNGEON_DIFFICULTY: u16 = 0x0329;
+    pub const SMSG_SPELLINSTAKILLLOG: u16 = 0x032f;
     pub const SMSG_EXPECTED_SPAM_RECORDS: u16 = 0x0332;
     pub const SMSG_DEFENSE_MESSAGE: u16 = 0x033a;
     pub const SMSG_INSTANCE_DIFFICULTY: u16 = 0x033b;
@@ -209,6 +232,9 @@ pub mod tbc_opcode {
     pub const MSG_MOVE_UPDATE_CAN_FLY: u16 = 0x03ad;
     pub const SMSG_GM_MESSAGECHAT: u16 = 0x03b2;
     pub const SMSG_FEATURE_SYSTEM_STATUS: u16 = 0x03c8;
+    pub const SMSG_USERLIST_ADD: u16 = 0x03ef;
+    pub const SMSG_USERLIST_REMOVE: u16 = 0x03f0;
+    pub const SMSG_USERLIST_UPDATE: u16 = 0x03f1;
     pub const CMSG_KEEP_ALIVE: u16 = 0x0406;
     pub const SMSG_SEND_UNLEARN_SPELLS: u16 = 0x041d;
     pub const SMSG_SPLINE_MOVE_SET_FLYING: u16 = 0x0421;
@@ -255,7 +281,10 @@ static NAMES: &[(u16, &str)] = &[
     (0x007c, "SMSG_GROUP_DESTROYED"),
     (0x0083, "SMSG_GUILD_INVITE"),
     (0x0088, "SMSG_GUILD_INFO"),
+    (0x0095, "CMSG_MESSAGECHAT"),
     (0x0096, "SMSG_MESSAGECHAT"),
+    (0x0097, "CMSG_JOIN_CHANNEL"),
+    (0x0098, "CMSG_LEAVE_CHANNEL"),
     (0x0099, "SMSG_CHANNEL_NOTIFY"),
     (0x00a9, "SMSG_UPDATE_OBJECT"),
     (0x00aa, "SMSG_DESTROY_OBJECT"),
@@ -319,6 +348,8 @@ static NAMES: &[(u16, &str)] = &[
     (0x00fd, "SMSG_TUTORIAL_FLAGS"),
     (0x0103, "SMSG_EMOTE"),
     (0x0105, "SMSG_TEXT_EMOTE"),
+    (0x010d, "CMSG_SWAP_INV_ITEM"),
+    (0x0112, "SMSG_INVENTORY_CHANGE_FAILURE"),
     (0x0122, "SMSG_INITIALIZE_FACTIONS"),
     (0x0123, "SMSG_SET_FACTION_VISIBLE"),
     (0x0127, "SMSG_SET_PROFICIENCY"),
@@ -326,11 +357,14 @@ static NAMES: &[(u16, &str)] = &[
     (0x012a, "SMSG_INITIAL_SPELLS"),
     (0x012b, "SMSG_LEARNED_SPELL"),
     (0x012c, "SMSG_SUPERCEDED_SPELL"),
+    (0x0130, "SMSG_CAST_RESULT"),
     (0x0131, "SMSG_SPELL_START"),
     (0x0132, "SMSG_SPELL_GO"),
     (0x0134, "SMSG_SPELL_COOLDOWN"),
     (0x0135, "SMSG_COOLDOWN_EVENT"),
     (0x0137, "SMSG_UPDATE_AURA_DURATION"),
+    (0x0139, "MSG_CHANNEL_START"),
+    (0x013a, "MSG_CHANNEL_UPDATE"),
     (0x013c, "SMSG_AI_REACTION"),
     (0x0143, "SMSG_ATTACKSTART"),
     (0x0144, "SMSG_ATTACKSTOP"),
@@ -338,8 +372,10 @@ static NAMES: &[(u16, &str)] = &[
     (0x0146, "SMSG_ATTACKSWING_BADFACING"),
     (0x0148, "SMSG_ATTACKSWING_DEADTARGET"),
     (0x0149, "SMSG_ATTACKSWING_CANT_ATTACK"),
+    (0x014a, "SMSG_ATTACKERSTATEUPDATE"),
     (0x014e, "SMSG_CANCEL_COMBAT"),
     (0x014f, "SMSG_SPELLBREAKLOG"),
+    (0x0150, "SMSG_SPELLHEALLOG"),
     (0x0151, "SMSG_SPELLENERGIZELOG"),
     (0x0155, "SMSG_BINDPOINTUPDATE"),
     (0x0158, "SMSG_PLAYERBOUND"),
@@ -350,6 +386,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x0162, "SMSG_LOOT_REMOVED"),
     (0x0163, "SMSG_LOOT_MONEY_NOTIFY"),
     (0x0165, "SMSG_LOOT_CLEAR_MONEY"),
+    (0x0166, "SMSG_ITEM_PUSH_RESULT"),
     (0x0167, "SMSG_DUEL_REQUESTED"),
     (0x0168, "SMSG_DUEL_OUTOFBOUNDS"),
     (0x0169, "SMSG_DUEL_INBOUNDS"),
@@ -359,6 +396,8 @@ static NAMES: &[(u16, &str)] = &[
     (0x0173, "SMSG_PET_TAME_FAILURE"),
     (0x0179, "SMSG_PET_SPELLS"),
     (0x017a, "SMSG_PET_MODE"),
+    (0x017c, "CMSG_GOSSIP_SELECT_OPTION"),
+    (0x017d, "SMSG_GOSSIP_MESSAGE"),
     (0x017e, "SMSG_GOSSIP_COMPLETE"),
     (0x017f, "CMSG_NPC_TEXT_QUERY"),
     (0x0180, "SMSG_NPC_TEXT_UPDATE"),
@@ -370,6 +409,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x0199, "SMSG_QUESTUPDATE_ADD_KILL"),
     (0x019a, "SMSG_QUESTUPDATE_ADD_ITEM"),
     (0x019c, "SMSG_QUEST_CONFIRM_ACCEPT"),
+    (0x019f, "SMSG_LIST_INVENTORY"),
     (0x01a1, "SMSG_SELL_ITEM"),
     (0x01a4, "SMSG_BUY_ITEM"),
     (0x01a5, "SMSG_BUY_FAILED"),
@@ -416,12 +456,14 @@ static NAMES: &[(u16, &str)] = &[
     (0x021e, "SMSG_SET_REST_START"),
     (0x0222, "SMSG_SPIRIT_HEALER_CONFIRM"),
     (0x0224, "SMSG_GOSSIP_POI"),
+    (0x0225, "CMSG_CHAT_IGNORED"),
     (0x0236, "SMSG_LOGIN_VERIFY_WORLD"),
     (0x0239, "SMSG_SEND_MAIL_RESULT"),
     (0x0244, "SMSG_ITEM_TEXT_QUERY_RESPONSE"),
     (0x024b, "SMSG_SPELLLOGMISS"),
     (0x024c, "SMSG_SPELLLOGEXECUTE"),
     (0x024e, "SMSG_PERIODICAURALOG"),
+    (0x024f, "SMSG_SPELLDAMAGESHIELD"),
     (0x0250, "SMSG_SPELLNONMELEEDAMAGELOG"),
     (0x0254, "SMSG_ZONE_UNDER_ATTACK"),
     (0x0255, "MSG_AUCTION_HELLO"),
@@ -435,6 +477,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x0273, "SMSG_STABLE_RESULT"),
     (0x0276, "MSG_QUEST_PUSH_RESULT"),
     (0x0278, "SMSG_PLAY_OBJECT_SOUND"),
+    (0x027b, "SMSG_SPELLDISPELLOG"),
     (0x0284, "MSG_QUERY_NEXT_MAIL_TIME"),
     (0x0285, "SMSG_RECEIVED_MAIL"),
     (0x0286, "SMSG_RAID_GROUP_ONLY"),
@@ -444,8 +487,10 @@ static NAMES: &[(u16, &str)] = &[
     (0x029c, "SMSG_CANCEL_AUTO_REPEAT"),
     (0x029d, "SMSG_STANDSTATE_UPDATE"),
     (0x029e, "SMSG_LOOT_ALL_PASSED"),
+    (0x02a0, "CMSG_LOOT_ROLL"),
     (0x02a1, "SMSG_LOOT_START_ROLL"),
     (0x02a4, "SMSG_LOOT_MASTER_LIST"),
+    (0x02a8, "CMSG_REPAIR_ITEM"),
     (0x02a9, "SMSG_CHAT_PLAYER_NOT_FOUND"),
     (0x02aa, "MSG_TALENT_WIPE_CONFIRM"),
     (0x02ab, "SMSG_SUMMON_REQUEST"),
@@ -484,6 +529,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x02f1, "SMSG_PET_UNLEARN_CONFIRM"),
     (0x02f4, "SMSG_WEATHER"),
     (0x02fa, "SMSG_RAID_INSTANCE_MESSAGE"),
+    (0x02fd, "SMSG_CHAT_RESTRICTED"),
     (0x02fe, "SMSG_SPLINE_SET_RUN_SPEED"),
     (0x02ff, "SMSG_SPLINE_SET_RUN_BACK_SPEED"),
     (0x0300, "SMSG_SPLINE_SET_SWIM_SPEED"),
@@ -511,6 +557,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x0325, "SMSG_PET_DISMISS_SOUND"),
     (0x0329, "MSG_SET_DUNGEON_DIFFICULTY"),
     (0x032b, "SMSG_UPDATE_INSTANCE_OWNERSHIP"),
+    (0x032f, "SMSG_SPELLINSTAKILLLOG"),
     (0x0332, "SMSG_EXPECTED_SPAM_RECORDS"),
     (0x033a, "SMSG_DEFENSE_MESSAGE"),
     (0x033b, "SMSG_INSTANCE_DIFFICULTY"),
@@ -545,6 +592,8 @@ static NAMES: &[(u16, &str)] = &[
     (0x03ad, "MSG_MOVE_UPDATE_CAN_FLY"),
     (0x03b2, "SMSG_GM_MESSAGECHAT"),
     (0x03c8, "SMSG_FEATURE_SYSTEM_STATUS"),
+    (0x03ef, "SMSG_USERLIST_ADD"),
+    (0x03f0, "SMSG_USERLIST_REMOVE"),
     (0x03f1, "SMSG_USERLIST_UPDATE"),
     (0x0406, "CMSG_KEEP_ALIVE"),
     (0x041d, "SMSG_SEND_UNLEARN_SPELLS"),

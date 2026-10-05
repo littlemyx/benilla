@@ -9,15 +9,22 @@ use super::WorldWriter;
 impl WorldWriter {
     /// Join a channel; the 1.12 client joins zone channels this way ("General - Elwynn Forest").
     pub fn join_channel(&mut self, name: &str, password: &str) -> Result<()> {
-        self.send(
-            opcode::CMSG_JOIN_CHANNEL,
-            &messages::join_channel(name, password),
-        )
+        let body = if self.tbc {
+            messages::join_channel_tbc(name, password)
+        } else {
+            messages::join_channel(name, password)
+        };
+        self.send(opcode::CMSG_JOIN_CHANNEL, &body)
     }
 
     /// Leave a channel (`CMSG_LEAVE_CHANNEL`).
     pub fn leave_channel(&mut self, name: &str) -> Result<()> {
-        self.send(opcode::CMSG_LEAVE_CHANNEL, &messages::leave_channel(name))
+        let body = if self.tbc {
+            messages::leave_channel_tbc(name)
+        } else {
+            messages::leave_channel(name)
+        };
+        self.send(opcode::CMSG_LEAVE_CHANNEL, &body)
     }
 
     /// Ask a channel's members (`CMSG_CHANNEL_LIST`, `/chatlist`), answered by `SMSG_CHANNEL_LIST`.

@@ -26,6 +26,7 @@ impl WorldWriter {
 
     /// Deposit the item at wire `(bag, slot)` into the bank (`CMSG_AUTOBANK_ITEM`).
     pub fn autobank_item(&mut self, bag: u8, slot: u8) -> Result<()> {
+        let (bag, slot) = (self.slot(bag)?, self.slot(slot)?);
         self.send(
             opcode::CMSG_AUTOBANK_ITEM,
             &messages::autobank_item(bag, slot),
@@ -34,6 +35,7 @@ impl WorldWriter {
 
     /// Withdraw the bank item at wire `(bag, slot)` into the bags (`CMSG_AUTOSTORE_BANK_ITEM`).
     pub fn autostore_bank_item(&mut self, bag: u8, slot: u8) -> Result<()> {
+        let (bag, slot) = (self.slot(bag)?, self.slot(slot)?);
         self.send(
             opcode::CMSG_AUTOSTORE_BANK_ITEM,
             &messages::autostore_bank_item(bag, slot),

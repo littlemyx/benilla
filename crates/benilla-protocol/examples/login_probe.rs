@@ -607,6 +607,19 @@ fn enter_world(world: &mut WorldSession, characters: &[Character], name: &str) -
         println!("    {op:#06x} x{n}  {}", opcode_label(op));
     }
 
+    if let Ok(list) = std::env::var("WOW_SCENARIO") {
+        tally.verbose = true;
+        let mut errors = 0usize;
+        for name in list.split(',').filter(|n| !n.is_empty()) {
+            if let Err(e) = scenario(world, &mut tally, &mut errors, &character, &seen, name) {
+                println!("SCEN {name} FAILED {e:#}");
+            }
+        }
+        println!("SCEN parse errors: {errors}");
+        println!("SCEN unread tails: {}", tally.tails.len());
+        tally.verbose = false;
+    }
+
     let logout_began = Instant::now();
     let result = world.logout(Duration::from_secs(25));
     match result {
@@ -679,6 +692,8 @@ fn hex(bytes: &[u8]) -> String {
 /// exchange and the query replies.
 #[derive(Default)]
 struct Tally {
+    /// Scenario phase: every non-update packet's decoded value is printed (`PARSED`).
+    verbose: bool,
     /// Opcode to count, for packets the dispatch decoded.
     parsed: BTreeMap<u16, u32>,
     /// Opcode to count, for packets left as `Other`.
@@ -870,6 +885,45 @@ impl Tally {
                         println!("PARSED {label} entry {entry} MISS");
                     }
                 }
+            }
+            ServerPacket::ChannelNotify(n) if self.verbose => println!(
+                "PARSED {label} notice {:#04x} channel {:?} tail {:?}",
+                n.notice, n.channel, n.tail
+            ),
+            ServerPacket::ChatPlayerNotFound { name } if self.verbose => {
+                println!("PARSED {label} name {name:?}")
+            }
+            ServerPacket::QuestGiverStatus { npc, status } if self.verbose => {
+                println!("PARSED {label} npc {npc:#x} status {status}")
+            }
+            ServerPacket::InventoryChangeFailure {
+                reason,
+                required_level,
+                item_guid,
+                bag_slot,
+            } if self.verbose => println!(
+                "PARSED {label} reason {reason} level {required_level:?} item {item_guid:#x} bag_slot {bag_slot}"
+            ),
+            ServerPacket::GossipMessage {
+                npc,
+                text_id,
+                options,
+                quests,
+            } if self.verbose => println!(
+                "PARSED {label} npc {npc:#x} text {text_id} options {} quests {}",
+                options.len(),
+                quests.len()
+            ),
+            ServerPacket::VendorList { vendor, items } if self.verbose => {
+                println!("PARSED {label} vendor {vendor:#x} items {}", items.len())
+            }
+            ServerPacket::TrainerList {
+                trainer, services, ..
+            } if self.verbose => {
+                println!("PARSED {label} trainer {trainer:#x} services {}", services.len())
+            }
+            other if self.verbose && !update => {
+                println!("PARSED {label} (no printer for {})", other.name())
             }
             _ => {}
         }
@@ -1449,5 +1503,169 @@ fn walk(
         "WALK done at ({:.3}, {:.3}, {:.3}) facing {facing0:.5}: {} packets read, {} findings, {} relays of other movers, answered {:?}, abort {}",
         here[0], here[1], here[2], w.read, w.findings, w.relays, w.answered, w.abort
     );
+    Ok(())
+}
+
+/// Reads `secs` seconds of the world stream, answering time sync, counting parse errors.
+fn pump(world: &mut WorldSession, tally: &mut Tally, errors: &mut usize, secs: f64) -> Result<()> {
+    let until = Instant::now() + Duration::from_secs_f64(secs);
+    let zero = Instant::now();
+    while Instant::now() < until {
+        match world.recv_detailed() {
+            Ok(read) => {
+                tally.note(&read, zero.elapsed());
+                answer_time_sync(world, tally)?;
+            }
+            Err(e) => {
+                let text = format!("{e:#}");
+                if is_timeout(&text) {
+                    continue;
+                }
+                if text.contains("parsing opcode") {
+                    println!("SCEN parse error: {text}");
+                    *errors += 1;
+                    continue;
+                }
+                return Err(e.context("reading the world stream in a scenario"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The guid of the first creature in view with this entry.
+fn creature_guid(seen: &[Seen], entry: u32) -> Option<u64> {
+    seen.iter()
+        .find(|s| s.ty == ObjectType::Unit && s.fields.object_entry() == Some(entry))
+        .map(|s| s.guid)
+}
+
+/// One scenario of `WOW_SCENARIO` (comma list): only sends that change nothing lasting, never
+/// combat, a cast, a purchase, a sale, a learn, a loot, a trade or a quest accept.
+fn scenario(
+    world: &mut WorldSession,
+    tally: &mut Tally,
+    errors: &mut usize,
+    me: &Character,
+    seen: &[Seen],
+    name: &str,
+) -> Result<()> {
+    println!("SCEN {name} BEGIN");
+    let willem = creature_guid(seen, 823);
+    let janos = creature_guid(seen, 78);
+    println!(
+        "SCEN guids willem {willem:?} janos {janos:?} self {:#x}",
+        me.guid
+    );
+    let chat =
+        |world: &mut WorldSession, ty: u32, target: Option<&str>, text: &str| -> Result<()> {
+            let body = messages::messagechat_tbc(ty, 7, target, text)
+                .ok_or_else(|| anyhow!("chat type {ty:#x} has no 2.4.3 number"))?;
+            world.send_raw(messages::opcode::CMSG_MESSAGECHAT, &body)
+        };
+    let join = |world: &mut WorldSession, n: &str| {
+        world.send_raw(
+            messages::opcode::CMSG_JOIN_CHANNEL,
+            &messages::join_channel_tbc(n, ""),
+        )
+    };
+    match name {
+        "say" => chat(world, messages::CHAT_TYPE_SAY, None, "benilla probe say")?,
+        "yell" => chat(world, messages::CHAT_TYPE_YELL, None, "benilla probe yell")?,
+        "emote" => chat(
+            world,
+            messages::CHAT_TYPE_EMOTE,
+            None,
+            "benilla probe emote",
+        )?,
+        "whisper-self" => chat(
+            world,
+            messages::CHAT_TYPE_WHISPER,
+            Some(&me.name),
+            "benilla probe whisper",
+        )?,
+        "whisper-nobody" => chat(
+            world,
+            messages::CHAT_TYPE_WHISPER,
+            Some("Nobodyhere"),
+            "benilla probe whisper",
+        )?,
+        "channel" => {
+            join(world, "benilla_probe")?;
+            pump(world, tally, errors, 2.0)?;
+            chat(
+                world,
+                messages::CHAT_TYPE_CHANNEL,
+                Some("benilla_probe"),
+                "benilla probe channel line",
+            )?;
+            pump(world, tally, errors, 2.0)?;
+            world.send_raw(
+                messages::opcode::CMSG_CHANNEL_LIST,
+                &messages::channel_list("benilla_probe"),
+            )?;
+            pump(world, tally, errors, 2.0)?;
+            world.send_raw(
+                messages::opcode::CMSG_CHANNEL_ANNOUNCEMENTS,
+                &messages::channel_announcements("benilla_probe"),
+            )?;
+            pump(world, tally, errors, 2.0)?;
+            world.send_raw(
+                messages::opcode::CMSG_CHANNEL_OWNER,
+                &messages::channel_owner("benilla_probe"),
+            )?;
+            pump(world, tally, errors, 2.0)?;
+            world.send_raw(
+                messages::opcode::CMSG_LEAVE_CHANNEL,
+                &messages::leave_channel_tbc("benilla_probe"),
+            )?;
+        }
+        "zone-channel" => {
+            join(world, "General - Elwynn Forest")?;
+            pump(world, tally, errors, 2.0)?;
+            world.send_raw(
+                messages::opcode::CMSG_CHANNEL_LIST,
+                &messages::channel_list("General - Elwynn Forest"),
+            )?;
+        }
+        "select" => {
+            let g = willem.ok_or_else(|| anyhow!("Deputy Willem not in view"))?;
+            world.set_selection(g)?;
+            pump(world, tally, errors, 1.5)?;
+            world.set_selection(0)?;
+        }
+        "quest-status" => {
+            let g = willem.ok_or_else(|| anyhow!("Deputy Willem not in view"))?;
+            world.questgiver_status_query(g)?;
+        }
+        "gossip-hello" => {
+            let g = willem.ok_or_else(|| anyhow!("Deputy Willem not in view"))?;
+            world.send_raw(
+                messages::opcode::CMSG_GOSSIP_HELLO,
+                &messages::gossip_hello(g),
+            )?;
+        }
+        "quest-hello" => {
+            let g = willem.ok_or_else(|| anyhow!("Deputy Willem not in view"))?;
+            world.questgiver_hello(g)?;
+        }
+        "vendor-list" => {
+            let g = janos.ok_or_else(|| anyhow!("Janos Hammerknuckle not in view"))?;
+            world.list_inventory(g)?;
+        }
+        "invswap" => {
+            // Backpack slot 23 holds the food; 25 is empty. Move and put back.
+            world.swap_inv_item(23, 25)?;
+            pump(world, tally, errors, 2.0)?;
+            world.swap_inv_item(25, 23)?;
+        }
+        "invfail" => {
+            // A backpack item onto the head slot: refused, nothing moves.
+            world.swap_inv_item(23, 0)?;
+        }
+        other => bail!("unknown scenario {other}"),
+    }
+    pump(world, tally, errors, 3.0)?;
+    println!("SCEN {name} END");
     Ok(())
 }

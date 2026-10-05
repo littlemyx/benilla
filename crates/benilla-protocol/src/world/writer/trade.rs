@@ -33,6 +33,7 @@ impl WorldWriter {
 
     /// `CMSG_SET_TRADE_ITEM`: clears the partner's accept and re-arms the server's 200 ms delay.
     pub fn set_trade_item(&mut self, trade_slot: u8, bag: u8, slot: u8) -> Result<()> {
+        let (bag, slot) = (self.slot(bag)?, self.slot(slot)?);
         self.send(
             opcode::CMSG_SET_TRADE_ITEM,
             &messages::set_trade_item(trade_slot, bag, slot),

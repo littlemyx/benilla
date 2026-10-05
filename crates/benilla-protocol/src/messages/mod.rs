@@ -55,8 +55,20 @@ mod tbc;
 pub use tbc::{char_create_result, read_char_enum_records};
 pub mod tbc_movement;
 pub use tbc_movement::{tbc_flag, FlightSpeed, RelayTail, TbcMovementInfo, TbcTransport};
+pub mod tbc_chat;
+pub use tbc_chat::{
+    chat_ignored_tbc, chat_type_to_tbc, join_channel_tbc, leave_channel_tbc, messagechat_tbc,
+    UserListChange,
+};
+mod tbc_combat;
+mod tbc_items;
+pub use tbc_items::{repair_item_tbc, slot_to_tbc};
+mod tbc_npc;
+pub use tbc_npc::quest_status_from_tbc;
 mod tbc_same;
+mod tbc_spells;
 pub use tbc_same::{same_reader_for, TBC_SAME_READERS};
+pub use tbc_spells::{cast_result_from_tbc, CAST_RESULT_TBC_TO_112};
 mod tbc_world;
 pub use tbc_world::{Contact, ExtraAura, TbcPacket};
 mod trade;
