@@ -697,7 +697,6 @@ fn run_with(
                     tail,
                 } => {
                     skip_run = 0;
-                    #[cfg(feature = "dev")]
                     crate::flow_census::note_packet(opcode, &events);
                     // A body is length-framed, so a decoder shorter than the server's layout
                     // succeeds silently; report it once per opcode, and never skip the packet.
@@ -748,7 +747,6 @@ fn run_with(
                 }
                 Poll::Skipped { opcode, reason } => {
                     skip_run += 1;
-                    #[cfg(feature = "dev")]
                     crate::flow_census::note_unparseable(opcode);
                     // Every skip, uncapped, into the trace (tag `skip`): otherwise a packet that
                     // failed to parse looks like one that never arrived.

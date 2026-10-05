@@ -4,12 +4,12 @@
 //! behaviour and compiles out of the player build.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use benilla_build::{ClientBuild, Expansion};
 use benilla_protocol::{SessionEvent, SessionEventKind};
-use benilla_ui::script::UiScript;
 use bevy::prelude::*;
 
 /// Process-relative zero for every stamp.
@@ -22,11 +22,11 @@ fn ms() -> u128 {
 
 /// What one interface VM reported when it was last sampled.
 #[derive(Default, Clone)]
-struct VmSnap {
+pub(crate) struct VmSnap {
     /// Error / load / warning rows: (kind tag, message, count).
-    diagnostics: Vec<(&'static str, String, u32)>,
-    registered: BTreeMap<String, u64>,
-    fired: BTreeMap<String, u64>,
+    pub(crate) diagnostics: Vec<(&'static str, String, u32)>,
+    pub(crate) registered: BTreeMap<String, u64>,
+    pub(crate) fired: BTreeMap<String, u64>,
 }
 
 /// One opcode's fate: events produced, a parse with no event, an unknown opcode, a failed parse.
@@ -81,6 +81,9 @@ pub(crate) fn stage(name: &str, detail: &str) {
 
 /// One decoded event reaching the dispatch, by kind; the stage edges of the login flow ride it.
 pub(crate) fn note_event(ev: &SessionEvent) {
+    if !crate::run_mode::dev_affordances() {
+        return;
+    }
     let kind: &'static str = SessionEventKind::from(ev).into();
     with(|c| *c.events.entry(kind).or_default() += 1);
     match ev {
@@ -117,6 +120,9 @@ pub(crate) fn note_event(ev: &SessionEvent) {
 
 /// One packet off the world socket: `events` is what the decode produced for it.
 pub(crate) fn note_packet(opcode: u16, events: &[SessionEvent]) {
+    if !crate::run_mode::dev_affordances() {
+        return;
+    }
     with(|c| {
         let t = c.packets.entry(opcode).or_default();
         if events.is_empty() {
@@ -139,98 +145,10 @@ pub(crate) fn note_packet(opcode: u16, events: &[SessionEvent]) {
 
 /// A packet whose parse failed and was skipped.
 pub(crate) fn note_unparseable(opcode: u16) {
+    if !crate::run_mode::dev_affordances() {
+        return;
+    }
     with(|c| c.packets.entry(opcode).or_default().unparseable += 1);
-}
-
-/// The Lua installed ahead of the stock files: counts every `RegisterEvent` by event name through
-/// each widget class's method table, and a probe frame on `RegisterAllEvents` counts every event
-/// the engine dispatches. Written for Lua 5.0 and 5.1 alike.
-const LUA_PROBE: &str = r#"
-BenillaCensus = { reg = {}, fired = {} }
-local C = BenillaCensus
-local seen = {}
-local kinds = { "Frame", "Button", "CheckButton", "EditBox", "ScrollFrame", "Slider", "StatusBar",
-  "GameTooltip", "MessageFrame", "SimpleHTML", "ColorSelect", "Cooldown", "Model", "Minimap",
-  "ScrollingMessageFrame", "MovieFrame", "PlayerModel", "DressUpModel", "TabardModel" }
-local function wrap(methods)
-  local orig = methods.RegisterEvent
-  if orig then
-    methods.RegisterEvent = function(self, ev)
-      C.reg[ev] = (C.reg[ev] or 0) + 1
-      return orig(self, ev)
-    end
-  end
-end
-for _, kind in ipairs(kinds) do
-  local ok, f = pcall(CreateFrame, kind)
-  if ok and f then
-    local mt = getmetatable(f)
-    local idx = mt and mt.__index
-    if type(idx) == "table" and not seen[idx] then
-      seen[idx] = true
-      wrap(idx)
-    end
-  end
-end
-local probe = CreateFrame("Frame")
-probe:RegisterAllEvents()
-probe:SetScript("OnEvent", function()
-  C.fired[event] = (C.fired[event] or 0) + 1
-end)
-function BenillaCensusDump()
-  local out = {}
-  for k, v in pairs(C.reg) do table.insert(out, "R\t" .. k .. "\t" .. v) end
-  for k, v in pairs(C.fired) do table.insert(out, "F\t" .. k .. "\t" .. v) end
-  return table.concat(out, "\n")
-end
-"#;
-
-/// Installs the probe in a VM about to load the in-game interface.
-pub(crate) fn install_lua_probe(script: &UiScript) {
-    match script.run(LUA_PROBE) {
-        Ok(()) => println!(
-            "census: lua probe installed (VM session {})",
-            script.session()
-        ),
-        Err(e) => println!("census: lua probe FAILED to install: {e}"),
-    }
-}
-
-fn parse_dump(text: &str) -> (BTreeMap<String, u64>, BTreeMap<String, u64>) {
-    let (mut reg, mut fired) = (BTreeMap::new(), BTreeMap::new());
-    for line in text.lines() {
-        let mut p = line.split('\t');
-        let (Some(kind), Some(name), Some(n)) = (p.next(), p.next(), p.next()) else {
-            continue;
-        };
-        let n = n.parse::<u64>().unwrap_or(0);
-        match kind {
-            "R" => reg.insert(name.to_string(), n),
-            "F" => fired.insert(name.to_string(), n),
-            _ => None,
-        };
-    }
-    (reg, fired)
-}
-
-/// Copies the live VM's reports into the census, replacing its earlier sample.
-fn sample_vm(script: &UiScript) {
-    let mut snap = VmSnap {
-        diagnostics: script
-            .diagnostics()
-            .into_iter()
-            .map(|d| (d.kind.tag(), d.message, d.count))
-            .collect(),
-        ..Default::default()
-    };
-    if let Ok(dump) =
-        script.eval::<String>("return BenillaCensusDump and BenillaCensusDump() or ''")
-    {
-        (snap.registered, snap.fired) = parse_dump(&dump);
-    }
-    with(|c| {
-        c.vms.insert(script.session(), snap);
-    });
 }
 
 /// The missing name in "attempt to call global 'X' (a nil value)", for 5.0 and 5.1 quoting.
@@ -416,9 +334,14 @@ impl Plugin for FlowCensusPlugin {
         stage("startup", &format!("build {}", build.build));
         app.add_systems(
             Update,
-            (state_stages, own_player_stage, sample_ui, heartbeat),
+            (
+                state_stages,
+                own_player_stage,
+                crate::ui_script::flow_probe::sample_ui,
+                heartbeat,
+            ),
         )
-        .add_systems(Last, summary_on_exit);
+        .add_systems(Last, crate::ui_script::flow_probe::summary_on_exit);
     }
 }
 
@@ -442,30 +365,23 @@ fn own_player_stage(
     }
 }
 
-fn sample_ui(script: Option<NonSend<UiScript>>, time: Res<Time>, mut next: Local<f32>) {
-    let now = time.elapsed_secs();
-    if now < *next {
-        return;
+pub(crate) static NEXT_SAMPLE_MS: AtomicU64 = AtomicU64::new(0);
+static NEXT_BEAT_MS: AtomicU64 = AtomicU64::new(15_000);
+
+/// True once per `every_ms` of process time, per timer.
+pub(crate) fn due(next: &AtomicU64, every_ms: u64) -> bool {
+    let now = ms() as u64;
+    if now < next.load(Ordering::Relaxed) {
+        return false;
     }
-    *next = now + 1.0;
-    if let Some(script) = script {
-        sample_vm(&script);
-        // The in-game interface's own stage: the probe's dump exists only in a VM that loaded it.
-        if script
-            .eval::<bool>("return BenillaCensus ~= nil and PlayerFrame ~= nil")
-            .unwrap_or(false)
-        {
-            stage("ingame_ui", &format!("VM session {}", script.session()));
-        }
-    }
+    next.store(now + every_ms, Ordering::Relaxed);
+    true
 }
 
-fn heartbeat(time: Res<Time>, mut next: Local<f32>) {
-    let now = time.elapsed_secs();
-    if now < *next {
+fn heartbeat() {
+    if !due(&NEXT_BEAT_MS, 15_000) {
         return;
     }
-    *next = now + 15.0;
     let last = with(|c| {
         c.stages
             .last()
@@ -475,15 +391,11 @@ fn heartbeat(time: Res<Time>, mut next: Local<f32>) {
     println!("census: heartbeat t={}ms last-stage={last}", ms());
 }
 
-fn summary_on_exit(mut exits: MessageReader<AppExit>, script: Option<NonSend<UiScript>>) {
-    if exits.read().next().is_none() {
-        return;
-    }
-    if let Some(script) = script {
-        sample_vm(&script);
-    }
-    stage("exit", "");
-    print_summary();
+/// Replaces one VM's earlier sample.
+pub(crate) fn record_vm(session: u64, snap: VmSnap) {
+    with(|c| {
+        c.vms.insert(session, snap);
+    });
 }
 
 #[cfg(test)]
@@ -508,25 +420,11 @@ mod tests {
     }
 
     #[test]
-    fn the_probe_counts_registrations_and_dispatches() {
-        let script = UiScript::new().unwrap();
-        script.run(LUA_PROBE).unwrap();
-        script
-            .run(r#"local f = CreateFrame("Frame"); f:RegisterEvent("A_EVENT"); f:RegisterEvent("B_EVENT")"#)
-            .unwrap();
-        let mut script = script;
-        script.fire_event("A_EVENT", vec![]);
-        script.fire_event("A_EVENT", vec![]);
-        let dump: String = script.eval("return BenillaCensusDump()").unwrap();
-        let (reg, fired) = parse_dump(&dump);
-        assert_eq!(reg.get("A_EVENT"), Some(&1), "{dump}");
-        assert_eq!(reg.get("B_EVENT"), Some(&1), "{dump}");
-        assert_eq!(fired.get("A_EVENT"), Some(&2), "{dump}");
-        assert_eq!(fired.get("B_EVENT"), None, "{dump}");
-    }
-
-    #[test]
     fn packets_are_told_apart_by_what_the_decode_made_of_them() {
+        // A player build counts nothing.
+        if !crate::run_mode::dev_affordances() {
+            return;
+        }
         note_packet(0xFFF0, &[]);
         note_packet(
             0xFFF1,

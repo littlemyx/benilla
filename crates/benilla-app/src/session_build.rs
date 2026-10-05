@@ -51,14 +51,9 @@ pub(crate) fn admit(build: &ClientBuild, allow_unplayable: bool) -> Admission {
 }
 
 /// `WOW_ALLOW_UNPLAYABLE=1`, honoured by dev builds only; the player build keeps the refusal.
-#[cfg(feature = "dev")]
 pub(crate) fn allow_unplayable_env() -> bool {
-    std::env::var("WOW_ALLOW_UNPLAYABLE").as_deref() == Ok("1")
-}
-
-#[cfg(not(feature = "dev"))]
-pub(crate) fn allow_unplayable_env() -> bool {
-    false
+    crate::run_mode::dev_affordances()
+        && std::env::var("WOW_ALLOW_UNPLAYABLE").as_deref() == Ok("1")
 }
 
 #[cfg(test)]
@@ -108,12 +103,5 @@ mod tests {
         }
         // The switch changes nothing about what the build is.
         assert!(!TBC_2_4_3.playable());
-    }
-
-    #[cfg(not(feature = "dev"))]
-    #[test]
-    fn a_player_build_ignores_the_switch() {
-        std::env::set_var("WOW_ALLOW_UNPLAYABLE", "1");
-        assert!(!allow_unplayable_env());
     }
 }
