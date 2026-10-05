@@ -350,6 +350,7 @@ pub(super) fn feed_actions(
         // Each occupied slot's display, diffed against what the VM holds; a changed slot is
         // pushed and fires `ACTIONBAR_SLOT_CHANGED` with its Lua action id.
         let mut fresh: HashMap<u32, ActionSlot> = HashMap::new();
+        let mut stackable: HashSet<u32> = HashSet::new();
         for (slot, button) in &actions.buttons {
             let (texture, count, consumable) = match button.kind {
                 ACTION_KIND_SPELL => {
@@ -382,6 +383,10 @@ pub(super) fn feed_actions(
                     // The Count gate (`0x4e5250`, [`ItemInfo::is_consumable`]) reads the icon's
                     // template, so it rides the same push.
                     let consumable = template.as_ref().is_some_and(|t| t.is_consumable());
+                    // `IsStackableAction` reads the same template: it stacks past one.
+                    if template.as_ref().is_some_and(|t| t.stackable > 1) {
+                        stackable.insert(u32::from(*slot) + 1);
+                    }
                     (Some(texture), count, consumable)
                 }
                 // A macro slot shows the macro's own icon (`0x4e6bf9` calls `0x4f0fd0`), never its
@@ -422,6 +427,7 @@ pub(super) fn feed_actions(
         for &action in &changed {
             script.set_action(action, fresh.get(&action).cloned());
         }
+        script.set_stackable_actions(stackable);
         memory.pushed = fresh;
         debug!(
             "ui_action: fed {} changed slot(s) ({} occupied)",

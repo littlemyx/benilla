@@ -342,6 +342,7 @@ impl Loader<'_> {
     /// A `<FontString>`'s font: `inherits=` through [`Self::font_object_through_templates`], then
     /// `font=`, a font object's name first and a file only on a miss (`0x770f40`, `0x771104`).
     pub(super) fn apply_fontstring_font(&mut self, region: &Element, wrapper: &Table, dbg: &str) {
+        self.store_text_hints(region, wrapper);
         if let Some(name) = region.attr("inherits") {
             // The expanded element keeps the instance's `inherits=`, a template's name, so the
             // chain is walked to its font object. An unresolved name passes through unchanged:
@@ -389,6 +390,22 @@ impl Loader<'_> {
                 }
             }
             None => {}
+        }
+    }
+
+    /// 2.4.3's text-wrapping attributes of a `<FontString>` or `<ButtonText>`, kept for the
+    /// renderer ([`crate::script::ui243::store_hint`]); on 1.12.1 they stay unread.
+    pub(super) fn store_text_hints(&mut self, el: &Element, wrapper: &Table) {
+        if !self.listed_inherits() {
+            return;
+        }
+        let Some(owner) = crate::script::ui243::hint_owner(wrapper) else {
+            return;
+        };
+        for attr in ["nonspacewrap", "bytes", "maxLines", "indented"] {
+            if let Some(v) = el.attr(attr) {
+                crate::script::ui243::store_hint(self.lua, owner.clone(), attr, v);
+            }
         }
     }
 }

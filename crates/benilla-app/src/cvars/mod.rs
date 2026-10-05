@@ -30,7 +30,9 @@ use benilla_ui::script::{SeededCvar, UiScript};
 mod table;
 #[cfg(test)]
 use table::Reference;
-pub(crate) use table::{registered_pairs, REGISTERED};
+#[cfg(test)]
+pub(crate) use table::REGISTERED_243;
+pub(crate) use table::{registered_pairs, registered_pairs_for, REGISTERED};
 
 /// `config.toml`: a `[cvars]` table of `Name = "value"` strings, sorted so every save is stable.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -2319,5 +2321,34 @@ mod tests {
                 "gxWindow",
             ]
         );
+    }
+
+    /// 2.4.3's additions are the reference's own registered strings, share no name with the 1.12.1
+    /// table, and reach only the 5.1 dialect's VM.
+    #[test]
+    fn the_2_4_3_rows_are_the_references_and_reach_only_its_dialect() {
+        use benilla_ui::script::ScriptDialect;
+        let mut seen = HashSet::new();
+        for row in REGISTERED_243 {
+            let name = row.name.to_ascii_lowercase();
+            assert!(seen.insert(name.clone()), "{}: listed twice", row.name);
+            assert!(
+                !REGISTERED
+                    .iter()
+                    .any(|r| r.name.eq_ignore_ascii_case(&name)),
+                "{}: already a 1.12.1 row",
+                row.name
+            );
+            match &row.reference {
+                Reference::Same(v) => assert_eq!(*v, row.default, "{}", row.name),
+                _ => panic!("{}: a 2.4.3 row is the reference's own default", row.name),
+            }
+        }
+        let old: Vec<_> = table::registered_pairs_for(ScriptDialect::Lua50).collect();
+        assert_eq!(old, registered_pairs().collect::<Vec<_>>());
+        let new: Vec<_> = table::registered_pairs_for(ScriptDialect::Lua51).collect();
+        assert_eq!(new.len(), old.len() + REGISTERED_243.len());
+        assert!(new.contains(&("autoQuestWatch", "1")));
+        assert!(!old.iter().any(|(n, _)| *n == "autoQuestWatch"));
     }
 }

@@ -425,6 +425,20 @@ pub(crate) struct Model {
     /// Per action, its usable, range, current and cooldown state; an absent one reads cold.
     pub(crate) action_states: HashMap<u32, super::action::StoredActionState>,
     pub(crate) bonus_bar_offset: u8,
+    /// `GetActionBarPage()` in 2.4.3, where the engine owns the page: 1..=6, set by `ChangeActionBarPage`.
+    pub(crate) action_bar_page: u8,
+    /// `GetAccountExpansionLevel()`: the byte of the admitting 2.4.3 `SMSG_AUTH_RESPONSE`.
+    pub(crate) account_expansion: u8,
+    /// Calls of the secure-execution verbs, while the taint model is pending.
+    pub(crate) secure_model_calls: std::collections::BTreeMap<&'static str, u64>,
+    /// Layout hints the 2.4.3 loader kept for drawing, by owner key (`ui243::store_hint`).
+    pub(crate) xml_hints: HashMap<String, Vec<(String, String)>>,
+    /// Action ids whose item template stacks past one (`IsStackableAction`).
+    pub(crate) stackable_actions: std::collections::HashSet<u32>,
+    /// `<ModifiedClick>` defaults by upper-cased action (`GetModifiedClick`).
+    pub(crate) modified_clicks: HashMap<String, String>,
+    /// The frame `InitWorldMapPing` was given.
+    pub(crate) world_map_ping_host: Option<u32>,
     /// `(action id, packed)` per slot `PickupAction`/`PlaceAction` changed, 0 clearing it: one
     /// `CMSG_SET_ACTION_BUTTON` each, so a drag swap is two sends.
     pub(crate) action_sets: Vec<(u32, u32)>,
@@ -1189,6 +1203,13 @@ impl Model {
             actions: HashMap::new(),
             action_states: HashMap::new(),
             bonus_bar_offset: 0,
+            action_bar_page: 1,
+            account_expansion: 0,
+            secure_model_calls: Default::default(),
+            stackable_actions: Default::default(),
+            xml_hints: HashMap::new(),
+            modified_clicks: HashMap::new(),
+            world_map_ping_host: None,
             action_sets: Vec::new(),
             ui_errors: Vec::new(),
             spellbook: spellbook::SpellBookState::default(),

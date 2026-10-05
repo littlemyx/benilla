@@ -158,6 +158,7 @@ impl Loader<'_> {
             }
             self.call(wrapper, "SetText", label, dbg);
             if let Ok(region) = wrapper.call_method::<Table>("GetFontString", ()) {
+                self.store_text_hints(bt, &region);
                 // Clear, lay out, then the implicit step, as both reference legs do (`0x6f27f5`,
                 // `0x778b96`); the button's own adopter anchor never fires on them (`0x778d5f`).
                 // On `<NormalText>` the justify is the Normal font's, so the implicit anchor reads
@@ -307,6 +308,16 @@ impl Loader<'_> {
         if !self.listed_inherits() {
             return;
         }
+        // A button's `<PushedTextOffset>` (the label's shift while pushed) is read and kept; the
+        // label is not shifted yet (gap).
+        if let (Some(po), Some(owner)) = (
+            children_named(el, "PushedTextOffset").last(),
+            crate::script::ui243::hint_owner(wrapper),
+        ) {
+            let (x, y) = abs_dim(po);
+            let text = format!("{},{}", x.unwrap_or(0.0), y.unwrap_or(0.0));
+            crate::script::ui243::store_hint(self.lua, owner, "pushedTextOffset", &text);
+        }
         if el.attr_bool("protected") {
             let done = crate::script::ui243::set_protected(self.lua, wrapper, true);
             if let Err(e) = done {
@@ -423,6 +434,16 @@ impl Loader<'_> {
                 if n > 0 {
                     self.call(wrapper, "SetMaxLines", n, dbg);
                 }
+            }
+        }
+        // 2.4.3's scrolling frame reads `insertMode` too; where the newest line enters is not drawn
+        // from it yet (gap), so it is kept for the renderer.
+        if scrolling && self.listed_inherits() {
+            if let (Some(mode), Some(owner)) = (
+                el.attr("insertMode"),
+                crate::script::ui243::hint_owner(wrapper),
+            ) {
+                crate::script::ui243::store_hint(self.lua, owner, "insertMode", mode.trim());
             }
         }
         if plain {

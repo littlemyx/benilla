@@ -546,6 +546,17 @@ impl Loader<'_> {
         };
 
         let font = font_object_from_element(&merged);
+        // 2.4.3's `monochrome` is a font flag nothing draws yet; kept for the renderer.
+        if self.listed_inherits() {
+            if let Some(v) = merged.attr("monochrome") {
+                crate::script::ui243::store_hint(
+                    self.lua(),
+                    format!("font:{name}"),
+                    "monochrome",
+                    v,
+                );
+            }
+        }
         {
             let mut model = self.model();
             model

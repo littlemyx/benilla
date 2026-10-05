@@ -151,6 +151,7 @@ impl Plugin for UiUnitPlugin {
                 // First, so a worldport's leaving edge precedes the entering edge `feed_units`
                 // raises for the same port.
                 fire_leaving_world_on_worldport,
+                feed_account_expansion,
                 feed_units,
                 // After the aura feed, whose resolver inputs it measures.
                 feed_unit_reach.after(crate::ui_aura::AuraEvents),
@@ -1175,6 +1176,21 @@ pub(crate) fn fire_transitions(
     }) {
         script.fire_event("UNIT_FACTION", vec![tok()]);
     }
+}
+
+/// The account's expansion level, read at each world entry: the byte of the admitting auth
+/// response (`GetAccountExpansionLevel`); 1.12.1's response carries none and the level stays 0.
+fn feed_account_expansion(
+    script: Option<NonSendMut<UiScript>>,
+    entered_world: Option<MessageReader<crate::net::EnteredWorldMessage>>,
+    expansion: Option<Res<crate::net::AccountExpansion>>,
+) {
+    let entered = entered_world.and_then(|mut r| r.read().last().map(|_| ()));
+    let (Some(mut script), Some(())) = (script, entered) else {
+        return;
+    };
+    let level = expansion.map_or(u8::MAX, |e| e.0.load(std::sync::atomic::Ordering::Relaxed));
+    script.set_account_expansion(if level == u8::MAX { 0 } else { level });
 }
 
 fn feed_units(
