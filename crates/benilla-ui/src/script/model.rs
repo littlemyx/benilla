@@ -435,6 +435,8 @@ pub(crate) struct Model {
     pub(crate) cast: Option<super::ui243_verbs::ChannelState>,
     /// The auction sort order per list, in set order: `(column, reverse)` rows.
     pub(crate) auction_sort_order: HashMap<String, Vec<(String, bool)>>,
+    /// `GetCurrentDungeonDifficulty()`: 1 normal, 2 heroic.
+    pub(crate) dungeon_difficulty: u8,
     /// The server's voice-chat flag (`SMSG_FEATURE_SYSTEM_STATUS`).
     pub(crate) voice_chat_allowed: bool,
     /// The player's channelled spell while one runs: `UnitChannelInfo("player")`.
@@ -1225,6 +1227,7 @@ impl Model {
             channel: None,
             cast: None,
             voice_chat_allowed: false,
+            dungeon_difficulty: 1,
             auction_sort_order: HashMap::new(),
             client_interface: super::addon_gate::CLIENT_INTERFACE,
             combat_log: Default::default(),

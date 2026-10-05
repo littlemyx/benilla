@@ -1098,6 +1098,19 @@ pub fn decode(packet: ServerPacket) -> Vec<SessionEvent> {
         ServerPacket::Tbc(crate::messages::TbcPacket::ClearExtraAuraInfo { guid, spell_id }) => {
             vec![SessionEvent::ExtraAuraCleared { guid, spell_id }]
         }
+        ServerPacket::Tbc(crate::messages::TbcPacket::Motd { lines }) => {
+            vec![SessionEvent::Motd { lines }]
+        }
+        ServerPacket::Tbc(crate::messages::TbcPacket::FeatureSystemStatus {
+            voice_chat_enabled,
+            ..
+        }) => vec![SessionEvent::FeatureSystemStatus { voice_chat_enabled }],
+        ServerPacket::Tbc(crate::messages::TbcPacket::InstanceDifficulty {
+            difficulty, ..
+        })
+        | ServerPacket::Tbc(crate::messages::TbcPacket::SetDungeonDifficulty {
+            difficulty, ..
+        }) => vec![SessionEvent::DungeonDifficulty { difficulty }],
         ServerPacket::Tbc(_) => Vec::new(),
         // No parse arm at all: surfaced for the app's dropped-opcode tally.
         ServerPacket::Other { opcode } => vec![SessionEvent::PacketDropped {

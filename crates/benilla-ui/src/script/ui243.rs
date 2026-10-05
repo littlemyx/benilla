@@ -681,7 +681,10 @@ mod tests {
         )
         .unwrap();
         s.fire_event("SPELLCAST_START", vec![Str("Fireball".into()), Int(3000)]);
-        s.fire_event("SPELLCAST_CHANNEL_START", vec![Int(8000), Str("Blizzard".into())]);
+        s.fire_event(
+            "SPELLCAST_CHANNEL_START",
+            vec![Int(8000), Str("Blizzard".into())],
+        );
         s.fire_event("SPELLCAST_STOP", vec![]);
         s.fire_event("SPELLCAST_DELAYED", vec![Int(500)]);
         assert_eq!(

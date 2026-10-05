@@ -847,6 +847,32 @@ mod tests {
         ));
     }
 
+    /// The MOTD lines, the feature flags and the dungeon difficulty reach the app as events.
+    #[test]
+    fn the_motd_feature_status_and_difficulty_decode_to_events() {
+        use crate::SessionEvent as E;
+        let mut motd = 2u32.to_le_bytes().to_vec();
+        motd.extend(b"Welcome\0Have fun\0");
+        let events = crate::decode(parse(tbc_opcode::SMSG_MOTD, &motd).unwrap());
+        assert!(
+            matches!(events.as_slice(), [E::Motd { lines }] if lines == &["Welcome", "Have fun"])
+        );
+        let events = crate::decode(parse(tbc_opcode::SMSG_FEATURE_SYSTEM_STATUS, &[2, 1]).unwrap());
+        assert!(matches!(
+            events.as_slice(),
+            [E::FeatureSystemStatus {
+                voice_chat_enabled: true
+            }]
+        ));
+        let mut diff = 1u32.to_le_bytes().to_vec();
+        diff.extend(0u32.to_le_bytes());
+        let events = crate::decode(parse(tbc_opcode::SMSG_INSTANCE_DIFFICULTY, &diff).unwrap());
+        assert!(matches!(
+            events.as_slice(),
+            [E::DungeonDifficulty { difficulty: 1 }]
+        ));
+    }
+
     #[test]
     fn a_time_sync_request_decodes_to_the_event_the_read_thread_answers() {
         let packet = parse(tbc_opcode::SMSG_TIME_SYNC_REQ, &7u32.to_le_bytes()).unwrap();

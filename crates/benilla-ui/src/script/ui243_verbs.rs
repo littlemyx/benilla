@@ -122,6 +122,12 @@ impl super::UiScript {
         self.model_mut().cast = None;
     }
 
+    /// Push the dungeon difficulty the server states (0 normal, 1 heroic on the wire), which
+    /// `GetCurrentDungeonDifficulty` answers as 1 or 2.
+    pub fn set_dungeon_difficulty(&mut self, wire: u32) {
+        self.model_mut().dungeon_difficulty = wire.min(1) as u8 + 1;
+    }
+
     /// Push whether the server allows voice chat (`SMSG_FEATURE_SYSTEM_STATUS`), which
     /// `IsVoiceChatAllowedByServer` answers.
     pub fn set_voice_chat_allowed(&mut self, allowed: bool) {
@@ -661,10 +667,13 @@ fn install_empty_state(lua: &Lua) -> mlua::Result<()> {
         "GetCurrentTitle",
         lua.create_function(|_, _: MultiValue| Ok(-1))?,
     )?;
-    // The dungeon difficulty a character that never changed it has: 1, normal (2 is heroic).
+    // The dungeon difficulty the server last stated; 1, normal, until it states one (2 is heroic).
     g.set(
         "GetCurrentDungeonDifficulty",
-        lua.create_function(|_, _: MultiValue| Ok(1))?,
+        lua.create_function(|lua, _: MultiValue| {
+            let model = lua.app_data_ref::<Model>().expect("model app_data");
+            Ok(i64::from(model.dungeon_difficulty))
+        })?,
     )?;
     // No totems: `haveTotem` false with an empty name, icon and zero times.
     g.set(
