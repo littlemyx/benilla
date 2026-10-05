@@ -62,6 +62,38 @@ pub(super) struct CheckHilight;
 #[derive(Component)]
 pub(super) struct RealmlistReadout;
 
+/// The build date the client's `GetBuildInfo` carries, from the executable's own constants (the
+/// date, build and version strings sit together): 1.12.1's and 2.4.3's; `None` for a build whose
+/// date has not been established.
+fn build_date(build: &benilla_build::ClientBuild) -> Option<&'static str> {
+    match build.build {
+        5875 => Some("Sep 19 2006"),
+        8606 => Some("Jul 10 2008"),
+        _ => None,
+    }
+}
+
+/// `VERSION_TEMPLATE` filled with the version type, version, internal number (the build), build
+/// type and date; without an established date, the template's first line alone.
+fn version_line(template: &str, build: &benilla_build::ClientBuild) -> String {
+    let [major, minor, patch] = build.version;
+    let version = format!("{major}.{minor}.{patch}");
+    let number = build.build.to_string();
+    let date = build_date(build);
+    let template = match date {
+        Some(_) => template,
+        None => template.lines().next().unwrap_or(template),
+    };
+    let mut out = template.to_string();
+    for piece in ["Version", version.as_str(), number.as_str(), "Release"]
+        .into_iter()
+        .chain(date)
+    {
+        out = out.replacen("%s", piece, 1);
+    }
+    out
+}
+
 /// Spawn the screen tree once its prerequisites exist (the initial state's `OnEnter` fires before
 /// the MPQ chain and booth slots do), and rebuild an artless early spawn when the art lands.
 pub(super) fn materialize_screen(
@@ -78,7 +110,9 @@ pub(super) fn materialize_screen(
     realmlist: Res<crate::realmlist::Realmlist>,
     window: Query<&Window, With<PrimaryWindow>>,
     time: Res<Time>,
+    build: Option<Res<crate::session_build::SessionBuild>>,
 ) {
+    let build = build.map_or(benilla_build::VANILLA_1_12_1, |b| b.0);
     if let Some(mut wa) = world_assets {
         art.ensure_loaded(&mut wa, &mut images, &mut add_mats);
     }
@@ -97,6 +131,7 @@ pub(super) fn materialize_screen(
                     &form,
                     &realmlist,
                     &window,
+                    &build,
                 );
             }
         }
@@ -111,6 +146,7 @@ pub(super) fn materialize_screen(
                     &form,
                     &realmlist,
                     &window,
+                    &build,
                 );
             }
         }
@@ -126,6 +162,7 @@ fn spawn_screen(
     form: &LoginForm,
     realmlist: &crate::realmlist::Realmlist,
     window: &Query<&Window, With<PrimaryWindow>>,
+    build: &benilla_build::ClientBuild,
 ) {
     let font = wow_font(assets);
     // The edit boxes type in `GlueEditBoxFont`, ARIALN (GlueFonts.xml).
@@ -217,21 +254,10 @@ fn spawn_screen(
 
         // `AccountLoginVersion` (GlueFontNormalSmall at BOTTOMLEFT (0,10)): `VERSION_TEMPLATE`
         // filled with versionType, version, internalVersion, buildType and date.
-        let version = {
-            let template = strings.text("VERSION_TEMPLATE", "%s %s (%s) (%s)\n%s");
-            let build = benilla_protocol::CLIENT_BUILD.to_string();
-            let mut out = template.to_string();
-            for piece in [
-                "Version",
-                "1.12.1",
-                build.as_str(),
-                "Release",
-                "Sep 19 2006",
-            ] {
-                out = out.replacen("%s", piece, 1);
-            }
-            out
-        };
+        let version = version_line(
+            strings.text("VERSION_TEMPLATE", "%s %s (%s) (%s)\n%s"),
+            build,
+        );
         outlined_text(
             ui,
             Node {
@@ -647,4 +673,41 @@ pub(super) fn debug_login_shot(
         .observe(save_to_disk(out.clone()));
     info!("login: shot instrument writing {out}");
     *done = true;
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+    use benilla_build::{TBC_2_4_3, VANILLA_1_12_1};
+
+    const TEMPLATE: &str = "%s %s (%s) (%s)\n%s";
+
+    #[test]
+    fn the_1_12_1_line_is_the_one_it_always_was() {
+        assert_eq!(
+            version_line(TEMPLATE, &VANILLA_1_12_1),
+            "Version 1.12.1 (5875) (Release)\nSep 19 2006"
+        );
+    }
+
+    #[test]
+    fn the_2_4_3_line_carries_its_own_version_build_and_date() {
+        assert_eq!(
+            version_line(TEMPLATE, &TBC_2_4_3),
+            "Version 2.4.3 (8606) (Release)\nJul 10 2008"
+        );
+    }
+
+    #[test]
+    fn a_build_with_no_established_date_prints_version_and_build_alone() {
+        let other = benilla_build::ClientBuild {
+            build: 9999,
+            version: [3, 0, 0],
+            ..TBC_2_4_3
+        };
+        assert_eq!(
+            version_line(TEMPLATE, &other),
+            "Version 3.0.0 (9999) (Release)"
+        );
+    }
 }

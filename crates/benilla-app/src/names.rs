@@ -318,8 +318,14 @@ const CACHE_MAGIC: &str = "benilla-namecache";
 /// Our record-layout version; bump it when a column changes. Version 2 holds creature records
 /// only.
 const CACHE_FORMAT: u32 = 2;
-/// The client build, the reference's `0x16f3`.
+/// 1.12.1's client build, the reference's `0x16f3`.
+#[cfg(test)]
 const CACHE_BUILD: u32 = benilla_build::VANILLA_1_12_1.build as u32;
+
+/// The header's build: the session's, so a 2.4.3 cache says 8606 (and 1.12.1's stays `0x16f3`).
+fn cache_build() -> u32 {
+    u32::from(crate::local_state::build().build)
+}
 /// In the header as in the reference's; benilla reads DBC locale slot 0 only.
 const CACHE_LOCALE: &str = "enUS";
 
@@ -327,8 +333,10 @@ impl NameCache {
     /// Serialize as TSV: the header line, then one line per creature record. In-flight asks are
     /// not written.
     pub(crate) fn to_tsv(&self, realm: &str) -> String {
-        let mut out =
-            format!("{CACHE_MAGIC}\t{CACHE_FORMAT}\t{CACHE_BUILD}\t{CACHE_LOCALE}\t{realm}\n");
+        let mut out = format!(
+            "{CACHE_MAGIC}\t{CACHE_FORMAT}\t{}\t{CACHE_LOCALE}\t{realm}\n",
+            cache_build()
+        );
         for (entry, rec) in self.creatures.iter() {
             match rec {
                 Some(r) => out.push_str(&format!(
@@ -357,7 +365,7 @@ impl NameCache {
         if header.len() != 5
             || header[0] != CACHE_MAGIC
             || header[1] != CACHE_FORMAT.to_string()
-            || header[2] != CACHE_BUILD.to_string()
+            || header[2] != cache_build().to_string()
             || header[3] != CACHE_LOCALE
             || header[4] != realm
         {
@@ -1002,5 +1010,27 @@ mod tests {
             rx.try_recv(),
             Ok(ClientCommand::PetNameQuery { pet_number: 55, .. })
         ));
+    }
+
+    /// The header's build is the session's: a 2.4.3 cache says 8606, and the 1.12.1 reader (5875)
+    /// discards it, as the 2.4.3 reader discards a 1.12.1 file.
+    #[test]
+    fn a_cache_is_stamped_with_the_build_that_wrote_it() {
+        use crate::local_state::test_env::ENV_LOCK;
+        let _l = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cache = NameCache::default();
+        crate::local_state::set_build(benilla_build::TBC_2_4_3);
+        let tbc = cache.to_tsv("Realm");
+        crate::local_state::set_build(benilla_build::VANILLA_1_12_1);
+        let classic = cache.to_tsv("Realm");
+        assert!(tbc.starts_with("benilla-namecache\t2\t8606\t"), "{tbc}");
+        assert!(
+            classic.starts_with("benilla-namecache\t2\t5875\t"),
+            "{classic}"
+        );
+        assert!(NameCache::from_tsv(&tbc, "Realm").is_none());
+        assert!(NameCache::from_tsv(&classic, "Realm").is_some());
     }
 }

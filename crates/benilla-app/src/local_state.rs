@@ -38,6 +38,13 @@ pub(crate) fn set_build(build: ClientBuild) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = build;
 }
 
+/// The build the session plays ([`set_build`]); 1.12.1 until one is set.
+pub(crate) fn build() -> ClientBuild {
+    *BUILD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The subfolder of the state folder that `build` keeps its files in: none for 1.12.1, else its
 /// version (`2.4.3`).
 fn build_subfolder(build: &ClientBuild) -> Option<String> {
