@@ -680,8 +680,8 @@ void luaV_execute (lua_State *L, int nexeccalls) {
       }
       case OP_TFORLOOP: {
         StkId cb = ra + 3;  /* call base */
-        /* BENILLA: Lua 5.0's OP_TFORPREP, folded into the loop opcode (see
-        ** third_party/lua-src/BENILLA.md).
+        /* BENILLA: Lua 5.0's OP_TFORPREP, folded into the loop opcode and run only in the 5.0
+        ** dialect (see third_party/lua-src/BENILLA.md); a 5.1 state calls the table, as 5.1 does.
         **
         ** 5.0 ran this once at loop entry in its own opcode (index 30, 157 bytes, at
         ** 0x6f94a2 in the 1.12.1 client): when a generic-for's generator is a table, the
@@ -710,7 +710,7 @@ void luaV_execute (lua_State *L, int nexeccalls) {
         ** 95 corpus addons contain the shape, concentrated in Dewdrop-2.0.lua (123 sites) and
         ** AceEvent-2.0.lua (113).
         */
-        if (ttistable(ra)) {
+        if (luai_dialect50(L) && ttistable(ra)) {
           setobjs2s(L, ra+1, ra);
           setobj2s(L, ra, luaH_getstr(hvalue(gt(L)), luaS_new(L, "next")));
         }

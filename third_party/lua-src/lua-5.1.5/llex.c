@@ -101,7 +101,9 @@ static const char *txtToken (LexState *ls, int token) {
 
 void luaX_lexerror (LexState *ls, const char *msg, int token) {
   char buff[MAXSRC];
+  char fixed[128];
   luaO_chunkid(buff, getstr(ls->source), MAXSRC);
+  msg = luaO_qlfix(msg, fixed, sizeof(fixed), ls->L);
   msg = luaO_pushfstring(ls->L, "%s:%d: %s", buff, ls->linenumber, msg);
   if (token)
     luaO_pushfstring(ls->L, "%s near " LUA_QS, msg, txtToken(ls, token));
@@ -222,7 +224,6 @@ static int skip_sep (LexState *ls) {
 
 static void read_long_string (LexState *ls, SemInfo *seminfo, int sep) {
   int cont = 0;
-  (void)(cont);  /* avoid warnings when `cont' is not used */
   save_and_next(ls);  /* skip 2nd `[' */
   if (currIsNewline(ls))  /* string starts with a newline? */
     inclinenumber(ls);  /* skip it */
@@ -232,26 +233,23 @@ static void read_long_string (LexState *ls, SemInfo *seminfo, int sep) {
         luaX_lexerror(ls, (seminfo) ? "unfinished long string" :
                                    "unfinished long comment", TK_EOS);
         break;  /* to avoid warnings */
-#if defined(LUA_COMPAT_LSTR)
       case '[': {
         if (skip_sep(ls) == sep) {
           save_and_next(ls);  /* skip 2nd `[' */
           cont++;
-#if LUA_COMPAT_LSTR == 1
-          if (sep == 0)
+          /* BENILLA: 1.12's Lua 5.0 nests `[[...]]'; 5.1 raises the advisory error */
+          if (!luai_dialect50(ls->L) && sep == 0)
             luaX_lexerror(ls, "nesting of [[...]] is deprecated", '[');
-#endif
         }
         break;
       }
-#endif
       case ']': {
         if (skip_sep(ls) == sep) {
           save_and_next(ls);  /* skip 2nd `]' */
-#if defined(LUA_COMPAT_LSTR) && LUA_COMPAT_LSTR == 2
-          cont--;
-          if (sep == 0 && cont >= 0) break;
-#endif
+          if (luai_dialect50(ls->L)) {
+            cont--;
+            if (sep == 0 && cont >= 0) break;
+          }
           goto endloop;
         }
         break;

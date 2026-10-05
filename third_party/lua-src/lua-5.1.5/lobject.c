@@ -107,6 +107,31 @@ static void pushstr (lua_State *L, const char *str) {
 }
 
 
+/*
+** BENILLA: a 5.1-dialect state quotes program elements with apostrophes, 1.12's Lua 5.0 with
+** a backquote and an apostrophe (LUA_QL in luaconf.h spells the latter): copy `s' into
+** `buff' with each backquote replaced, or answer `s' itself when nothing changes.
+*/
+const char *luaO_qlfix (const char *s, char *buff, size_t size, lua_State *L) {
+  size_t i, l = strlen(s);
+  if (luai_dialect50(L) || l >= size || memchr(s, '`', l) == NULL) return s;
+  for (i = 0; i <= l; i++) buff[i] = (s[i] == '`') ? '\'' : s[i];
+  return buff;
+}
+
+
+static void pushlit (lua_State *L, const char *s, size_t l) {
+  char buff[256];
+  if (!luai_dialect50(L) && l < sizeof(buff) && memchr(s, '`', l) != NULL) {
+    memcpy(buff, s, l);
+    buff[l] = '\0';
+    s = luaO_qlfix(buff, buff, sizeof(buff), L);
+  }
+  setsvalue2s(L, L->top, luaS_newlstr(L, s, l));
+  incr_top(L);
+}
+
+
 /* this function handles only `%d', `%c', %f, %p, and `%s' formats */
 const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
   int n = 1;
@@ -114,8 +139,7 @@ const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
   for (;;) {
     const char *e = strchr(fmt, '%');
     if (e == NULL) break;
-    setsvalue2s(L, L->top, luaS_newlstr(L, fmt, e-fmt));
-    incr_top(L);
+    pushlit(L, fmt, e-fmt);
     switch (*(e+1)) {
       case 's': {
         const char *s = va_arg(argp, char *);
@@ -162,7 +186,7 @@ const char *luaO_pushvfstring (lua_State *L, const char *fmt, va_list argp) {
     n += 2;
     fmt = e+2;
   }
-  pushstr(L, fmt);
+  pushlit(L, fmt, strlen(fmt));
   luaV_concat(L, n+1, cast_int(L->top - L->base) - 1);
   L->top -= n;
   return svalue(L->top - 1);

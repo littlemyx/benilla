@@ -1004,6 +1004,13 @@ LUA_API void lua_concat (lua_State *L, int n) {
 }
 
 
+LUA_API void benilla_setdialect (lua_State *L, int dialect) {
+  lua_lock(L);
+  G(L)->dialect = cast_byte(dialect);
+  lua_unlock(L);
+}
+
+
 LUA_API lua_Alloc lua_getallocf (lua_State *L, void **ud) {
   lua_Alloc f;
   lua_lock(L);

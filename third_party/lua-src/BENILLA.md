@@ -33,35 +33,51 @@ whole of mlua's surface, stay exactly as upstream.
 
 ## The delta, and the command that proves it
 
-Eight hunks in three files. `src/lib.rs` additionally differs by having Lua 5.2/5.3/5.4/5.5 stripped
-from the `Version` enum (with their source trees deleted): benilla builds 5.1 and only 5.1, and a
-fork that still offered the other four would answer a request for one with a missing directory at
-build time instead of a compile error.
+Since the build profile (2.4.3 beside 1.12.1) every hunk is a switch, not a deletion. A `global_State`
+carries a one-byte `dialect` (`lstate.h`: `LUA_BENILLA_DIALECT_50` = 0, `_51` = 1), set to 50 in
+`lua_newstate`, so a state nobody touches behaves as before. `benilla_setdialect(L, d)` (`lapi.c`,
+declared in `lua.h`) sets it; benilla-ui calls it through FFI on the VM's own state, after its own
+Lua is loaded and before any user chunk is compiled. The macro `luai_dialect50(L)` is the test.
+In the 5.1 dialect each hunk is upstream 5.1.5's text. No unpatched `lua-src` is in the cargo
+registry, so that text is reconstructed from this tree (every hunk's removed lines are recorded
+below and in the code) and from 5.1.5's grammar; the tests in
+`crates/benilla-ui/src/script/tests/dialect.rs` exercise each construct in both dialects.
 
-Five hunks restore what 5.1 changed or removed:
+Five hunks switch what 5.1 changed or removed back to 5.0:
 
-| file | hunk | why |
+| file | hunk | 5.0 dialect | 5.1 dialect |
+|---|---|---|---|
+| `lvm.c` | 5.0's `OP_TFORPREP` table-to-`next` substitution, folded into the top of `OP_TFORLOOP` | `for k, v in someTable do` runs `next` over the table | stock: calling a table raises "attempt to call a table value" |
+| `llex.c` | long-string nesting (`read_long_string`'s `[` and `]` arms), formerly `LUA_COMPAT_LSTR` = 2 in `luaconf.h` | `[[ [[ ]] ]]` nests, no error | stock `LUA_COMPAT_LSTR` = 1 (restored in `luaconf.h`): the nested `[[` raises "nesting of [[...]] is deprecated" |
+| `luaconf.h`, `lobject.c`, `llex.c` | `LUA_QL(x)`: kept as 5.0's `` `x' `` in every literal; `luaO_pushvfstring` copies each format literal with backquotes turned into apostrophes, and `luaX_lexerror` does the same for its message, when the state is 5.1 (`luaO_qlfix`) | `` `x' `` | `'x'` |
+| `lparser.c` | `constructor()`'s loop head `testnext(ls, ';')` | one extra `;` after a field separator is skipped | not skipped: parse error |
+| `lparser.c` | `recfield`'s `cc->nh++` | inside its `TK_NAME` arm: `[expr] = value` credits neither size hint | after the `if`/`else`: both forms credit it |
+
+Three delete what 5.1 added; the 5.0 dialect lands on 5.0's own `unexpected symbol` at `prefixexp`, the
+5.1 dialect has 5.1.5's code (all in `lparser.c`, byte-read out of the 1.12.1 client's parser:
+`simpleexp 0x6fd240`, `getunopr 0x6fe0a0`, `getbinopr 0x6fe0c0`):
+
+| hunk | 5.0 dialect | 5.1 dialect |
 |---|---|---|
-| `lvm.c` | 5.0's `OP_TFORPREP` table-to-`next` substitution, folded into the top of `OP_TFORLOOP` | `for k, v in someTable do` raised "attempt to call a table value" |
-| `luaconf.h` | `LUA_COMPAT_LSTR` `1` to `2` | 5.1 kept 5.0's `[[...]]` nesting machinery and put an advisory error in front of it; two corpus addons died on "nesting of `[[...]]` is deprecated" |
-| `luaconf.h` | `LUA_QL(x)` back to 5.0's `` `x' `` from 5.1's `'x'` | every Lua error message quotes a program element, and `WoW.exe`'s own `.rdata` carries all five formats in the 5.0 spelling |
-| `lparser.c` | 5.0's compat-semicolon skip restored at the top of `constructor()`'s field loop, 5.0's own line verbatim | one extra `;` after a field separator inside a table constructor (`Back_Title = AL["Factions"];;`, which AtlasLoot writes) is accepted by the client and was a parse error here |
-| `lparser.c` | `recfield`'s `cc->nh++` moved back inside its `TK_NAME` arm, 5.0's own placement | a `[expr] = value` constructor field credits neither `OP_NEWTABLE` size hint in 5.0, so the table is born on the dummy node |
+| `simpleexp`'s `case TK_DOTS`: `...` as an expression | falls to `primaryexp`, "unexpected symbol" | `check_condition(is_vararg, "cannot use '...' outside a vararg function")`, clears `VARARG_NEEDSARG`, `OP_VARARG` |
+| `getunopr` takes the `LexState`; `case '#'` | `OPR_NOUNOPR` | `OPR_LEN` |
+| `getbinopr` takes the `LexState`; `case '%'` | `OPR_NOBINOPR` | `OPR_MOD` |
 
-Three delete what 5.1 added, all in `lparser.c`, all byte-read out of the client's own parser
-(`simpleexp 0x6fd240`, `getunopr 0x6fe0a0`, `getbinopr 0x6fe0c0`), all landing on 5.0's own
-`unexpected symbol` at `prefixexp 0x6fde40`:
+The `luaconf.h` compat macros that are not grammar are untouched upstream defaults for both
+dialects (`LUA_COMPAT_VARARG`, `_MOD`, `_GFIND`, `_OPENLIB`); where the 2.4.3 library differs
+(`string.gfind` only raises there, `mod` is `math.fmod`) benilla-ui's library layer for the dialect does it.
+`LUA_COMPAT_VARARG` is stock in both: with `...` as a 5.1 expression a vararg function that names it
+loses the `arg` table, as in 5.1; with the 5.0 dialect no function ever names it, so every vararg
+function keeps its `arg`.
 
-| hunk | why |
-|---|---|
-| `simpleexp`'s `case TK_DOTS` deleted: `...` is not an expression | the Ace2 corpus asks which interpreter it is on by compiling `return function(...) return ... end`; 170 `loadstring` sites in the corpus are that question, and 92 library files in 24 folders branch on the answer |
-| `getunopr`'s `case '#'` deleted: no length operator | the client's `getunopr` tests exactly two tokens (`-`, `not`) and its `OPR_NOUNOPR` is 2, a three-member enum; 5.0 asks a table with `table.getn` and a string with `string.len` |
-| `getbinopr`'s `case '%'` deleted: no modulo operator | the client's `getbinopr` switch is based at `'*'` (0x2A), so `%` (0x25) is below its range and reaches `OPR_NOBINOPR` = 14, a fifteen-member `BinOpr`; 5.0 spells it `math.mod` |
+`src/lib.rs` additionally differs by having Lua 5.2/5.3/5.4/5.5 stripped from the `Version` enum (with
+their source trees deleted): benilla builds 5.1 and only 5.1, and a fork that still offered the other
+four would answer a request for one with a missing directory at build time instead of a compile error.
 
-The deletions are safe because nothing the reference runs uses those constructs: a comment- and
-string-stripping scan of the 1.12 FrameXML (177 files), GlueXML, Blizzard's own addons and the
-corpus finds zero sites of all three. No chunk of benilla's own Lua may use a construct the client's
-parser rejects.
+The 5.0 dialect's deletions are safe because nothing the reference runs uses those constructs: a
+comment- and string-stripping scan of the 1.12 FrameXML (177 files), GlueXML, Blizzard's own addons and the
+corpus finds zero sites of all three. No chunk of benilla's own Lua may use a construct the 1.12.1
+client's parser rejects; benilla's own chunks are compiled before the switch to the 5.1 dialect.
 
 To verify the Lua sources against upstream at any time:
 
@@ -71,7 +87,8 @@ diff -r third_party/lua-src/lua-5.1.5 \
   ~/.cargo/registry/src/*/lua-src-550.0.0/lua-5.1.5
 ```
 
-That must print exactly the eight hunks in the tables above and nothing else.
+That must print exactly the hunks in the tables above (and the `benilla_setdialect` plumbing in
+`lstate.h`, `lstate.c`, `lapi.c`, `lua.h`, `lobject.c`, `lobject.h`) and nothing else.
 
 ## The generic-for, in detail
 
