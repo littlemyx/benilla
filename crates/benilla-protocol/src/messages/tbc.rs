@@ -83,7 +83,7 @@ pub(super) fn parse_tbc_body(
     Ok(packet)
 }
 
-/// The 2.4.3 arms of world entry, the queries and time sync (digest 12.1). Every arm is named by
+/// The 2.4.3 arms of world entry, the queries and time sync. Every arm is named by
 /// the 2.4.3 opcode; a number whose 1.12.1 meaning differs (0x67, 0x33A, 0x33B) is read by its
 /// 2.4.3 meaning, and one this table does not hold is `Other`.
 fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
