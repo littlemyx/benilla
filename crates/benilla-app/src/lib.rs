@@ -92,6 +92,7 @@ mod run_mode;
 mod screen_fade;
 mod screenshot;
 mod script_calls;
+mod session_build;
 mod shaders;
 
 mod game_tip;
@@ -322,16 +323,23 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
             {
                 Ok(build) => {
                     // A recognised build the client cannot play stops here, before any asset
-                    // source or plugin (window included) exists.
-                    if let Some(notice) = unplayable_notice(&build) {
-                        eprintln!("{notice}");
-                        return AppExit::error();
+                    // source or plugin (window included) exists, unless a dev build's
+                    // `WOW_ALLOW_UNPLAYABLE=1` lets it through.
+                    match session_build::admit(&build, session_build::allow_unplayable_env()) {
+                        session_build::Admission::Refuse(notice) => {
+                            eprintln!("{notice}");
+                            return AppExit::error();
+                        }
+                        session_build::Admission::Proceed(notice) => eprintln!("{notice}"),
+                        session_build::Admission::Play => {}
                     }
                     let [major, minor, patch] = build.version;
                     eprintln!(
                         "benilla: install is {major}.{minor}.{patch} (build {})",
                         build.build
                     );
+                    // The one source of the session's build; the net plugin reads it at build.
+                    app.insert_resource(session_build::SessionBuild(build));
                 }
                 Err(e) => eprintln!("benilla: cannot tell the install's build ({e:#})"),
             }
