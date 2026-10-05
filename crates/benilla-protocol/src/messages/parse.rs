@@ -289,6 +289,14 @@ fn parse_server_with_tail_in(
     Ok((packet, tail))
 }
 
+/// The 1.12.1 arm of `vanilla_opcode`, for a packet whose 2.4.3 bytes are the same (`tbc_same`).
+pub(super) fn read_same_as_vanilla(
+    vanilla_opcode: u16,
+    cursor: &mut &[u8],
+) -> io::Result<ServerPacket> {
+    parse_server_body(&update_object::FIELDS_5875, vanilla_opcode, cursor, &mut 0)
+}
+
 /// The opcode dispatch; `cursor` advances past what the arm read only on success.
 fn parse_server_body(
     fields: &'static update_object::FieldTable,
