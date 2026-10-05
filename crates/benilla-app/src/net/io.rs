@@ -611,6 +611,10 @@ fn run(
         session.set_active_mover(guid)?;
 
         let billing_time_rested = session.billing_time_rested();
+        crate::net::ACCOUNT_EXPANSION.store(
+            session.expansion().unwrap_or(u8::MAX),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let tutorial_flags = session.take_tutorial_flags();
         // `SMSG_ADDON_INFO` carries no names, so it is paired back against the block we sent. No
         // reply means no AddOn index space at all, carried as `None`.

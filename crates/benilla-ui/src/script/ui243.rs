@@ -17,7 +17,8 @@ pub(super) fn install(lua: &Lua) -> mlua::Result<()> {
     }
     install_cooldown(lua)?;
     install_attributes(lua)?;
-    install_text_methods(lua)
+    install_text_methods(lua)?;
+    super::ui243_verbs::install(lua)
 }
 
 /// Run `f` over a frame's Cooldown state; errors unless `this` is a live Cooldown.

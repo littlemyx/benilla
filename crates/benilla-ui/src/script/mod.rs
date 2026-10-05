@@ -133,6 +133,7 @@ mod tooltip_item;
 mod tooltip_spell;
 mod tooltip_unit;
 pub(crate) mod ui243;
+mod ui243_verbs;
 mod ui_errors;
 pub use tooltip_unit::TooltipTint;
 mod trade;

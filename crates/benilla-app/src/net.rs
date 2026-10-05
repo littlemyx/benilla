@@ -2017,6 +2017,12 @@ pub(crate) struct CharacterLoginFailedMessage {
     pub(crate) result: u8,
 }
 
+/// The expansion byte of the admitting 2.4.3 `SMSG_AUTH_RESPONSE`, `u8::MAX` while none came (1.12.1
+/// has none). The session thread writes it before the world entry; `GetAccountExpansionLevel`
+/// reads it. A process-wide cell because the protocol crate's connect event carries no field for it.
+pub(crate) static ACCOUNT_EXPANSION: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(u8::MAX);
+
 /// We entered the world.
 #[derive(Message)]
 pub(crate) struct EnteredWorldMessage {

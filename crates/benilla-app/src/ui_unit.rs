@@ -1209,6 +1209,9 @@ fn feed_units(
         entered_world.and_then(|mut r| r.read().last().map(|m| m.billing_time_rested))
     {
         script.set_billing_time_rested(entered);
+        // 1.12.1's response carries no expansion byte, and the level then stays 0.
+        let level = crate::net::ACCOUNT_EXPANSION.load(std::sync::atomic::Ordering::Relaxed);
+        script.set_account_expansion(if level == u8::MAX { 0 } else { level });
     }
     let chr = tables.classes();
     let types = tables.types(&names);

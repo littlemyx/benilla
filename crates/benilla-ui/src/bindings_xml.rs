@@ -100,6 +100,23 @@ pub fn parse(text: &str) -> Result<Vec<Binding>, Error> {
     Ok(out)
 }
 
+/// The `<ModifiedClick action="…" default="…"/>` rows of a `Bindings.xml`, in document order: the
+/// 2.4.3 client's table of click modifiers (the exe carries the element name beside
+/// `GetModifiedClick`). A row with no `action` is skipped; a missing `default` is the empty key.
+pub fn parse_modified_clicks(text: &str) -> Vec<(String, String)> {
+    let Ok(doc) = roxmltree::Document::parse(text) else {
+        return Vec::new();
+    };
+    doc.root_element()
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("ModifiedClick"))
+        .filter_map(|n| {
+            let action = attr_ci(n, "action").filter(|a| !a.is_empty())?;
+            Some((action, attr_ci(n, "default").unwrap_or_default()))
+        })
+        .collect()
+}
+
 /// Case-insensitive attribute lookup, as the reference's `GetAttribute 0x6f2cf0` folds case.
 fn attr_ci(node: roxmltree::Node, name: &str) -> Option<String> {
     node.attributes()

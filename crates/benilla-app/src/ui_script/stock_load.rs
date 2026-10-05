@@ -157,6 +157,9 @@ pub(super) struct Report {
     pub(super) rows: Vec<Row>,
     /// Failures no row owns: the load after the walk (the bindings file).
     pub(super) unattributed: Vec<String>,
+    /// Calls the secure-execution verbs answered during the load, while the taint model is pending
+    /// (always 0 on 1.12.1, which has none).
+    pub(super) secure_model_calls: std::collections::BTreeMap<&'static str, u64>,
 }
 
 impl Report {
@@ -293,7 +296,7 @@ pub(super) fn load_stock(data: &Path, tag: &str) -> Report {
     let chain = chain_of(data);
     let _laid = reference_ui::fixture::use_chain(chain);
     let mut rows = Vec::new();
-    let (_script, failures) = production_load_observed(tag, true, "", |_| {}, &mut |file, out| {
+    let (script, failures) = production_load_observed(tag, true, "", |_| {}, &mut |file, out| {
         rows.push(Row {
             diags: diagnose(file, &out),
             file: file.to_string(),
@@ -320,12 +323,17 @@ pub(super) fn load_stock(data: &Path, tag: &str) -> Report {
         build: chain.build(),
         rows,
         unattributed,
+        secure_model_calls: script.secure_model_calls(),
     };
     // `BENILLA_STOCK_LOAD_DIR` names a folder that receives the row-by-row detail of each load.
     if let Some(dir) = std::env::var_os("BENILLA_STOCK_LOAD_DIR") {
         let dir = PathBuf::from(dir);
         let _ = std::fs::write(dir.join(format!("{tag}.detail.txt")), report.detail());
         let _ = std::fs::write(dir.join(format!("{tag}.table.txt")), report.table());
+        let _ = std::fs::write(
+            dir.join(format!("{tag}.secure.txt")),
+            format!("secure-model calls {:?}\n", report.secure_model_calls),
+        );
         let blocked: String = report
             .rows_per_name(Class::MissingGlobalFunction)
             .iter()
@@ -501,6 +509,10 @@ mod tests {
         let report = load_stock(&data, "stock-112");
         assert_eq!(report.build, Some(benilla_build::VANILLA_1_12_1));
         assert_baseline("1.12.1", &report, &BASELINE_1_12_1);
+        assert!(
+            report.secure_model_calls.is_empty(),
+            "1.12.1 has no secure-execution verbs"
+        );
     }
 
     /// The install's own 2.4.3 interface, the gap the structural work closes.
@@ -513,6 +525,11 @@ mod tests {
         let report = load_stock(&data, "stock-243");
         assert_eq!(report.build, Some(benilla_build::TBC_2_4_3));
         assert_baseline("2.4.3", &report, &BASELINE_2_4_3);
+        // Taint model pending: every call the load made to `issecure`/`securecall` answered secure.
+        assert_eq!(
+            report.secure_model_calls.values().sum::<u64>(),
+            SECURE_MODEL_CALLS_2_4_3
+        );
     }
 
     /// The control. Not clean: 1.12.1's own files carry an element and attributes the loader has
@@ -540,22 +557,24 @@ mod tests {
         unattributed: 0,
     };
 
+    const SECURE_MODEL_CALLS_2_4_3: u64 = 114;
+
     const BASELINE_2_4_3: Baseline = Baseline {
         rows: 113,
-        clean: 75,
+        clean: 85,
         classes: [
             (0, 0),
-            (448, 19),
+            (0, 0),
+            (1, 1),
             (0, 0),
             (0, 0),
-            (0, 0),
-            (2, 2),
+            (4, 4),
             (0, 0),
             (5, 2),
             (14, 7),
             (1, 1),
             (44, 1),
-            (72, 72),
+            (76, 76),
             (3, 3),
         ],
         unattributed: 1,

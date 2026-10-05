@@ -224,6 +224,9 @@ pub(super) fn load_core_bindings(script: &UiScript) -> Vec<String> {
     match benilla_ui::bindings_xml::parse(&benilla_ui::source::decode(&bytes)) {
         Ok(bindings) => {
             script.register_bindings(&bindings);
+            script.register_modified_clicks(&benilla_ui::bindings_xml::parse_modified_clicks(
+                &benilla_ui::source::decode(&bytes),
+            ));
             info!(
                 "bindings: {} commands registered from {}",
                 bindings.len(),
