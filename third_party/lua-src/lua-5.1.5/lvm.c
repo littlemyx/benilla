@@ -709,8 +709,10 @@ void luaV_execute (lua_State *L, int nexeccalls) {
         ** own slot, a register-layout property of the code generator, not of this handler.
         ** 95 corpus addons contain the shape, concentrated in Dewdrop-2.0.lua (123 sites) and
         ** AceEvent-2.0.lua (113).
+        **
+        ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm.
         */
-        if (ttistable(ra)) {
+        if (luai_dialect50(L) && ttistable(ra)) {
           setobjs2s(L, ra+1, ra);
           setobj2s(L, ra, luaH_getstr(hvalue(gt(L)), luaS_new(L, "next")));
         }

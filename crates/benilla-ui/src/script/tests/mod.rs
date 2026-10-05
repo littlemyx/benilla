@@ -11,6 +11,7 @@ mod common;
 mod cooldown;
 mod create_frame_template;
 mod cvar_bindings;
+mod dialect;
 mod dispatch_bench;
 mod end_to_end;
 mod events;

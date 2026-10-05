@@ -101,7 +101,9 @@ static const char *txtToken (LexState *ls, int token) {
 
 void luaX_lexerror (LexState *ls, const char *msg, int token) {
   char buff[MAXSRC];
+  char fixed[128];
   luaO_chunkid(buff, getstr(ls->source), MAXSRC);
+  msg = luaO_qlfix(msg, fixed, sizeof(fixed), ls->L);
   msg = luaO_pushfstring(ls->L, "%s:%d: %s", buff, ls->linenumber, msg);
   if (token)
     luaO_pushfstring(ls->L, "%s near " LUA_QS, msg, txtToken(ls, token));
@@ -232,26 +234,27 @@ static void read_long_string (LexState *ls, SemInfo *seminfo, int sep) {
         luaX_lexerror(ls, (seminfo) ? "unfinished long string" :
                                    "unfinished long comment", TK_EOS);
         break;  /* to avoid warnings */
-#if defined(LUA_COMPAT_LSTR)
+      /* BENILLA: 2, the 5.0 behaviour. 1.12.1 ships Lua 5.0, where `[[ ... [[ ... ]] ... ]]`
+      ** nests; 5.1 kept the machinery and put an advisory error in front of it, on which two
+      ** corpus addons stop loading ("nesting of [[...]] is deprecated").
+      ** Now a per-state switch (formerly LUA_COMPAT_LSTR 2 in luaconf.h): the 5.0 dialect nests,
+      ** the 5.1 dialect takes LUA_COMPAT_LSTR 1's arm. */
       case '[': {
         if (skip_sep(ls) == sep) {
           save_and_next(ls);  /* skip 2nd `[' */
           cont++;
-#if LUA_COMPAT_LSTR == 1
-          if (sep == 0)
+          if (!luai_dialect50(ls->L) && sep == 0)
             luaX_lexerror(ls, "nesting of [[...]] is deprecated", '[');
-#endif
         }
         break;
       }
-#endif
       case ']': {
         if (skip_sep(ls) == sep) {
           save_and_next(ls);  /* skip 2nd `]' */
-#if defined(LUA_COMPAT_LSTR) && LUA_COMPAT_LSTR == 2
-          cont--;
-          if (sep == 0 && cont >= 0) break;
-#endif
+          if (luai_dialect50(ls->L)) {
+            cont--;
+            if (sep == 0 && cont >= 0) break;
+          }
           goto endloop;
         }
         break;

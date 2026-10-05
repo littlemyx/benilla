@@ -91,6 +91,7 @@ typedef struct global_State {
   UpVal uvhead;  /* head of double-linked list of all open upvalues */
   struct Table *mt[NUM_TAGS];  /* metatables for basic types */
   TString *tmname[TM_N];  /* array with tag-method names */
+  lu_byte dialect;  /* the Lua this state speaks: LUA_BENILLA_DIALECT_50 or _51 */
 } global_State;
 
 
@@ -128,6 +129,15 @@ struct lua_State {
 
 
 #define G(L)	(L->l_G)
+
+
+/*
+** The dialect of a state, set by benilla_setdialect before any chunk is loaded:
+** 1.12's Lua 5.0 grammar and messages (the default) or stock Lua 5.1's.
+*/
+#define LUA_BENILLA_DIALECT_50	0
+#define LUA_BENILLA_DIALECT_51	1
+#define luai_dialect50(L)	(G(L)->dialect == LUA_BENILLA_DIALECT_50)
 
 
 /*

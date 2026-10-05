@@ -448,11 +448,14 @@ static void recfield (LexState *ls, struct ConsControl *cc) {
   int rkkey;
   if (ls->t.token == TK_NAME) {
     luaY_checklimit(fs, cc->nh, MAX_INT, "items in a constructor");
-    cc->nh++;  /* benilla: 5.0's placement -- `[expr] = v` credits NEITHER size hint */
+    if (luai_dialect50(ls->L))
+      cc->nh++;  /* benilla: 5.0's placement -- `[expr] = v` credits NEITHER size hint */  /* 5.1 counts both forms, below */
     checkname(ls, &key);
   }
   else  /* ls->t.token == '[' */
     yindex(ls, &key);
+  if (!luai_dialect50(ls->L))
+    cc->nh++;  /* 5.1's placement: both field forms credit the hint */
   checknext(ls, '=');
   rkkey = luaK_exp2RK(fs, &key);
   expr(ls, &val);
@@ -519,8 +522,10 @@ static void constructor (LexState *ls, expdesc *t) {
     ** without testing EAX (a skip, not a separator check), while the loop's
     ** continuation at 0x6fd4f5/0x6fd505 does test it; of testnext 0x6fccf0's 16
     ** call sites, the only other `;' consumer is chunk 0x6fcccc, at statement
-    ** level, with no such head skip. */
-    testnext(ls, ';');  /* compatibility only */
+    ** level, with no such head skip. 
+    ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm. */
+    if (luai_dialect50(ls->L))
+      testnext(ls, ';');  /* compatibility only */
     if (ls->t.token == '}') break;
     closelistfield(fs, &cc);
     switch(ls->t.token) {
@@ -786,7 +791,20 @@ static void simpleexp (LexState *ls, expdesc *v) {
     ** It also restores 5.0's `arg' rule: the deleted line cleared
     ** VARARG_NEEDSARG for any function that mentioned `...', so with the arm
     ** gone every vararg function gets its `arg' table, which is what 5.0 does
-    ** and what the shipped 1.12 FrameXML reads. */
+    ** and what the shipped 1.12 FrameXML reads. 
+    ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm. */
+    case TK_DOTS: {  /* vararg */
+      FuncState *fs = ls->fs;
+      if (luai_dialect50(ls->L)) {
+        primaryexp(ls, v);
+        return;
+      }
+      check_condition(ls, fs->f->is_vararg,
+                      "cannot use " LUA_QL("...") " outside a vararg function");
+      fs->f->is_vararg &= ~VARARG_NEEDSARG;  /* don't need 'arg' */
+      init_exp(v, VVARARG, luaK_codeABC(fs, OP_VARARG, 0, 1, 0));
+      break;
+    }
     case '{': {  /* constructor */
       constructor(ls, v);
       return;
@@ -805,7 +823,7 @@ static void simpleexp (LexState *ls, expdesc *v) {
 }
 
 
-static UnOpr getunopr (int op) {
+static UnOpr getunopr (LexState *ls, int op) {
   switch (op) {
     case TK_NOT: return OPR_NOT;
     case '-': return OPR_MINUS;
@@ -816,13 +834,15 @@ static UnOpr getunopr (int op) {
     ** (`-') then `cmp ecx,0x10E' (TK_NOT), so its OPR_NOUNOPR is 2: a
     ** three-member enum, not 5.1's four. The metamethod-name pool at 0x871896
     ** has no __len. A `#' therefore reaches simpleexp's default arm and raises
-    ** "unexpected symbol near `#'". */
+    ** "unexpected symbol near `#'". 
+    ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm. */
+    case '#': return luai_dialect50(ls->L) ? OPR_NOUNOPR : OPR_LEN;
     default: return OPR_NOUNOPR;
   }
 }
 
 
-static BinOpr getbinopr (int op) {
+static BinOpr getbinopr (LexState *ls, int op) {
   switch (op) {
     case '+': return OPR_ADD;
     case '-': return OPR_SUB;
@@ -836,7 +856,9 @@ static BinOpr getbinopr (int op) {
     ** 0x6fe129, `mov eax,0xE' = OPR_NOBINOPR 14: a 15-member BinOpr, 5.0's, not
     ** 5.1's 16-member one with OPR_MOD. The metamethod pool has no __mod either.
     ** priority[] is indexed by the BinOpr enum, which is untouched; only the
-    ** token that reaches OPR_MOD is gone. */
+    ** token that reaches OPR_MOD is gone. 
+    ** Now a per-state switch: the 5.0 dialect takes this path, the 5.1 dialect the stock arm. */
+    case '%': return luai_dialect50(ls->L) ? OPR_NOBINOPR : OPR_MOD;
     case '^': return OPR_POW;
     case TK_CONCAT: return OPR_CONCAT;
     case TK_NE: return OPR_NE;
@@ -874,7 +896,7 @@ static BinOpr subexpr (LexState *ls, expdesc *v, unsigned int limit) {
   BinOpr op;
   UnOpr uop;
   enterlevel(ls);
-  uop = getunopr(ls->t.token);
+  uop = getunopr(ls, ls->t.token);
   if (uop != OPR_NOUNOPR) {
     luaX_next(ls);
     subexpr(ls, v, UNARY_PRIORITY);
@@ -882,7 +904,7 @@ static BinOpr subexpr (LexState *ls, expdesc *v, unsigned int limit) {
   }
   else simpleexp(ls, v);
   /* expand while operators have priorities higher than `limit' */
-  op = getbinopr(ls->t.token);
+  op = getbinopr(ls, ls->t.token);
   while (op != OPR_NOBINOPR && priority[op].left > limit) {
     expdesc v2;
     BinOpr nextop;

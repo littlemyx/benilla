@@ -1,11 +1,12 @@
 //! The Lua scripting host: the engine-free VM that runs FrameXML and addons over the frame arena,
-//! the anchor resolver and the draw order. It embeds mlua's Lua 5.1, reshaped by [`lua50`] to
-//! answer as the 1.12 client's Lua 5.0.
+//! the anchor resolver and the draw order. It embeds mlua's Lua 5.1 and speaks one of two dialects
+//! ([`ScriptDialect`]): reshaped by [`lua50`] to answer as the 1.12 client's Lua 5.0, or as the
+//! 2.4.3 client's Lua 5.1 ([`lua51`]).
 //!
 //! A frame's Lua value is a table whose `T[0]` lightuserdata (`0x701bd0`) holds a `u32` id where
 //! the reference holds the `CScriptObject*`, with an `__index` metatable (`0x7020b0`). A handler
 //! is `pcall`ed with `this`, `event` and `arg1..argN` set as globals and restored after
-//! (`0x704d50`); it also gets `(self, event, ...)` as arguments, which 1.12 does not pass.
+//! (`0x704d50`). 2.4.3 also passes `(self, event, ...)` as arguments, which 1.12 does not.
 //!
 //! The `LUAI_MAXCSTACK` discipline: Rust holds no persistent Lua handle, since each owned `Table`
 //! or `Function` takes a slot on mlua's reference thread, capped at the vendored 8000. Lua-side
@@ -25,6 +26,7 @@ mod battlefield_score;
 mod bind_confirm;
 mod binder;
 mod binding_abi;
+mod dialect;
 mod dialog_verbs;
 mod tutorial;
 mod worldmap_arrow;
@@ -84,6 +86,7 @@ mod layout_cache;
 mod loot;
 mod loot_roll;
 mod lua50;
+mod lua51;
 mod macros;
 mod mail;
 mod measure;
@@ -187,6 +190,7 @@ pub use cvars::{
     WORLD_DETAIL_STOPS,
 };
 pub use death::{DeathAction, DeathUiState};
+pub use dialect::ScriptDialect;
 pub use dressup::DressUpIntent;
 pub use duel::DuelRequest;
 pub use follow::FollowRequest;
@@ -485,9 +489,17 @@ pub fn addon_chunk_name(folder: &str, file: &str) -> String {
 }
 
 impl UiScript {
-    /// Build a fully sandboxed, stdlib- and object-model-equipped host.
+    /// Build a fully sandboxed, stdlib- and object-model-equipped host speaking 1.12.1's Lua 5.0.
     pub fn new() -> mlua::Result<UiScript> {
+        Self::with_dialect(ScriptDialect::Lua50)
+    }
+
+    /// [`UiScript::new`] for a client's Lua: its grammar, library and handler convention. The
+    /// engine's own Lua chunks compile first, in the VM's default 5.0 dialect; the switch to the
+    /// requested one is the last step, before any chunk of the interface is loaded.
+    pub fn with_dialect(dialect: ScriptDialect) -> mlua::Result<UiScript> {
         let lua = Lua::new();
+        lua.set_app_data(dialect);
         lua.set_app_data(Model::new());
         // Before anything can fire a handler and while no app-data borrow is held, as the
         // profiler's slot requires.
@@ -502,10 +514,16 @@ impl UiScript {
         chat_window::install(&lua)?;
         client::install(&lua)?;
         screenshot::install(&lua)?;
-        stdlib::sandbox(&lua)?;
+        stdlib::sandbox(&lua, dialect)?;
         // Before the stdlib layer, so its aliases bind the 5.0-shaped functions.
-        lua50::install(&lua)?;
+        match dialect {
+            ScriptDialect::Lua50 => lua50::install(&lua)?,
+            ScriptDialect::Lua51 => lua51::install(&lua)?,
+        }
         stdlib::install(&lua)?;
+        if dialect == ScriptDialect::Lua51 {
+            lua51::install_aliases(&lua)?;
+        }
         object::install(&lua)?;
         frame_enum::install(&lua)?;
         // After `object`, whose `publish_global` it reuses, and before any FrameXML loads:
@@ -589,12 +607,18 @@ impl UiScript {
         worldstate::install(&lua)?;
         net_stats::install(&lua)?;
 
+        dialect.apply(&lua)?;
         let s = UiScript {
             lua,
             instructions: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             session: NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         };
         Ok(s)
+    }
+
+    /// The dialect this host's VM speaks.
+    pub fn dialect(&self) -> ScriptDialect {
+        ScriptDialect::of(&self.lua)
     }
 
     /// The embedded VM, for the app and the loader to add their bindings over this object model.

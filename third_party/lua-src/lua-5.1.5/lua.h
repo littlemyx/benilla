@@ -243,6 +243,9 @@ LUA_API void  (lua_concat) (lua_State *L, int n);
 LUA_API lua_Alloc (lua_getallocf) (lua_State *L, void **ud);
 LUA_API void lua_setallocf (lua_State *L, lua_Alloc f, void *ud);
 
+/* benilla: choose the state's dialect (0 = 1.12's Lua 5.0, 1 = stock 5.1); before any chunk loads */
+LUA_API void (benilla_setdialect) (lua_State *L, int dialect);
+
 
 
 /* 

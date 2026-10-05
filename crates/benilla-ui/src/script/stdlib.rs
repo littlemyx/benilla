@@ -23,14 +23,18 @@ pub(super) fn lua_message(e: &mlua::Error) -> String {
 
 /// Sandbox the VM: no filesystem, OS or native reach, the reference's `debugstack`, and text-only
 /// chunk loading.
-pub(super) fn sandbox(lua: &Lua) -> mlua::Result<()> {
+pub(super) fn sandbox(lua: &Lua, dialect: super::ScriptDialect) -> mlua::Result<()> {
     let g = lua.globals();
 
-    // Set to nil explicitly, whatever mlua's safe stdlib already leaves out.
+    // Set to nil explicitly, whatever mlua's safe stdlib already leaves out. 2.4.3's base library
+    // keeps `newproxy` (its strings carry the name and `boolean or proxy expected`); 1.12.1's has none.
     for name in [
         "io", "os", "package", "require", "dofile", "loadfile", "load", "module", "newproxy",
         "debug",
     ] {
+        if name == "newproxy" && dialect == super::ScriptDialect::Lua51 {
+            continue;
+        }
         g.set(name, Value::Nil)?;
     }
 
