@@ -100,6 +100,8 @@ impl NetHandlerApp for App {
 pub(crate) fn dispatch(world: &mut World, events: Vec<SessionEvent>) {
     let handlers = world.remove_resource::<NetHandlers>().unwrap_or_default();
     for ev in events {
+        #[cfg(feature = "dev")]
+        crate::flow_census::note_event(&ev);
         handlers.run(world, ev);
     }
     world.insert_resource(handlers);

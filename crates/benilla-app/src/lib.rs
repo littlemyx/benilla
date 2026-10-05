@@ -54,6 +54,8 @@ mod dev;
 mod doodad_events;
 mod entities;
 mod fishing_line;
+#[cfg(feature = "dev")]
+mod flow_census;
 mod footprints;
 mod game_plugins;
 mod glue;
