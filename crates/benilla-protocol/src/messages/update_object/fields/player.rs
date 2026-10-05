@@ -19,6 +19,15 @@ impl ObjectFields {
             .then(|| self.get_u32(at(self.table.item_spell_charges, u16::from(i))))?
             .map(|v| v as i32)
     }
+    /// `ITEM_FIELD_OWNER` (field 6): the guid of the player the item belongs to.
+    pub fn item_owner(&self) -> Option<u64> {
+        self.get_guid(self.table.item_owner).filter(|&g| g != 0)
+    }
+    /// `ITEM_FIELD_CONTAINED` (field 8): the guid of what holds the item, the player for an
+    /// equipped or backpack item, a bag otherwise.
+    pub fn item_contained(&self) -> Option<u64> {
+        self.get_guid(self.table.item_contained).filter(|&g| g != 0)
+    }
     /// `ITEM_FIELD_FLAGS` (field 21): `0x08` wrapped, never alerts; `0x10` forces red status 4.
     pub fn item_flags(&self) -> Option<u32> {
         self.get_u32(self.table.item_flags)

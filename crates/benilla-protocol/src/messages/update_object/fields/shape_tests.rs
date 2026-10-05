@@ -653,3 +653,16 @@ fn every_byte_triple_names_a_field_of_its_group() {
         AuraSplit::Byte(ByteAt::new(FIELDS_8606.unit_bytes_2, 1), 40)
     );
 }
+
+#[test]
+fn an_items_owner_and_container_read_alike_in_both_builds() {
+    let g = 5 | (0x4000u64 << 32);
+    let pairs = [(6, 5), (7, 0x4000), (8, 5), (9, 0x4000)];
+    for f in [
+        vanilla(ObjectType::Item, &pairs),
+        tbc(ObjectType::Item, &pairs),
+    ] {
+        assert_eq!((f.item_owner(), f.item_contained()), (Some(g), Some(g)));
+    }
+    assert_eq!(tbc(ObjectType::Item, &[]).item_owner(), None);
+}

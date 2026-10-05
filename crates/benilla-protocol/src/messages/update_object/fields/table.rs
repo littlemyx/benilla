@@ -308,6 +308,10 @@ field_table! {
     item_spell_charges,
     /// `ITEM_FIELD_CREATOR`.
     item_creator,
+    /// `ITEM_FIELD_OWNER` (OBJECT_END + 0, a guid): the player holding the item.
+    item_owner,
+    /// `ITEM_FIELD_CONTAINED` (OBJECT_END + 2, a guid): the player or bag the item sits in.
+    item_contained,
     /// `ITEM_FIELD_FLAGS`.
     item_flags,
     /// `ITEM_FIELD_RANDOM_PROPERTIES_ID`.
@@ -503,6 +507,8 @@ pub const FIELDS_5875: FieldTable = FieldTable {
     object_entry: 3,
     item_spell_charges: 16,
     item_creator: 10,
+    item_owner: 6,
+    item_contained: 8,
     item_flags: 21,
     item_random_properties_id: 44,
     item_text_id: 45,
@@ -703,6 +709,8 @@ pub const FIELDS_8606: FieldTable = FieldTable {
     object_entry: 3,
     item_spell_charges: 16,
     item_creator: 10,
+    item_owner: 6,
+    item_contained: 8,
     item_flags: 21,
     item_random_properties_id: 56,
     item_text_id: 57,
