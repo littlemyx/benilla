@@ -53,6 +53,8 @@ mod tabard;
 mod taxi;
 mod tbc;
 pub use tbc::{char_create_result, read_char_enum_records};
+pub mod tbc_movement;
+pub use tbc_movement::{tbc_flag, FlightSpeed, RelayTail, TbcMovementInfo, TbcTransport};
 mod tbc_world;
 pub use tbc_world::{Contact, ExtraAura, TbcPacket};
 mod trade;

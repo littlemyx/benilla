@@ -235,7 +235,10 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
                 info: info.map(Box::new),
             }
         }
-        other => ServerPacket::Other { opcode: other },
+        other => match super::tbc_movement::read_server(other, r)? {
+            Some(packet) => packet,
+            None => ServerPacket::Other { opcode: other },
+        },
     })
 }
 

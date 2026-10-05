@@ -4,6 +4,7 @@ use crate::messages::movement::{
     TransportPose, MOVEMENT_FLAG_JUMPING, MOVEMENT_FLAG_ON_TRANSPORT,
     MOVEMENT_FLAG_SPLINE_ELEVATION, MOVEMENT_FLAG_SPLINE_ENABLED, MOVEMENT_FLAG_SWIMMING,
 };
+use crate::messages::tbc_movement::TbcMovementInfo;
 use crate::wire::{
     capacity_hint, read_f32_le, read_packed_guid, read_u32_le, read_u64_le, read_u8, Vector3d,
 };
@@ -42,12 +43,8 @@ const UPDATE_FLAG_HIGH_GUID: u8 = 0x08;
 const UPDATE_FLAG_ALL: u8 = 0x10;
 const UPDATE_FLAG_LIVING: u8 = 0x20;
 const UPDATE_FLAG_HAS_POSITION: u8 = 0x40;
-/// 2.4.3 movement-flag bits (cmangos-tbc `Object.h`, wow_messages `MovementFlags`), which differ
-/// from 1.12.1's. The jump block rides `FALLING`: cmangos-tbc reads it there where wow_messages
-/// names 0x2000; the server is the arbiter, and the airborne-at-create case is the one that tells.
-const TBC_MOVEMENT_FLAG_ON_TRANSPORT: u32 = 0x0000_0200;
-const TBC_MOVEMENT_FLAG_FALLING: u32 = 0x0000_1000;
-const TBC_MOVEMENT_FLAG_FLYING: u32 = 0x0200_0000;
+/// The 2.4.3 spline-enabled bit (cmangos-tbc `MOVEFLAG_SPLINE_ENABLED`); the other 2.4.3 bits live
+/// with the movement info's layout in `messages::tbc_movement`.
 const TBC_MOVEMENT_FLAG_SPLINE_ENABLED: u32 = 0x0800_0000;
 const SPLINE_FLAG_FINAL_POINT: u32 = 0x1_0000;
 const SPLINE_FLAG_FINAL_TARGET: u32 = 0x2_0000;
@@ -186,39 +183,15 @@ impl MovementBlock {
         let mut spline = None;
 
         if update_flag & UPDATE_FLAG_LIVING != 0 {
-            let flags = read_u32_le(r)?;
-            // The extra movement flags (`moveFlags2`); no consumer takes them.
-            let _flags2 = read_u8(r)?;
-            let _timestamp = read_u32_le(r)?;
-            let living_position = Vector3d::read(r)?;
-            let living_orientation = read_f32_le(r)?;
-            position = Some((living_position, living_orientation));
-
-            if flags & TBC_MOVEMENT_FLAG_ON_TRANSPORT != 0 {
-                transport = Some(TransportPose {
-                    guid: read_u64_le(r)?,
-                    pos: Vector3d::read(r)?,
-                    orientation: read_f32_le(r)?,
-                });
-                // The transport's clock stamp; `TransportPose` has no field for it.
-                let _transport_time = read_u32_le(r)?;
-            }
-            // Swimming or the flying bit carries a pitch.
-            let pitch = if flags & (MOVEMENT_FLAG_SWIMMING | TBC_MOVEMENT_FLAG_FLYING) != 0 {
-                read_f32_le(r)?
-            } else {
-                0.0
-            };
-            mover = Some(MoverState { flags, pitch });
-            let _fall_time = read_f32_le(r)?;
-            if flags & TBC_MOVEMENT_FLAG_FALLING != 0 {
-                for _ in 0..4 {
-                    let _ = read_f32_le(r)?; // z_speed, cos_angle, sin_angle, xy_speed
-                }
-            }
-            if flags & MOVEMENT_FLAG_SPLINE_ELEVATION != 0 {
-                let _ = read_f32_le(r)?;
-            }
+            // The same layout a relayed or sent movement info has, read by its one description.
+            let info = TbcMovementInfo::read(r)?;
+            position = Some((info.position, info.orientation));
+            transport = info.transport.map(|t| t.pose);
+            mover = Some(MoverState {
+                flags: info.flags,
+                pitch: info.pitch,
+            });
+            let flags = info.flags;
             // Walk, run, run back, swim, swim back, flight, flight back, turn rate.
             let mut s = [0.0f32; 8];
             for slot in &mut s {
