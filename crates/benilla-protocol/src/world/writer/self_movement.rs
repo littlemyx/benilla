@@ -11,6 +11,9 @@ use crate::world::movement::{
     movement_info, not_active_mover_body, spline_done_body,
 };
 
+use crate::messages::ServerPacket;
+use crate::world::{answer_for, MoverPose};
+
 use super::WorldWriter;
 
 impl WorldWriter {
@@ -203,5 +206,18 @@ impl WorldWriter {
             tbc_opcode::CMSG_MOVE_SET_CAN_FLY_ACK,
             &move_flag_ack_body(self.tbc, guid, counter, &info, Some(apply)),
         )
+    }
+
+    /// Send the answer a server order is owed, as [`WorldSession::answer_movement`](crate::WorldSession::answer_movement).
+    pub fn answer_movement(
+        &mut self,
+        packet: &ServerPacket,
+        mover: &MoverPose,
+    ) -> Result<Option<&'static str>> {
+        let Some(answer) = answer_for(self.tbc, packet, mover) else {
+            return Ok(None);
+        };
+        self.send(answer.opcode, &answer.body)?;
+        Ok(Some(answer.answers))
     }
 }

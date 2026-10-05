@@ -6,6 +6,7 @@ use benilla_srp::{NormalizedString, SESSION_KEY_LENGTH};
 
 use crate::messages::{self, opcode, Character, FieldTable, MoveMode, ServerPacket};
 
+use super::answers::{answer_for, MoverPose};
 use super::movement::{
     client_uptime_ms, force_speed_ack_body, full_info, move_flag_ack_body, movement_body,
     movement_info, spline_done_body, MOVEMENT_FLAG_FORWARD,
@@ -803,6 +804,21 @@ impl WorldSession {
     /// Ack a cross-map worldport (empty body); without it nothing on the new map is streamed.
     pub fn worldport_ack(&mut self) -> Result<()> {
         self.send(opcode::MSG_MOVE_WORLDPORT_ACK, &[])
+    }
+
+    /// Send the answer a server order is owed, if `packet` is one addressed to `mover`: a speed,
+    /// mode, can-fly, knock-back, teleport or new-world ack, or the time-sync reply. Returns what
+    /// it answered. The caller keeps `mover` current and moves it itself on a teleport.
+    pub fn answer_movement(
+        &mut self,
+        packet: &ServerPacket,
+        mover: &MoverPose,
+    ) -> Result<Option<&'static str>> {
+        let Some(answer) = answer_for(self.is_tbc(), packet, mover) else {
+            return Ok(None);
+        };
+        self.send(answer.opcode, &answer.body)?;
+        Ok(Some(answer.answers))
     }
 
     /// Ack a granted mover mode with the counter and current `pose`; nothing applies until then.
