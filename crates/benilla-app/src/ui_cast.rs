@@ -142,6 +142,16 @@ pub(crate) fn feed_cast_bar(
                 duration_ms,
             } => {
                 let args = channel_start_args(&script, spells.as_deref(), spell_id, duration_ms);
+                // What `UnitChannelInfo("player")` reads: the spell's name, the bar's text; the
+                // icon is not resolved here.
+                if let Some([_, ScriptValue::Str(label)]) = args.as_deref() {
+                    let spell = spells
+                        .as_deref()
+                        .and_then(|s| s.catalog.get(spell_id))
+                        .map(|d| d.name.clone())
+                        .unwrap_or_default();
+                    script.channel_start(&spell, label, None, i64::from(duration_ms));
+                }
                 // Traced here, where the `0x6e7550` gate is decided; other edges trace in
                 // `spell::net`.
                 if *crate::net::CAST_TRACE {
@@ -163,6 +173,11 @@ pub(crate) fn feed_cast_bar(
             // suppressed channel the stock Lua's `IsShown()` guards absorb these.
             CastBarEdge::ChannelUpdate { remaining_ms } => {
                 let over = remaining_ms == 0;
+                if over {
+                    script.channel_stop();
+                } else {
+                    script.channel_retime(i64::from(remaining_ms));
+                }
                 if *crate::net::CAST_TRACE {
                     if over {
                         info!("cast-trace: CHANNEL_STOP — update 0, the channel is over");
