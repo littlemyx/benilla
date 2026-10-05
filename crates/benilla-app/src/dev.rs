@@ -40,6 +40,9 @@ impl Plugin for DevToolsPlugin {
             app.add_plugins(crate::debug_panel::DebugPanelPlugin)
                 // Stages, Lua errors, events and packets of a live run, printed at exit.
                 .add_plugins(crate::flow_census::FlowCensusPlugin)
+                // `WOW_SESSION_RECORD=<dir>`: the play session as one file; the refusal line and
+                // the marker chord ride along.
+                .add_plugins(crate::session_record::SessionRecordPlugin)
                 .add_plugins(crate::perf::PerfPlugin)
                 // `WOW_FX_CENSUS=1`: where particle draws are addressed, and whether their view is
                 // on.

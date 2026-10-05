@@ -12,7 +12,7 @@ use crate::flow_census::{due, record_vm, stage, VmSnap, NEXT_SAMPLE_MS};
 /// each widget class's method table, and a probe frame on `RegisterAllEvents` counts every event
 /// the engine dispatches. Written for Lua 5.0 and 5.1 alike.
 const LUA_PROBE: &str = r#"
-BenillaCensus = { reg = {}, fired = {} }
+BenillaCensus = { reg = {}, fired = {}, q = {} }
 local C = BenillaCensus
 local seen = {}
 local kinds = { "Frame", "Button", "CheckButton", "EditBox", "ScrollFrame", "Slider", "StatusBar",
@@ -42,7 +42,21 @@ local probe = CreateFrame("Frame")
 probe:RegisterAllEvents()
 probe:SetScript("OnEvent", function()
   C.fired[event] = (C.fired[event] or 0) + 1
+  -- The session record's queue: the event and how many of arg1..arg9 it carried.
+  if table.getn(C.q) < 4000 then
+    local g = _G or getfenv(0)
+    local n = 0
+    for i = 1, 9 do
+      if g["arg" .. i] ~= nil then n = i end
+    end
+    table.insert(C.q, event .. "\t" .. n)
+  end
 end)
+function BenillaCensusEvents()
+  local out = table.concat(C.q, "\n")
+  C.q = {}
+  return out
+end
 function BenillaCensusDump()
   local out = {}
   for k, v in pairs(C.reg) do table.insert(out, "R\t" .. k .. "\t" .. v) end
@@ -127,6 +141,17 @@ fn sample_vm(script: &UiScript) {
         script.eval::<String>("return BenillaCensusDump and BenillaCensusDump() or ''")
     {
         (snap.registered, snap.fired) = parse_dump(&dump);
+    }
+    if crate::session_record::enabled() {
+        if let Ok(events) =
+            script.eval::<String>("return BenillaCensusEvents and BenillaCensusEvents() or ''")
+        {
+            for e in events.lines() {
+                if let Some((name, args)) = e.split_once('\t') {
+                    crate::session_record::line("event", &format!("{name} args={args}"));
+                }
+            }
+        }
     }
     if let Ok(line) = script.eval::<String>("return BenillaCensusUi and BenillaCensusUi() or ''") {
         if !line.is_empty() {
