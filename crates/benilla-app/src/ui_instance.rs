@@ -251,7 +251,27 @@ pub(crate) mod net {
             .net_handler(K::InstanceReset, on_packet)
             .net_handler(K::InstanceResetFailed, on_packet)
             .net_handler(K::UpdateLastInstance, on_packet)
-            .net_handler(K::UpdateInstanceOwnership, on_packet);
+            .net_handler(K::UpdateInstanceOwnership, on_packet)
+            .net_handler(K::DungeonDifficulty, on_dungeon_difficulty)
+            .net_handler(K::FeatureSystemStatus, on_feature_status);
+    }
+
+    /// The dungeon difficulty the server states (2.4.3), which `GetCurrentDungeonDifficulty`
+    /// answers.
+    fn on_dungeon_difficulty(In(ev): In<SessionEvent>, script: Option<NonSendMut<UiScript>>) {
+        if let (SessionEvent::DungeonDifficulty { difficulty }, Some(mut script)) = (ev, script) {
+            script.set_dungeon_difficulty(difficulty);
+        }
+    }
+
+    /// `SMSG_FEATURE_SYSTEM_STATUS` (2.4.3): the voice-chat flag `IsVoiceChatAllowedByServer`
+    /// answers.
+    fn on_feature_status(In(ev): In<SessionEvent>, script: Option<NonSendMut<UiScript>>) {
+        if let (SessionEvent::FeatureSystemStatus { voice_chat_enabled }, Some(mut script)) =
+            (ev, script)
+        {
+            script.set_voice_chat_allowed(voice_chat_enabled);
+        }
     }
 
     fn on_packet(In(ev): In<SessionEvent>, mut state: ResMut<InstanceState>) {
