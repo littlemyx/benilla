@@ -83,3 +83,35 @@ fn a_chat_type_with_no_2_4_3_number_is_an_error_on_2_4_3_only() {
     assert!(sent(&t).is_empty());
     v.send_message_chat(7, None, None, "x").unwrap();
 }
+
+#[test]
+fn the_slot_verbs_renumber_for_2_4_3_and_refuse_a_slot_it_has_no_number_for() {
+    let (mut t, _a) = writer(true);
+    let (mut v, _b) = writer(false);
+    // Bank-bag, buyback and keyring slots exist on both; the bytes keep their length.
+    for w in [&mut t, &mut v] {
+        w.swap_inv_item(63, 81).unwrap();
+        w.destroy_item(255, 69, 1).unwrap();
+        w.buyback_item(5, 70).unwrap();
+        w.repair_item(5, 0).unwrap();
+    }
+    assert_eq!(
+        sent(&t),
+        [
+            (opcode::CMSG_SWAP_INV_ITEM, 2),
+            (opcode::CMSG_DESTROYITEM, 6),
+            (opcode::CMSG_BUYBACK_ITEM, 12),
+            (opcode::CMSG_REPAIR_ITEM, 17),
+        ]
+    );
+    assert_eq!(sent(&v)[3], (opcode::CMSG_REPAIR_ITEM, 16));
+    // A slot past the keyring's 96 is an error on 2.4.3 and sent as before on 1.12.1.
+    assert!(t
+        .swap_inv_item(100, 23)
+        .unwrap_err()
+        .to_string()
+        .contains("no 2.4.3 number"));
+    assert!(t.buyback_item(5, 300).is_err());
+    assert_eq!(sent(&t).len(), 4);
+    v.swap_inv_item(100, 23).unwrap();
+}

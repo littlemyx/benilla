@@ -53,6 +53,12 @@ impl WorldWriter {
     /// `CMSG_BUYBACK_ITEM`: `slot` is the absolute player-array buyback slot, 69 to 80; a refusal
     /// is `SMSG_BUY_FAILED`.
     pub fn buyback_item(&mut self, vendor_guid: u64, slot: u32) -> Result<()> {
+        // 2.4.3 numbers the buyback slots 74 to 85.
+        let slot = match (self.tbc, u8::try_from(slot)) {
+            (false, _) => slot,
+            (true, Ok(s)) => u32::from(self.slot(s)?),
+            (true, Err(_)) => anyhow::bail!("inventory slot {slot} has no 2.4.3 number"),
+        };
         self.send(
             opcode::CMSG_BUYBACK_ITEM,
             &messages::buyback_item(vendor_guid, slot),
@@ -61,9 +67,11 @@ impl WorldWriter {
 
     /// `CMSG_REPAIR_ITEM`: `item_guid` 0 repairs everything; there is no reply packet.
     pub fn repair_item(&mut self, vendor_guid: u64, item_guid: u64) -> Result<()> {
-        self.send(
-            opcode::CMSG_REPAIR_ITEM,
-            &messages::repair_item(vendor_guid, item_guid),
-        )
+        let body = if self.tbc {
+            messages::repair_item_tbc(vendor_guid, item_guid)
+        } else {
+            messages::repair_item(vendor_guid, item_guid)
+        };
+        self.send(opcode::CMSG_REPAIR_ITEM, &body)
     }
 }

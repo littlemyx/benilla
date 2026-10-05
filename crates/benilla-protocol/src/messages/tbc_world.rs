@@ -152,6 +152,12 @@ pub enum TbcPacket {
     },
     /// `MSG_CHANNEL_UPDATE`: `caster`'s channel has `remaining_ms` left (0 ends it).
     ChannelUpdate { caster: u64, remaining_ms: u32 },
+    /// `SMSG_INVENTORY_CHANGE_FAILURE` with an `InventoryResult` 1.12.1 lacks (67 and up).
+    InventoryChangeFailed {
+        result: u8,
+        item_guid: u64,
+        bag_slot: u8,
+    },
 }
 
 impl TbcPacket {
@@ -213,6 +219,7 @@ impl TbcPacket {
             TbcPacket::CastFailed { .. } => "SMSG_CAST_RESULT",
             TbcPacket::ChannelStart { .. } => "MSG_CHANNEL_START",
             TbcPacket::ChannelUpdate { .. } => "MSG_CHANNEL_UPDATE",
+            TbcPacket::InventoryChangeFailed { .. } => "SMSG_INVENTORY_CHANGE_FAILURE",
         }
     }
 }

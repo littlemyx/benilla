@@ -37,6 +37,7 @@ impl WorldWriter {
     /// `CMSG_OPEN_ITEM`: open a clam, lockbox or gift; the loot window comes back on the item's
     /// own guid.
     pub fn open_item(&mut self, bag_index: u8, slot: u8) -> Result<()> {
+        let (bag_index, slot) = (self.slot(bag_index)?, self.slot(slot)?);
         self.send(
             opcode::CMSG_OPEN_ITEM,
             &messages::open_item(bag_index, slot),
@@ -52,6 +53,8 @@ impl WorldWriter {
         item_bag: u8,
         item_slot: u8,
     ) -> Result<()> {
+        let (gift_bag, gift_slot) = (self.slot(gift_bag)?, self.slot(gift_slot)?);
+        let (item_bag, item_slot) = (self.slot(item_bag)?, self.slot(item_slot)?);
         self.send(
             opcode::CMSG_WRAP_ITEM,
             &messages::wrap_item(gift_bag, gift_slot, item_bag, item_slot),
@@ -60,6 +63,7 @@ impl WorldWriter {
 
     /// `CMSG_AUTOEQUIP_ITEM`: equip a bag item; the server picks the slot.
     pub fn auto_equip_item(&mut self, bag_index: u8, slot: u8) -> Result<()> {
+        let (bag_index, slot) = (self.slot(bag_index)?, self.slot(slot)?);
         self.send(
             opcode::CMSG_AUTOEQUIP_ITEM,
             &messages::auto_equip_item(bag_index, slot),
@@ -74,6 +78,7 @@ impl WorldWriter {
 
     /// `CMSG_SWAP_INV_ITEM`: two slots of the player's own grid; an empty destination is a move.
     pub fn swap_inv_item(&mut self, src_slot: u8, dst_slot: u8) -> Result<()> {
+        let (src_slot, dst_slot) = (self.slot(src_slot)?, self.slot(dst_slot)?);
         self.send(
             opcode::CMSG_SWAP_INV_ITEM,
             &messages::swap_inv_item(src_slot, dst_slot),
@@ -88,6 +93,8 @@ impl WorldWriter {
         src_bag: u8,
         src_slot: u8,
     ) -> Result<()> {
+        let (dst_bag, dst_slot) = (self.slot(dst_bag)?, self.slot(dst_slot)?);
+        let (src_bag, src_slot) = (self.slot(src_bag)?, self.slot(src_slot)?);
         self.send(
             opcode::CMSG_SWAP_ITEM,
             &messages::swap_item(dst_bag, dst_slot, src_bag, src_slot),
@@ -97,6 +104,11 @@ impl WorldWriter {
     /// `CMSG_AUTOSTORE_BAG_ITEM`: into `dst_bag` at a slot the server picks; the wire of
     /// `PutItemInBackpack` and of `PutItemInBag`'s auto-store.
     pub fn auto_store_bag_item(&mut self, src_bag: u8, src_slot: u8, dst_bag: u8) -> Result<()> {
+        let (src_bag, src_slot, dst_bag) = (
+            self.slot(src_bag)?,
+            self.slot(src_slot)?,
+            self.slot(dst_bag)?,
+        );
         self.send(
             opcode::CMSG_AUTOSTORE_BAG_ITEM,
             &messages::auto_store_bag_item(src_bag, src_slot, dst_bag),
@@ -112,6 +124,8 @@ impl WorldWriter {
         dst_slot: u8,
         count: u8,
     ) -> Result<()> {
+        let (src_bag, src_slot) = (self.slot(src_bag)?, self.slot(src_slot)?);
+        let (dst_bag, dst_slot) = (self.slot(dst_bag)?, self.slot(dst_slot)?);
         self.send(
             opcode::CMSG_SPLIT_ITEM,
             &messages::split_item(src_bag, src_slot, dst_bag, dst_slot, count),
@@ -120,6 +134,7 @@ impl WorldWriter {
 
     /// `CMSG_DESTROYITEM`: `count` 0 destroys the whole stack; there is no reply packet.
     pub fn destroy_item(&mut self, bag: u8, slot: u8, count: u8) -> Result<()> {
+        let (bag, slot) = (self.slot(bag)?, self.slot(slot)?);
         self.send(
             opcode::CMSG_DESTROYITEM,
             &messages::destroy_item(bag, slot, count),

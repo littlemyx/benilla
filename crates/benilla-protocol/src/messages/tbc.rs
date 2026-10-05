@@ -225,6 +225,11 @@ fn parse_tbc_entry_body(op: u16, r: &mut &[u8]) -> io::Result<ServerPacket> {
         }
         t::MSG_CHANNEL_START => ServerPacket::Tbc(super::tbc_spells::read_channel_start(r)?),
         t::MSG_CHANNEL_UPDATE => ServerPacket::Tbc(super::tbc_spells::read_channel_update(r)?),
+        // --- Items and inventory (`tbc_items`) ---------------------------------------------
+        t::SMSG_ITEM_PUSH_RESULT => {
+            ServerPacket::ItemPushResult(super::tbc_items::read_item_push_result(r)?)
+        }
+        t::SMSG_INVENTORY_CHANGE_FAILURE => super::tbc_items::read_inventory_change_failure(r)?,
         // --- Combat readout: values or bytes that differ from 1.12.1 (`tbc_combat`) -----------
         t::SMSG_ATTACKERSTATEUPDATE => {
             ServerPacket::AttackerState(super::attack::read_attacker_state_in(r, true)?)

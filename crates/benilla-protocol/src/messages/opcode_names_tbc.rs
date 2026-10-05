@@ -106,6 +106,8 @@ pub mod tbc_opcode {
     pub const MSG_MOVE_HOVER: u16 = 0x00f7;
     pub const SMSG_TRIGGER_CINEMATIC: u16 = 0x00fa;
     pub const SMSG_TUTORIAL_FLAGS: u16 = 0x00fd;
+    pub const CMSG_SWAP_INV_ITEM: u16 = 0x010d;
+    pub const SMSG_INVENTORY_CHANGE_FAILURE: u16 = 0x0112;
     pub const SMSG_INITIALIZE_FACTIONS: u16 = 0x0122;
     pub const SMSG_SET_PROFICIENCY: u16 = 0x0127;
     pub const SMSG_ACTION_BUTTONS: u16 = 0x0129;
@@ -123,6 +125,7 @@ pub mod tbc_opcode {
     pub const SMSG_SPELLHEALLOG: u16 = 0x0150;
     pub const SMSG_BINDPOINTUPDATE: u16 = 0x0155;
     pub const SMSG_CLIENT_CONTROL_UPDATE: u16 = 0x0159;
+    pub const SMSG_ITEM_PUSH_RESULT: u16 = 0x0166;
     pub const CMSG_NPC_TEXT_QUERY: u16 = 0x017f;
     pub const SMSG_NPC_TEXT_UPDATE: u16 = 0x0180;
     pub const SMSG_QUESTGIVER_STATUS: u16 = 0x0183;
@@ -150,6 +153,8 @@ pub mod tbc_opcode {
     pub const SMSG_SPELLDISPELLOG: u16 = 0x027b;
     pub const SMSG_SERVER_MESSAGE: u16 = 0x0291;
     pub const SMSG_MEETINGSTONE_LEAVE: u16 = 0x0293;
+    pub const CMSG_LOOT_ROLL: u16 = 0x02a0;
+    pub const CMSG_REPAIR_ITEM: u16 = 0x02a8;
     pub const SMSG_MONSTER_MOVE_TRANSPORT: u16 = 0x02ae;
     pub const MSG_MOVE_FEATHER_FALL: u16 = 0x02b0;
     pub const MSG_MOVE_WATER_WALK: u16 = 0x02b1;
@@ -340,6 +345,8 @@ static NAMES: &[(u16, &str)] = &[
     (0x00fd, "SMSG_TUTORIAL_FLAGS"),
     (0x0103, "SMSG_EMOTE"),
     (0x0105, "SMSG_TEXT_EMOTE"),
+    (0x010d, "CMSG_SWAP_INV_ITEM"),
+    (0x0112, "SMSG_INVENTORY_CHANGE_FAILURE"),
     (0x0122, "SMSG_INITIALIZE_FACTIONS"),
     (0x0123, "SMSG_SET_FACTION_VISIBLE"),
     (0x0127, "SMSG_SET_PROFICIENCY"),
@@ -376,6 +383,7 @@ static NAMES: &[(u16, &str)] = &[
     (0x0162, "SMSG_LOOT_REMOVED"),
     (0x0163, "SMSG_LOOT_MONEY_NOTIFY"),
     (0x0165, "SMSG_LOOT_CLEAR_MONEY"),
+    (0x0166, "SMSG_ITEM_PUSH_RESULT"),
     (0x0167, "SMSG_DUEL_REQUESTED"),
     (0x0168, "SMSG_DUEL_OUTOFBOUNDS"),
     (0x0169, "SMSG_DUEL_INBOUNDS"),
@@ -473,8 +481,10 @@ static NAMES: &[(u16, &str)] = &[
     (0x029c, "SMSG_CANCEL_AUTO_REPEAT"),
     (0x029d, "SMSG_STANDSTATE_UPDATE"),
     (0x029e, "SMSG_LOOT_ALL_PASSED"),
+    (0x02a0, "CMSG_LOOT_ROLL"),
     (0x02a1, "SMSG_LOOT_START_ROLL"),
     (0x02a4, "SMSG_LOOT_MASTER_LIST"),
+    (0x02a8, "CMSG_REPAIR_ITEM"),
     (0x02a9, "SMSG_CHAT_PLAYER_NOT_FOUND"),
     (0x02aa, "MSG_TALENT_WIPE_CONFIRM"),
     (0x02ab, "SMSG_SUMMON_REQUEST"),
