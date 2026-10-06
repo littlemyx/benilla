@@ -31,8 +31,10 @@ const FIRST: u32 = 500;
 /// After [`FIRST`], one row in this many.
 const EVERY: u32 = 100;
 /// Rows of a high-rate shim kind written in full.
+#[cfg(any(target_os = "ios", test))]
 const FIRST_HIGH_RATE: u32 = 20;
 /// After [`FIRST_HIGH_RATE`], one row in this many.
+#[cfg(any(target_os = "ios", test))]
 const EVERY_HIGH_RATE: u32 = 200;
 /// How long a button held without a release is called stuck, once per press.
 const STUCK: Duration = Duration::from_secs(3);
