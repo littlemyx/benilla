@@ -163,6 +163,20 @@ impl Default for Cvars {
 }
 
 impl Cvars {
+    /// Registers a build's additional rows after the common table, each at its default.
+    fn add_build_rows(&mut self, rows: &[table::Registered]) {
+        for r in rows {
+            self.insert_row(Row {
+                name: r.name.to_string(),
+                default: r.default.to_string(),
+                value: r.default.to_string(),
+                pending: None,
+                latched: r.latched,
+                addon: false,
+            });
+        }
+    }
+
     fn insert_row(&mut self, row: Row) {
         let key = row.name.to_ascii_lowercase();
         debug_assert!(
@@ -519,23 +533,29 @@ pub(crate) struct CvarPlugin;
 
 impl Plugin for CvarPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Cvars>()
-            .add_systems(
-                Startup,
-                (load_config, publish_filter_policy)
-                    .chain()
-                    .in_set(CvarLoad),
-            )
-            // After the tick, so a `SetCVar` from this frame reaches the registry and its observers
-            // before the frame's drains; `video::drain_restart_gx` orders after this so the commit
-            // finds the stage.
-            .add_systems(Update, sync_cvars.after(crate::ui_script::UiInput))
-            // In `Last`, after every `Update` writer of the registry, so the save reads the frame's
-            // settled state; before the exit flush, which finds it clean on a quiet exit frame.
-            .add_systems(
-                Last,
-                save_config_when_quiet.before(crate::shutdown::OnAppExit),
-            );
+        app.init_resource::<Cvars>();
+        // The build's own rows: the 2.4.3 client registers CVars 1.12.1 has no name for.
+        if crate::session_build::of_app(app).0.expansion == benilla_build::Expansion::Tbc {
+            app.world_mut()
+                .resource_mut::<Cvars>()
+                .add_build_rows(table::REGISTERED_243);
+        }
+        app.add_systems(
+            Startup,
+            (load_config, publish_filter_policy)
+                .chain()
+                .in_set(CvarLoad),
+        )
+        // After the tick, so a `SetCVar` from this frame reaches the registry and its observers
+        // before the frame's drains; `video::drain_restart_gx` orders after this so the commit
+        // finds the stage.
+        .add_systems(Update, sync_cvars.after(crate::ui_script::UiInput))
+        // In `Last`, after every `Update` writer of the registry, so the save reads the frame's
+        // settled state; before the exit flush, which finds it clean on a quiet exit frame.
+        .add_systems(
+            Last,
+            save_config_when_quiet.before(crate::shutdown::OnAppExit),
+        );
         // The exit flush runs on the exit edge: the close button's `AppExit` is written in
         // `PostUpdate`, so an `Update` save never sees it.
         crate::shutdown::on_app_exit(app, save_config_on_exit.into_configs());
@@ -2325,6 +2345,33 @@ mod tests {
 
     /// 2.4.3's additions are the reference's own registered strings, share no name with the 1.12.1
     /// table, and reach only the 5.1 dialect's VM.
+    #[test]
+    fn the_2_4_3_build_registers_its_own_rows_beside_the_common_table() {
+        let mut vanilla = App::new();
+        vanilla.add_plugins(CvarPlugin);
+        let v = vanilla.world().resource::<Cvars>();
+        assert_eq!(
+            v.default_of("autoLootCorpse"),
+            None,
+            "1.12.1 has no such CVar"
+        );
+
+        let mut tbc = App::new();
+        tbc.insert_resource(crate::session_build::SessionBuild(benilla_build::TBC_2_4_3))
+            .add_plugins(CvarPlugin);
+        let t = tbc.world().resource::<Cvars>();
+        assert_eq!(t.default_of("autoLootCorpse"), Some("0"));
+        assert_eq!(t.default_of("CombatHealing"), Some("1"));
+        assert!(
+            t.vm_seed().iter().any(|r| r.name == "timeMgrAlarmEnabled"),
+            "the VM is seeded with the build's rows, so the stock options panels find them"
+        );
+        assert_eq!(
+            t.vm_seed().len(),
+            v.vm_seed().len() + table::REGISTERED_243.len()
+        );
+    }
+
     #[test]
     fn the_2_4_3_rows_are_the_references_and_reach_only_its_dialect() {
         use benilla_ui::script::ScriptDialect;
