@@ -43,6 +43,8 @@ impl Plugin for DevToolsPlugin {
                 // `WOW_SESSION_RECORD=<dir>`: the play session as one file; the refusal line and
                 // the marker chord ride along.
                 .add_plugins(crate::session_record::SessionRecordPlugin)
+                // The record's input rows: every button and key edge with the layer that took it.
+                .add_plugins(crate::input_record::InputRecordPlugin)
                 .add_plugins(crate::perf::PerfPlugin)
                 // `WOW_FX_CENSUS=1`: where particle draws are addressed, and whether their view is
                 // on.

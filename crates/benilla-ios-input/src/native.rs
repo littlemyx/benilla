@@ -421,3 +421,16 @@ pub fn ui_pasteboard_write(text: &str) {
     // SAFETY: plain setter; the caller is on the main thread.
     unsafe { UIPasteboard::generalPasteboard().setString(Some(&NSString::from_str(text))) };
 }
+
+/// The main screen's `maximumFramesPerSecond`: 120 on a ProMotion iPad, else 60. Main thread only.
+pub fn display_max_fps() -> Option<i64> {
+    let class = AnyClass::get(c"UIScreen")?;
+    // SAFETY: `mainScreen` is a class method returning an object (or nil) and
+    // `maximumFramesPerSecond` an `NSInteger`; the caller is on the main thread.
+    unsafe {
+        let screen: Option<Retained<AnyObject>> = msg_send![class, mainScreen];
+        let screen = screen?;
+        let n: isize = msg_send![&*screen, maximumFramesPerSecond];
+        Some(n as i64)
+    }
+}

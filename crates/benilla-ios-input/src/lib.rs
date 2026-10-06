@@ -48,9 +48,38 @@ pub use audio::activate_playback_session;
 #[cfg(target_os = "ios")]
 mod native;
 #[cfg(target_os = "ios")]
-pub use native::{ui_pasteboard_read, ui_pasteboard_write};
+pub use native::{display_max_fps, ui_pasteboard_read, ui_pasteboard_write};
 
 pub use keycodes::{key_code, logical_text};
+
+/// The notes queue is on: the session record wants the shim's events ([`enable_notes`]).
+static NOTES_ON: AtomicBool = AtomicBool::new(false);
+/// What the shim saw, `(kind, text)`, for the session record to drain each frame.
+static NOTES: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
+/// The most notes held between two drains; the rest are dropped, never the app's memory.
+const NOTES_MAX: usize = 4096;
+
+/// Starts queueing the shim's events as notes ([`take_notes`]); off until asked, so a run without a
+/// session record queues nothing.
+pub fn enable_notes() {
+    NOTES_ON.store(true, Ordering::Relaxed);
+}
+
+/// The notes queued since the last call, oldest first.
+pub fn take_notes() -> Vec<(&'static str, String)> {
+    std::mem::take(&mut *NOTES.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Queues one note when the queue is on; `text` is built only then.
+fn note(kind: &'static str, text: impl FnOnce() -> String) {
+    if !NOTES_ON.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut q = NOTES.lock().unwrap_or_else(|e| e.into_inner());
+    if q.len() < NOTES_MAX {
+        q.push((kind, text()));
+    }
+}
 
 /// One device event, as GameController reported it, before it becomes a Bevy message.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -197,6 +226,7 @@ impl InputState {
         };
         if self.logged.insert(kind) {
             info!("ios input: first {kind}");
+            note("first", || kind.to_string());
         }
     }
 }
@@ -220,6 +250,7 @@ impl PointerLock {
     pub fn set_locked(&mut self, locked: bool) {
         if self.locked != locked {
             info!("ios pointer lock: {locked}");
+            note("lock", || locked.to_string());
         }
         self.locked = locked;
         PREFERS_LOCKED.store(locked, Ordering::Relaxed);
@@ -257,6 +288,19 @@ impl Plugin for IosInputPlugin {
         }
         #[cfg(not(target_os = "ios"))]
         let _ = (app, InputSystems);
+    }
+}
+
+/// The note kind of a raw event; the session record budgets each kind on its own.
+fn raw_kind(raw: &Raw) -> &'static str {
+    match raw {
+        Raw::Key { .. } => "key",
+        Raw::Move { .. } => "move",
+        Raw::Button { .. } => "button",
+        Raw::Scroll { .. } => "scroll",
+        Raw::Hover { .. } => "hover",
+        Raw::HoverEnd => "hoverend",
+        Raw::Reset => "reset",
     }
 }
 
@@ -306,9 +350,20 @@ pub fn drain(
     while let Ok(raw) = rx.try_recv() {
         state.first(&raw);
         state.trace(TraceEv::Raw(raw), lock.is_locked());
+        note(raw_kind(&raw), || {
+            format!(
+                "{raw:?} held={:?} cursor={:?} locked={}",
+                state.held_buttons,
+                state.cursor,
+                lock.is_locked()
+            )
+        });
         match raw {
             Raw::Key { hid, pressed } => {
                 let Some(key_code) = key_code(hid) else {
+                    note("key-unmapped", || {
+                        format!("hid={hid:#04x} pressed={pressed}")
+                    });
                     continue;
                 };
                 // Auto-repeat is not reported by GameController; a held key arrives once.
@@ -379,6 +434,10 @@ pub fn drain(
                         },
                         window,
                     });
+                } else {
+                    note("button-dup", || {
+                        format!("{button:?} pressed={pressed} dropped: no edge")
+                    });
                 }
             }
             Raw::Scroll { dx, dy } => {
@@ -428,7 +487,23 @@ pub fn drain(
             },
             lock.is_locked(),
         );
-        if state.held_buttons.is_empty() || lock.is_locked() {
+        let applied = !state.held_buttons.is_empty() && !lock.is_locked();
+        note(
+            match touch.phase {
+                TouchPhase::Moved => "touch-move",
+                _ => "touch",
+            },
+            || {
+                format!(
+                    "{:?} pos={:?} applied={applied} held={:?} locked={}",
+                    touch.phase,
+                    touch.position,
+                    state.held_buttons,
+                    lock.is_locked()
+                )
+            },
+        );
+        if !applied {
             continue;
         }
         if matches!(touch.phase, TouchPhase::Started | TouchPhase::Moved) {
@@ -687,6 +762,88 @@ mod tests {
         .unwrap();
         app.update();
         assert_eq!(app.world().resource::<InputState>().trace_remaining, 0);
+    }
+
+    /// The shim in front of Bevy's own input systems, as the plugin orders them.
+    fn app_with_input() -> (App, Sender<Raw>) {
+        let (mut app, tx) = app();
+        app.add_plugins(bevy::input::InputPlugin);
+        app.world_mut().remove_resource::<Messages<TouchInput>>();
+        app.add_message::<TouchInput>();
+        app.add_systems(PreUpdate, drain.before(InputSystems));
+        (app, tx)
+    }
+
+    #[test]
+    fn a_press_and_a_release_in_one_drain_are_both_seen_by_the_button_plane() {
+        let (mut app, tx) = app_with_input();
+        tx.send(Raw::Hover { x: 120.0, y: 500.0 }).unwrap();
+        for pressed in [true, false] {
+            tx.send(Raw::Button {
+                button: MouseButton::Left,
+                pressed,
+            })
+            .unwrap();
+        }
+        app.update();
+        let b = app.world().resource::<ButtonInput<MouseButton>>();
+        assert!(b.just_pressed(MouseButton::Left) && b.just_released(MouseButton::Left));
+        assert!(!b.pressed(MouseButton::Left));
+        // The pointer stayed where the hover put it, in logical points.
+        let mut q = app.world_mut().query::<&Window>();
+        let w = q.single(app.world()).unwrap();
+        assert_eq!(w.cursor_position(), Some(Vec2::new(120.0, 500.0)));
+    }
+
+    #[test]
+    fn a_release_without_a_press_and_a_second_press_make_no_edge() {
+        let (mut app, tx) = app_with_input();
+        tx.send(Raw::Button {
+            button: MouseButton::Left,
+            pressed: false,
+        })
+        .unwrap();
+        app.update();
+        assert!(read::<MouseButtonInput>(&app).is_empty());
+        for _ in 0..2 {
+            tx.send(Raw::Button {
+                button: MouseButton::Left,
+                pressed: true,
+            })
+            .unwrap();
+        }
+        app.update();
+        assert_eq!(read::<MouseButtonInput>(&app).len(), 1);
+    }
+
+    #[test]
+    fn a_movement_key_reaches_the_key_plane_and_the_notes_name_the_events() {
+        let (mut app, tx) = app_with_input();
+        enable_notes();
+        let _ = take_notes();
+        tx.send(Raw::Key {
+            hid: 0x1A,
+            pressed: true,
+        })
+        .unwrap();
+        tx.send(Raw::Button {
+            button: MouseButton::Left,
+            pressed: true,
+        })
+        .unwrap();
+        app.update();
+        assert!(app
+            .world()
+            .resource::<ButtonInput<KeyCode>>()
+            .pressed(KeyCode::KeyW));
+        let notes = take_notes();
+        let kinds: Vec<_> = notes.iter().map(|(k, _)| *k).collect();
+        assert!(
+            kinds.contains(&"key") && kinds.contains(&"button"),
+            "{kinds:?}"
+        );
+        assert!(kinds.contains(&"first"), "{kinds:?}");
+        NOTES_ON.store(false, Ordering::Relaxed);
     }
 
     #[test]

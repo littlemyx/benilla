@@ -106,6 +106,17 @@ enum Held {
 }
 
 impl BindingsState {
+    /// The held and just-pressed inputs and the latch count, for the session record.
+    #[allow(dead_code)] // read by the dev-only session record
+    pub(crate) fn summary(&self) -> String {
+        format!(
+            "held={:?} just={:?} latched={}",
+            self.held,
+            self.just,
+            self.latched.len()
+        )
+    }
+
     /// Is a held bit set right now (the reference's `[InputControl+4]`)?
     pub(crate) fn pressed(&self, i: Input) -> bool {
         self.held.contains(&i)

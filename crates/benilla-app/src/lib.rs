@@ -63,6 +63,8 @@ mod go_anim;
 mod go_templates;
 #[cfg(feature = "dev")]
 mod hover_log;
+#[cfg(feature = "dev")]
+mod input_record;
 mod items;
 mod loading_screen;
 mod local_state;
@@ -355,6 +357,13 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
             "benilla: no WoW install found — looked in {:?}",
             benilla_formats::candidates()
         ),
+    }
+
+    // The iOS client log lands in the build's own `Logs` folder, which the log plugin (built below,
+    // in benilla-world) cannot name: `BENILLA_HOME/<build>/Logs`, as every other file of the build.
+    #[cfg(target_os = "ios")]
+    if let Some(dir) = local_state::logs_dir() {
+        std::env::set_var("BENILLA_LOG_DIR", dir);
     }
 
     // No `game://` source: the five UI shaders are compiled in by `crate::shaders`

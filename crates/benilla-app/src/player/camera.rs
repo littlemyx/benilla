@@ -594,6 +594,19 @@ impl CameraControl {
     }
 }
 
+#[allow(dead_code)] // read by the dev-only session record
+impl CameraControl {
+    /// The look session for the session record: `Left`, `Right` or `none`, and whether the OS
+    /// cursor is handed back (`released`) while it runs.
+    pub(crate) fn look_label(&self) -> String {
+        match self.look {
+            Some(b) if self.cursor_released => format!("{b:?}+released"),
+            Some(b) => format!("{b:?}"),
+            None => "none".into(),
+        }
+    }
+}
+
 /// The mouse-look mode: `Right` turns the character with the camera, `Left` orbits around it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum LookButton {
