@@ -106,23 +106,6 @@ fn layer(
     }
 }
 
-/// The frame under `(x, y)` in UI units: its name, else its nearest named ancestor's with `^`, else
-/// `#anon`; the world frame is `WorldFrame`'s own name.
-fn frame_under(script: &benilla_ui::script::UiScript, x: f32, y: f32) -> Option<String> {
-    let mut frame = script.hit_test_frame(x, y)?;
-    let mut hops = 0;
-    loop {
-        if let Some(name) = script.frame_name(frame) {
-            return Some(if hops == 0 { name } else { format!("^{name}") });
-        }
-        hops += 1;
-        match script.frame_parent(frame) {
-            Some(parent) if hops < 8 => frame = parent,
-            _ => return Some("#anon".into()),
-        }
-    }
-}
-
 /// What the world pick held, a unit's guid or an object's.
 fn pick_text(pick: &crate::target::PressPick) -> String {
     match (pick.hovered.guid, pick.object.guid) {
@@ -150,7 +133,7 @@ fn player_text(player: &crate::player::Player) -> String {
 fn record_buttons(
     mut edges: MessageReader<MouseButtonInput>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    script: Option<NonSend<benilla_ui::script::UiScript>>,
+    probe: crate::ui_script::PointerFrameProbe,
     ui_scale: Res<crate::ui_script::UiScaleCvar>,
     hover: Res<crate::ui_script::PlayerUiHover>,
     consumed: Res<crate::ui_script::PlayerUiClickConsumed>,
@@ -176,10 +159,7 @@ fn record_buttons(
         let s = crate::ui_script::seam_scale(window.height(), ui_scale.0);
         Vec2::new(c.x / s, (window.height() - c.y) / s)
     });
-    let frame = match (script.as_deref(), ui) {
-        (Some(script), Some(p)) => frame_under(script, p.x, p.y),
-        _ => None,
-    };
+    let frame = ui.and_then(|p| probe.name_at(p.x, p.y));
     // The world frame is hit-tested like any frame but is the world's, not the interface's.
     let ui_frame = frame.as_deref().filter(|n| *n != "WorldFrame");
     let look = rig.look_label();

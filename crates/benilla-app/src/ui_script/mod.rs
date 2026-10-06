@@ -33,6 +33,7 @@ mod session;
 /// The feed gate: a UI feed's input-side early-out, audited by `WOW_FEED_GATE_CHECK=1`.
 pub(crate) mod gate;
 
+pub(crate) use input::PointerFrameProbe;
 pub(crate) use session::VmMemo;
 
 // Not test-only: the addon harness loads the whole shipped interface under each addon.

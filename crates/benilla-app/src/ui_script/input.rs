@@ -449,3 +449,35 @@ mod tests {
         assert_eq!(calls(&s), (2, 0.0), "and the other way is a notch down");
     }
 }
+
+/// The interface's frame under a point, for the session record: a system param, so the record's
+/// module never names the VM.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct PointerFrameProbe<'w> {
+    script: Option<NonSend<'w, UiScript>>,
+}
+
+impl PointerFrameProbe<'_> {
+    /// The name of the frame at `(x, y)` in UI units, see [`frame_under`].
+    #[allow(dead_code)] // read by the dev-only session record
+    pub(crate) fn name_at(&self, x: f32, y: f32) -> Option<String> {
+        frame_under(self.script.as_deref()?, x, y)
+    }
+}
+
+/// The frame under `(x, y)` in UI units: its name, else its nearest named ancestor's with `^`, else
+/// `#anon`; the world frame is `WorldFrame`'s own name.
+fn frame_under(script: &UiScript, x: f32, y: f32) -> Option<String> {
+    let mut frame = script.hit_test_frame(x, y)?;
+    let mut hops = 0;
+    loop {
+        if let Some(name) = script.frame_name(frame) {
+            return Some(if hops == 0 { name } else { format!("^{name}") });
+        }
+        hops += 1;
+        match script.frame_parent(frame) {
+            Some(parent) if hops < 8 => frame = parent,
+            _ => return Some("#anon".into()),
+        }
+    }
+}
