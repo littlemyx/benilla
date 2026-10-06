@@ -13,8 +13,9 @@ const LOG_FILTER: &str = "wgpu=error,naga=warn";
 #[cfg(target_os = "ios")]
 const LOG_FILTER: &str = "wgpu=error,naga=warn,bevy_winit::system=off";
 
-/// The log ring; on iOS also `$BENILLA_HOME/Logs/client.log`, truncated at launch, since no console
-/// of a device reaches a tool without root. It sits before the plugin's level filter, which applies
+/// The log ring; on iOS also `client.log` in `$BENILLA_LOG_DIR` (the build's `Logs` folder, set by
+/// the launch once the install's build is known), else `$BENILLA_HOME/Logs`, truncated at launch,
+/// since no console of a device reaches a tool without root. It sits before the plugin's level filter, which applies
 /// to every layer alike.
 fn custom_layer(_: &mut App) -> Option<bevy::log::BoxedLayer> {
     #[cfg(target_os = "ios")]
@@ -31,17 +32,23 @@ fn custom_layer(_: &mut App) -> Option<bevy::log::BoxedLayer> {
     Some(Box::new(crate::log_ring::LogRing))
 }
 
-/// Opens (truncating) the client log. `BENILLA_HOME` is set by `crates/benilla/src/main.rs`;
-/// benilla-world cannot reach `benilla_app::local_state`, so the same fallback is repeated here.
+/// Opens (truncating) the client log. `BENILLA_LOG_DIR` is `benilla_app::local_state::logs_dir()`,
+/// which names the build's subfolder; benilla-world cannot reach it, so the launch passes it in the
+/// environment. Without it (no install found) the log is the 1.12.1 path, `$BENILLA_HOME/Logs`,
+/// with the `main.rs` fallback for `BENILLA_HOME` repeated here.
 #[cfg(target_os = "ios")]
 fn ios_log_file() -> Option<std::fs::File> {
-    let home = std::env::var_os("BENILLA_HOME")
+    let dir = std::env::var_os("BENILLA_LOG_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            let h = std::env::var("HOME").unwrap_or_default();
-            std::path::PathBuf::from(h).join("Documents/benilla-config")
+            let home = std::env::var_os("BENILLA_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    let h = std::env::var("HOME").unwrap_or_default();
+                    std::path::PathBuf::from(h).join("Documents/benilla-config")
+                });
+            home.join("Logs")
         });
-    let dir = home.join("Logs");
     std::fs::create_dir_all(&dir).ok()?;
     std::fs::File::create(dir.join("client.log")).ok()
 }
